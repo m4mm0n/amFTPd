@@ -3,6 +3,15 @@ using System.Text;
 
 namespace amFTPd.Logging;
 
+/// <summary>
+/// Provides a logger implementation that writes FTP log messages to a file.
+/// </summary>
+/// <remarks>This logger writes log messages to a specified file, appending new entries to the file.  It supports
+/// asynchronous logging using a background worker thread to ensure minimal  impact on application performance. The
+/// logger is thread-safe and can be used in  multi-threaded applications.  The log messages are formatted using a
+/// customizable formatter, or a default format  if no formatter is provided. Exceptions associated with log messages
+/// are also written  to the file, if present.  The logger must be disposed when no longer needed to ensure proper
+/// cleanup of resources  such as the file stream and background worker thread.</remarks>
 public sealed class FileFtpLogger : IFtpLogger, IDisposable
 {
     private readonly FileFtpLoggerOptions _options;

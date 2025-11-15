@@ -2,14 +2,21 @@
 using amFTPd.Security;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
-using amFTPd.Utils;
 using amFTPd.Config.Ftpd;
 
 namespace amFTPd.Core;
 
+/// <summary>
+/// Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file
+/// transfers over the FTP protocol with optional TLS encryption.
+/// </summary>
+/// <remarks>The <see cref="FtpServer"/> class provides methods to start and stop the server,  allowing it to
+/// listen for incoming client connections and handle FTP commands.  It supports secure communication using TLS,
+/// configurable logging, and user authentication  through an external user store. The server operates asynchronously to
+/// handle multiple  client sessions concurrently.</remarks>
 public sealed class FtpServer
 {
+    #region Private Fields
     private readonly FtpConfig _cfg;
     private readonly IUserStore _users;
     private readonly TlsConfig _tls;
@@ -18,7 +25,16 @@ public sealed class FtpServer
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private readonly SectionManager _sections;
-
+    #endregion
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FtpServer"/> class with the specified configuration, user store,
+    /// TLS settings, logger, and section manager.
+    /// </summary>
+    /// <param name="cfg">The configuration settings for the FTP server.</param>
+    /// <param name="users">The user store that manages authentication and user data.</param>
+    /// <param name="tls">The TLS configuration for secure connections.</param>
+    /// <param name="log">The logger used to record server activity and diagnostics.</param>
+    /// <param name="sections">The section manager that handles server sections and their behavior.</param>
     public FtpServer(FtpConfig cfg, IUserStore users, TlsConfig tls, IFtpLogger log, SectionManager sections)
     {
         _cfg = cfg;
@@ -27,7 +43,16 @@ public sealed class FtpServer
         _log = log;
         _sections = sections;
     }
-
+    /// <summary>
+    /// Starts the FTP(S) server and begins listening for incoming client connections.
+    /// </summary>
+    /// <remarks>This method initializes the server, binds it to the configured address and port, and begins
+    /// accepting incoming TCP client connections. Each client connection is handled in a separate session, which runs
+    /// asynchronously. The server continues to listen for connections until it is explicitly stopped by canceling the
+    /// associated <see cref="CancellationTokenSource" />. <para> Exceptions encountered during the acceptance of client
+    /// connections are logged, and the server continues to operate unless the cancellation token is triggered.
+    /// </para></remarks>
+    /// <returns></returns>
     public async Task StartAsync()
     {
         _cts = new CancellationTokenSource();
@@ -84,7 +109,11 @@ public sealed class FtpServer
             });
         }
     }
-
+    /// <summary>
+    /// Stops the FTP server, canceling any ongoing operations and releasing resources.
+    /// </summary>
+    /// <remarks>This method cancels any pending tasks, stops the listener, and logs the server shutdown
+    /// event.  Once called, the server will no longer accept new connections or process requests.</remarks>
     public void Stop()
     {
         _cts?.Cancel();

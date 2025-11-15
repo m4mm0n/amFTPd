@@ -9,8 +9,19 @@ using System.Text;
 
 namespace amFTPd.Core;
 
+/// <summary>
+/// Represents an FTP session that manages the control and data connections, user authentication,  and command handling
+/// for an FTP server.
+/// </summary>
+/// <remarks>This class encapsulates the state and behavior of an individual FTP session, including user 
+/// authentication, file system access, and data transfer. It supports both active and passive  data connections and can
+/// upgrade the control connection to use TLS for secure communication.  Instances of this class are created for each
+/// client connection and are responsible for  maintaining session-specific state, such as the current working
+/// directory, user account,  and transfer settings. The session also tracks activity timestamps for idle timeout
+/// management.</remarks>
 internal sealed class FtpSession : IAsyncDisposable
 {
+    #region Private Fields
     private readonly NetworkStream _baseStream;
     private Stream _ctrlStream;
 
@@ -22,7 +33,8 @@ internal sealed class FtpSession : IAsyncDisposable
 
     private static readonly ConcurrentDictionary<int, FtpSession> _sessions = new();
     private static int _nextSessionId;
-
+    #endregion
+    #region Public Properties and Methods
     public readonly TcpClient Control;
     public readonly IUserStore Users;
     public readonly FtpFileSystem Fs;
@@ -42,7 +54,7 @@ internal sealed class FtpSession : IAsyncDisposable
 
     public string? UserName { get; private set; }
     public long? RestOffset { get; set; }
-
+    #endregion
     public void SetAccount(FtpUser account)
     {
         Account = account;
@@ -112,8 +124,8 @@ internal sealed class FtpSession : IAsyncDisposable
         var local = (IPEndPoint)Control.Client.LocalEndPoint!;
         var bindAddress = local.Address;
 
-        int chosenPort = -1;
-        for (int p = _cfg.PassivePorts.Start; p <= _cfg.PassivePorts.End; p++)
+        var chosenPort = -1;
+        for (var p = _cfg.PassivePorts.Start; p <= _cfg.PassivePorts.End; p++)
         {
             try
             {
@@ -126,10 +138,7 @@ internal sealed class FtpSession : IAsyncDisposable
             }
         }
 
-        if (chosenPort < 0)
-            throw new InvalidOperationException("No passive port available.");
-
-        return chosenPort;
+        return chosenPort < 0 ? throw new InvalidOperationException("No passive port available.") : chosenPort;
     }
 
     public async Task OpenActiveAsync(IPAddress ip, int port, CancellationToken ct)

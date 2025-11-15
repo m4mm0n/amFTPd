@@ -1,6 +1,12 @@
 ﻿namespace amFTPd.Logging
 {
-
+    /// <summary>
+    /// Represents a composite FTP logger that delegates logging operations to multiple underlying loggers.
+    /// </summary>
+    /// <remarks>This logger forwards all log messages to the provided <see cref="IFtpLogger"/> instances.  If
+    /// an exception occurs while logging to one of the loggers, the exception is suppressed to ensure  that logging
+    /// continues for the remaining loggers. This class is particularly useful for scenarios  where logs need to be
+    /// written to multiple destinations, such as a file and a console.</remarks>
     public sealed class CombinedFtpLogger : IFtpLogger, IDisposable
     {
         private readonly IReadOnlyList<IFtpLogger> _loggers;

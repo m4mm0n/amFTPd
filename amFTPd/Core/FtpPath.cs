@@ -1,14 +1,26 @@
 ﻿namespace amFTPd.Core;
 
+/// <summary>
+/// Provides utility methods for normalizing and resolving FTP paths to a consistent POSIX-style format.
+/// </summary>
+/// <remarks>This class is designed to handle path normalization within a virtual root, ensuring that paths are
+/// resolved to their canonical form. It supports collapsing redundant path segments such as "." and "..", and converts
+/// backslashes to forward slashes for consistency.</remarks>
 internal static class FtpPath
 {
-    // Normalize to posix-style within virtual root.
+    /// <summary>
+    /// Normalizes a given input path by replacing backslashes with forward slashes and resolving relative paths.
+    /// </summary>
+    /// <param name="current">The current base path to resolve relative paths against. This should be a valid path.</param>
+    /// <param name="input">The input path to normalize. If null, empty, or whitespace, the <paramref name="current"/> path is returned
+    /// unchanged.</param>
+    /// <returns>A normalized path with forward slashes and resolved relative segments. If <paramref name="input"/> is null,
+    /// empty, or whitespace, the <paramref name="current"/> path is returned.</returns>
     public static string Normalize(string current, string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return current;
         var p = input.Replace('\\', '/');
-        if (p.StartsWith('/')) return Collapse(p);
-        return Collapse($"{current.TrimEnd('/')}/{p}");
+        return Collapse(p.StartsWith('/') ? p : $"{current.TrimEnd('/')}/{p}");
     }
 
     private static string Collapse(string p)

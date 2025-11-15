@@ -3,8 +3,29 @@ using System.Security.Cryptography.X509Certificates;
 
 namespace amFTPd.Security;
 
+/// <summary>
+/// Creates a self-signed X.509 certificate asynchronously.
+/// </summary>
+/// <remarks>The generated certificate is valid for three years from the current date and includes the following
+/// properties: <list type="bullet"> <item> <description>Key size: 3072 bits (RSA).</description> </item> <item>
+/// <description>Hash algorithm: SHA-256.</description> </item> <item> <description>Key usage: Digital Signature and Key
+/// Encipherment.</description> </item> </list> The certificate is exported in PFX format and stored in memory with the
+/// specified password.</remarks>
 internal static class CertificateHelper
 {
+    /// <summary>
+    /// Creates a self-signed X.509 certificate with the specified subject name and password.
+    /// </summary>
+    /// <remarks>The generated certificate is valid for three years from the current date and includes the
+    /// following extensions: <list type="bullet"> <item> <description>Basic Constraints: Indicates the certificate is
+    /// not a Certificate Authority (CA).</description> </item> <item> <description>Subject Key Identifier: Provides a
+    /// unique identifier for the certificate's public key.</description> </item> <item> <description>Key Usage:
+    /// Specifies the certificate can be used for digital signatures and key encipherment.</description> </item> </list>
+    /// The certificate is exported in PFX format and marked as exportable with an ephemeral key set.</remarks>
+    /// <param name="subject">The distinguished name (DN) of the certificate subject, in X.500 format.</param>
+    /// <param name="pfxPassword">The password used to protect the exported PFX file.</param>
+    /// <returns>A task that represents the asynchronous operation. The task result contains the generated  <see
+    /// cref="X509Certificate2"/> object, which includes the self-signed certificate.</returns>
     public static Task<X509Certificate2> CreateSelfSignedAsync(string subject, string pfxPassword)
     {
         var dn = new X500DistinguishedName(subject);

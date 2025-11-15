@@ -1,5 +1,13 @@
 ﻿namespace amFTPd.Core
 {
+    /// <summary>
+    /// Provides predefined FTP response messages and a method for generating custom banner responses.
+    /// </summary>
+    /// <remarks>This class contains a collection of static constants representing common FTP server response
+    /// messages, as defined by the FTP protocol. These responses are formatted according to the standard FTP reply
+    /// codes and can be used to communicate status and results to FTP clients. <para> The <see cref="Banner(string)"/>
+    /// method allows for the creation of a custom FTP banner message, which is typically sent to clients upon
+    /// establishing a connection. </para></remarks>
     internal static class FtpResponses
     {
         public static string Banner(string msg) => $"220 {msg}\r\n";

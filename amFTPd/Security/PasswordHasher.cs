@@ -1,15 +1,29 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Security.Cryptography;
 
 namespace amFTPd.Security
 {
+    /// <summary>
+    /// Provides methods for hashing and verifying passwords using the PBKDF2-SHA256 algorithm.
+    /// </summary>
+    /// <remarks>This class is designed to securely hash passwords and verify them against stored hashes.  It
+    /// uses the PBKDF2-SHA256 algorithm with a configurable number of iterations to derive  cryptographic hashes. The
+    /// generated hashes include the iteration count, a randomly  generated salt, and the derived hash, all encoded in
+    /// Base64. The class also ensures  constant-time comparison during verification to mitigate timing
+    /// attacks.</remarks>
     public static class PasswordHasher
     {
-        // Format: PBKDF2-SHA256:iterations:saltBase64:hashBase64
+        /// <summary>
+        /// Hashes a password using the PBKDF2-SHA256 algorithm with a specified number of iterations.
+        /// </summary>
+        /// <remarks>The generated hash includes the number of iterations, a randomly generated salt, and
+        /// the derived hash,  all encoded in Base64. This format allows the hash to be verified later by extracting the
+        /// salt and iterations.</remarks>
+        /// <param name="password">The password to hash. Cannot be <see langword="null"/>.</param>
+        /// <param name="iterations">The number of iterations to use for the key derivation function. Must be a positive integer. The default is
+        /// 100,000.</param>
+        /// <returns>A string representing the hashed password in the format: 
+        /// <c>PBKDF2-SHA256:iterations:saltBase64:hashBase64</c>.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="password"/> is <see langword="null"/>.</exception>
         public static string HashPassword(string password, int iterations = 100_000)
         {
             if (password is null) throw new ArgumentNullException(nameof(password));
@@ -23,7 +37,17 @@ namespace amFTPd.Security
 
             return $"PBKDF2-SHA256:{iterations}:{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
         }
-
+        /// <summary>
+        /// Verifies whether the provided password matches the stored hashed password.
+        /// </summary>
+        /// <remarks>This method uses the PBKDF2-SHA256 algorithm to derive a hash from the provided
+        /// password and compares it to the expected hash stored in the <paramref name="stored"/> parameter. The
+        /// comparison is performed in constant time to prevent timing attacks.</remarks>
+        /// <param name="password">The plaintext password to verify. Cannot be <see langword="null"/>.</param>
+        /// <param name="stored">The stored password hash in the format "PBKDF2-SHA256:iterations:salt:hash". Must be a non-empty string and
+        /// follow the expected format.</param>
+        /// <returns><see langword="true"/> if the password matches the stored hash; otherwise, <see langword="false"/>.</returns>
+        /// <exception cref="ArgumentNullException">Thrown if <paramref name="password"/> is <see langword="null"/>.</exception>
         public static bool VerifyPassword(string password, string stored)
         {
             if (password is null) throw new ArgumentNullException(nameof(password));

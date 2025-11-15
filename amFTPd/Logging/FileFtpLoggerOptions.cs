@@ -1,5 +1,10 @@
 ﻿namespace amFTPd.Logging;
 
+/// <summary>
+/// Represents configuration options for the <see cref="FileFtpLogger"/>.
+/// </summary>
+/// <remarks>This class provides settings to control the behavior of the <see cref="FileFtpLogger"/>,  including
+/// the log file path, the minimum log level, and an optional custom log message formatter.</remarks>
 public sealed class FileFtpLoggerOptions
 {
     /// <summary>
