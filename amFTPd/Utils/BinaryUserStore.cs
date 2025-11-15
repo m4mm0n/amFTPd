@@ -21,6 +21,8 @@ namespace amFTPd.Utils
         private readonly Dictionary<string, FtpUser> _users;
         private readonly Dictionary<string, int> _loginCounter = new();
         private readonly Lock _sync = new();
+        private FileSystemWatcher? _watcher;
+
         private string arcHeader = "AMFTPDBUS";
         private int arcVersion = 100;
         #endregion
@@ -39,6 +41,7 @@ namespace amFTPd.Utils
             _masterPasswordBytes = Encoding.UTF8.GetBytes(masterPassword);
 
             _users = File.Exists(path) ? LoadDb() : CreateEmptyDb();
+            StartWatcher();
         }
         /// <summary>
         /// Attempts to authenticate a user with the specified username and password.
@@ -154,6 +157,41 @@ namespace amFTPd.Utils
             return true;
         }
 
+        private void StartWatcher()
+        {
+            var dir = Path.GetDirectoryName(_path)!;
+            var file = Path.GetFileName(_path);
+
+            _watcher = new FileSystemWatcher(dir, file)
+            {
+                NotifyFilter = NotifyFilters.LastWrite
+            };
+
+            _watcher.Changed += (s, e) =>
+            {
+                lock (_sync)
+                {
+                    try
+                    {
+                        var newDb = LoadDb();
+                        foreach (var u in newDb)
+                            _users[u.Key] = u.Value;
+
+                        // remove deleted
+                        foreach (var old in new List<string>(_users.Keys).Where(old => !newDb.ContainsKey(old)))
+                            _users.Remove(old);
+                    }
+                    catch
+                    {
+                        // ignore malformed reload
+                    }
+                }
+            };
+
+            _watcher.EnableRaisingEvents = true;
+        }
+
+
         // ========================================================================
         // INTERNAL DB LOAD/SAVE
         // ========================================================================
@@ -212,7 +250,9 @@ namespace amFTPd.Utils
             // Read remaining bytes (encrypted)
             var encrypted = ReadAll(fs);
 
+            // LoadDb:
             var decrypted = DecryptDb(encrypted, salt);
+            decrypted = Lz4Codec.Decompress(decrypted);
 
             using var ms = new MemoryStream(decrypted);
             using var br = new BinaryReader(ms);
@@ -350,7 +390,9 @@ namespace amFTPd.Utils
                 plaintext = ms.ToArray();
             }
 
-            var encrypted = EncryptDb(plaintext, salt);
+            // SaveDbSnapshot:
+            var compressed = Lz4Codec.Compress(plaintext);
+            var encrypted = EncryptDb(compressed, salt);
 
             using var fs = File.Create(_path);
             using var bw2 = new BinaryWriter(fs);
