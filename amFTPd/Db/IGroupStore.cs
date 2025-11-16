@@ -13,4 +13,5 @@ public interface IGroupStore
     bool TryAddGroup(FtpGroup group, out string? error);
     bool TryUpdateGroup(FtpGroup group, out string? error);
     bool TryDeleteGroup(string groupName, out string? error);
+    bool TryRenameGroup(string oldName, string newName, out string? error);
 }

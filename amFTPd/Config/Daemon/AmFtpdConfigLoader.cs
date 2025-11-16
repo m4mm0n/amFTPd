@@ -4,6 +4,7 @@ using amFTPd.Security;
 using amFTPd.Utils;
 using System.Net;
 using System.Text.Json;
+using amFTPd.Db;
 
 namespace amFTPd.Config.Daemon;
 

@@ -48,6 +48,7 @@ internal sealed class FtpSession : IAsyncDisposable
     public string Protection { get; set; }
     public bool LoggedIn { get; private set; }
     public string Cwd { get; set; } = "/";
+    public string HomeDir { get; internal set; } = "/";
     public string? PendingUser { get; set; }
     public string? RenameFrom { get; set; }
     public bool QuitRequested { get; private set; }

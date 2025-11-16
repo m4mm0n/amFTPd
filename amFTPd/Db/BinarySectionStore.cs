@@ -119,6 +119,16 @@ public sealed class BinarySectionStore : ISectionStore
         }
     }
 
+    public void ForceSnapshotRewrite()
+    {
+        lock (_sync)
+        {
+            WriteSnapshot(_sections); // Users or Groups or Sections
+            _wal.Clear();
+            DebugLog?.Invoke("[DB] Forced snapshot rewrite completed.");
+        }
+    }
+
     // =======================================================================
     // WAL REPLAY
     // =======================================================================

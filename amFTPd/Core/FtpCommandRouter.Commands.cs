@@ -1,6 +1,7 @@
 ﻿using amFTPd.Config.Ftpd;
 using amFTPd.Security;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 namespace amFTPd.Core
@@ -275,18 +276,62 @@ namespace amFTPd.Core
 
         private async Task PASV(CancellationToken ct)
         {
-            var port = await _s.OpenPassiveAsync(ct);
-            var ep = (IPEndPoint)_s.Control.Client.LocalEndPoint!;
-            var bytes = ep.Address.GetAddressBytes();
-            var h = string.Join(",", bytes);
-            var p1 = port / 256;
-            var p2 = port % 256;
-            await _s.WriteAsync($"227 Entering Passive Mode ({h},{p1},{p2}).\r\n", ct);
+            int port = await _s.OpenPassiveAsync(ct);
+
+            // IP address for the response
+            var ip = _cfg.BindAddress;      // Or _cfg.ExternalAddress, if you have it
+
+            var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
+
+            // FXP detection — requested passive IP differs from client control IP
+            _isFxp = !ip.Equals(remote.Address);
+
+            var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
+            if (!allowFxp && _isFxp)
+            {
+                await _s.WriteAsync("504 FXP not allowed in PASV mode.\r\n", ct);
+                return;
+            }
+
+            var b = ip.GetAddressBytes();
+            await _s.WriteAsync(
+                $"227 Entering Passive Mode ({b[0]},{b[1]},{b[2]},{b[3]},{port >> 8},{port & 255})\r\n",
+                ct
+            );
         }
 
-        private async Task EPSV(CancellationToken ct)
+        private Task EPSV(CancellationToken ct)
+            => EPSV(null, ct);
+        
+        private async Task EPSV(string? arg, CancellationToken ct)
         {
-            var port = await _s.OpenPassiveAsync(ct);
+            // EPSV ALL
+            if (!string.IsNullOrEmpty(arg) &&
+                arg.Trim().Equals("ALL", StringComparison.OrdinalIgnoreCase))
+            {
+                await _s.WriteAsync("200 EPSV ALL command successful.\r\n", ct);
+                return;
+            }
+
+            // Family check (optional, kept simple)
+            if (!string.IsNullOrWhiteSpace(arg))
+            {
+                arg = arg.Trim();
+                if (arg == "1" && _s.Control.Client.RemoteEndPoint is IPEndPoint v6 && v6.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    await _s.WriteAsync("522 Network protocol not supported.\r\n", ct);
+                    return;
+                }
+                if (arg == "2" && _s.Control.Client.RemoteEndPoint is IPEndPoint v4 && v4.AddressFamily != AddressFamily.InterNetworkV6)
+                {
+                    await _s.WriteAsync("522 Network protocol not supported.\r\n", ct);
+                    return;
+                }
+            }
+
+            int port = await _s.OpenPassiveAsync(ct);
+
+            // EPSV format: (|||port|)
             await _s.WriteAsync($"229 Entering Extended Passive Mode (|||{port}|)\r\n", ct);
         }
 
@@ -312,8 +357,11 @@ namespace amFTPd.Core
             var requestedIp = IPAddress.Parse(ipString);
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
 
+            // --- FXP DETECTION ---
+            _isFxp = !requestedIp.Equals(remote.Address);
+
             var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
-            if (!allowFxp && !requestedIp.Equals(remote.Address))
+            if (!allowFxp && _isFxp)
             {
                 await _s.WriteAsync("504 FXP not allowed: IP mismatch.\r\n", ct);
                 return;
@@ -332,26 +380,55 @@ namespace amFTPd.Core
                 return;
             }
 
-            var tok = arg.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            if (tok.Length < 3)
+            // Format: |<af>|<host>|<port>|
+            // Example: |1|192.168.1.5|52344|
+            //          |2|2001:db8::1|50200|
+            if (!arg.StartsWith('|') || arg.Count(c => c == '|') < 3)
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
                 return;
             }
 
-            // tok[0] = proto (1 = IPv4, 2 = IPv6, etc.)
-            var ip = IPAddress.Parse(tok[1]);
-            var port = int.Parse(tok[2]);
+            var parts = arg.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 3)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            // parts[0] = address family (1 = IPv4, 2 = IPv6)
+            // parts[1] = IP
+            // parts[2] = port
+            var af = parts[0];
+            var host = parts[1];
+            var portString = parts[2];
+
+            if (!int.TryParse(portString, out int port))
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            IPAddress requestedIp;
+            if (!IPAddress.TryParse(host, out requestedIp))
+            {
+                await _s.WriteAsync("500 Invalid address.\r\n", ct);
+                return;
+            }
 
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
+
+            // --- FXP DETECTION (same rule as PORT) ---
+            _isFxp = !requestedIp.Equals(remote.Address);
+
             var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
-            if (!allowFxp && !ip.Equals(remote.Address))
+            if (!allowFxp && _isFxp)
             {
                 await _s.WriteAsync("504 FXP not allowed: IP mismatch.\r\n", ct);
                 return;
             }
 
-            await _s.OpenActiveAsync(ip, port, ct);
+            await _s.OpenActiveAsync(requestedIp, port, ct);
             await _s.WriteAsync(FtpResponses.CmdOkay, ct);
         }
 

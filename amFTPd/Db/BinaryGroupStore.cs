@@ -119,6 +119,69 @@ public sealed class BinaryGroupStore : IGroupStore
         }
     }
 
+    public void ForceSnapshotRewrite()
+    {
+        lock (_sync)
+        {
+            WriteSnapshot(_groups); // Users or Groups or Sections
+            _wal.Clear();
+            DebugLog?.Invoke("[DB] Forced snapshot rewrite completed.");
+        }
+    }
+
+    public bool TryRenameGroup(string oldName, string newName, out string? error)
+    {
+        lock (_sync)
+        {
+            if (!_groups.ContainsKey(oldName))
+            {
+                error = $"Group '{oldName}' not found.";
+                return false;
+            }
+
+            if (_groups.ContainsKey(newName))
+            {
+                error = $"A group named '{newName}' already exists.";
+                return false;
+            }
+
+            // Fetch group
+            var g = _groups[oldName];
+
+            // Create updated group record
+            var updated = g with { GroupName = newName };
+
+            // WAL: group rename = DeleteGroup(oldName) + AddGroup(newName)
+            // because WAL entries do not have a Rename opcode.
+            //
+            // This keeps the WAL format *simple* and makes replay trivial.
+            //
+            _wal.Append(new WalEntry(
+                WalEntryType.DeleteGroup,
+                Encoding.UTF8.GetBytes(oldName)
+            ));
+
+            var record = BuildRecord(updated);
+            _wal.Append(new WalEntry(
+                WalEntryType.AddGroup,
+                record
+            ));
+
+            // Update memory
+            _groups.Remove(oldName);
+            _groups[newName] = updated;
+
+            DebugLog?.Invoke($"[GROUP-DB] Rename '{oldName}' → '{newName}'");
+
+            // Check compaction
+            if (_wal.NeedsCompaction())
+                RewriteSnapshot();
+
+            error = null;
+            return true;
+        }
+    }
+
     // ============================================================
     // WAL REPLAY
     // ============================================================

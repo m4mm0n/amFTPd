@@ -1,10 +1,10 @@
 ﻿using amFTPd.Config.Ftpd;
-using amFTPd.Db;
 using amFTPd.Security;
+using amFTPd.Utils;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace amFTPd.Utils
+namespace amFTPd.Db
 {
     /// <summary>
     /// Provides a binary-based implementation of the <see cref="IUserStore"/> interface for managing FTP users.
@@ -238,6 +238,52 @@ namespace amFTPd.Utils
                 return true;
             }
         }
+
+        public void ForceSnapshotRewrite()
+        {
+            lock (_sync)
+            {
+                WriteSnapshot(_users); // Users or Groups or Sections
+                _wal.Clear();
+                DebugLog?.Invoke("[DB] Forced snapshot rewrite completed.");
+            }
+        }
+
+        private void WriteSnapshot(Dictionary<string, FtpUser> dict)
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
+
+            // Write count
+            bw.Write((uint)dict.Count);
+
+            foreach (var u in dict.Values)
+            {
+                var rec = BuildRecord(u);
+
+                // Include type marker (0 = user record)
+                using var rms = new MemoryStream();
+                using var rbw = new BinaryWriter(rms);
+
+                rbw.Write((byte)0);     // record type
+                rbw.Write(rec);         // record data
+
+                var final = rms.ToArray();
+                bw.Write((uint)final.Length);
+                bw.Write(final);
+            }
+
+            // Compress
+            var raw = ms.ToArray();
+            var compressed = Lz4Codec.Compress(raw);
+
+            // Encrypt
+            var encrypted = EncryptSnapshot(compressed);
+
+            // Atomic 2-phase commit
+            AtomicSnapshot.WriteAtomic(_dbPath, encrypted);
+        }
+
 
         // ========================================================================
         // CREATE EMPTY DB (with default admin user)

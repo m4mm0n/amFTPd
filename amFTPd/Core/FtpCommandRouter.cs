@@ -1,13 +1,25 @@
 ﻿using amFTPd.Config.Ftpd;
+using amFTPd.Credits;
+using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Security;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
+using FtpSection = amFTPd.Config.Ftpd.FtpSection;
 
 namespace amFTPd.Core;
 
+/// <summary>
+/// Routes and handles FTP commands received from a client session.
+/// </summary>
+/// <remarks>This class processes FTP commands by interpreting the input command string,  executing the
+/// corresponding operation, and sending appropriate responses  back to the client. It supports a wide range of FTP
+/// commands, including  authentication, file system navigation, file transfers, and session management.  The <see
+/// cref="FtpCommandRouter"/> relies on injected dependencies such as  session state, logging, file system access, and
+/// configuration to perform its operations.</remarks>
 internal sealed partial class FtpCommandRouter
 {
     private readonly FtpSession _s;
@@ -16,8 +28,28 @@ internal sealed partial class FtpCommandRouter
     private readonly FtpConfig _cfg;
     private readonly TlsConfig _tls;
     private readonly SectionManager _sections;
+    private readonly CreditEngine _credits;
+    private readonly IUserStore _users;
+    private readonly IGroupStore _groups;
+    private bool _isFxp;
 
-    public FtpCommandRouter(FtpSession s, IFtpLogger log, FtpFileSystem fs, FtpConfig cfg, TlsConfig tls, SectionManager sections)
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FtpCommandRouter"/> class, which is responsible for routing and
+    /// handling FTP commands within a session.
+    /// </summary>
+    /// <param name="s">The current FTP session context, which manages the state and communication for the session.</param>
+    /// <param name="log">The logger instance used to record FTP activity and diagnostics.</param>
+    /// <param name="fs">The file system abstraction used to interact with files and directories on the server.</param>
+    /// <param name="cfg">The FTP server configuration settings that influence command behavior.</param>
+    /// <param name="tls">The TLS configuration used to manage secure communication for the session.</param>
+    /// <param name="sections">The section manager responsible for handling segmented or partitioned server resources.</param>
+    public FtpCommandRouter(
+        FtpSession s,
+        IFtpLogger log,
+        FtpFileSystem fs,
+        FtpConfig cfg,
+        TlsConfig tls,
+        SectionManager sections)
     {
         _s = s;
         _log = log;
@@ -27,6 +59,19 @@ internal sealed partial class FtpCommandRouter
         _sections = sections;
     }
 
+    /// <summary>
+    /// Handles an FTP command by parsing the input line, identifying the command, and executing the corresponding
+    /// operation.
+    /// </summary>
+    /// <remarks>This method processes a wide range of FTP commands, such as authentication, file system
+    /// operations, and data transfer commands. The command is extracted from the input line, converted to uppercase for
+    /// case-insensitive matching, and dispatched to the appropriate handler. If the command is unrecognized, a default
+    /// response indicating an unknown command is sent to the client. <para> The method ensures that the session is kept
+    /// alive and logs the command for debugging purposes. Certain commands may alter the session state, such as marking
+    /// the session as quit after processing a "QUIT" command. </para></remarks>
+    /// <param name="line">The raw command line received from the client, including the command and optional arguments.</param>
+    /// <param name="ct">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
+    /// <returns></returns>
     public async Task HandleAsync(string line, CancellationToken ct)
     {
         var sp = line.Split(' ', 2, StringSplitOptions.TrimEntries);
@@ -118,14 +163,14 @@ internal sealed partial class FtpCommandRouter
         }
 
         long totalBytes = 0;
-        long bytesPerSecondLimit = maxKbps * 1024L;
+        var bytesPerSecondLimit = maxKbps * 1024L;
         long bytesThisWindow = 0;
-        long windowStartTicks = Stopwatch.GetTimestamp();
+        var windowStartTicks = Stopwatch.GetTimestamp();
         double ticksPerSecond = Stopwatch.Frequency;
 
         while (true)
         {
-            int read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
+            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
             if (read <= 0)
                 break;
 
@@ -163,12 +208,38 @@ internal sealed partial class FtpCommandRouter
     {
         var account = _s.Account;
         if (account is null) return true;
-        if (section.FreeLeech) return true;
 
+        // FREELEECH → always allowed
+        if (section.FreeLeech)
+            return true;
+
+        // Convert to KB
         long kb = bytes / 1024;
-        if (kb <= 0) return true;
+        if (kb <= 0)
+            return true;
 
-        if (account.CreditsKb < kb)
+        // FXP-IN (server sending data to remote FTP server)
+        // If FXP should be FREE on download:
+        if (_isFxp)
+        {
+            // uncomment if needed:
+            // return true;
+
+            // or: double cost FXP? 
+            // kb *= 2;
+        }
+
+        // APPLY SECTION DOWNLOAD RATIO
+        // ratio: how many KB of credit consumed per KB downloaded
+        long cost = kb;
+
+        if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
+        {
+            // Example: DU:2 means download costs twice normal
+            cost = (long)Math.Ceiling(kb * (double)section.RatioDownloadUnit);
+        }
+
+        if (account.CreditsKb < cost)
         {
             await _s.WriteAsync("550 Not enough credits for download.\r\n", ct);
             return false;
@@ -186,7 +257,26 @@ internal sealed partial class FtpCommandRouter
         long kb = bytes / 1024;
         if (kb <= 0) return;
 
-        var updated = account with { CreditsKb = Math.Max(0, account.CreditsKb - kb) };
+        long cost = kb;
+
+        // Apply FXP rules if desired
+        if (_isFxp)
+        {
+            // Free FXP?
+            // return;
+
+            // or double cost?
+            // cost *= 2;
+        }
+
+        // Apply section ratio
+        if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
+        {
+            cost = (long)Math.Ceiling(kb * (double)section.RatioDownloadUnit);
+        }
+
+        var updated = account with { CreditsKb = Math.Max(0, account.CreditsKb - cost) };
+
         if (_s.Users.TryUpdateUser(updated, out _))
             _s.SetAccount(updated);
     }
@@ -200,21 +290,29 @@ internal sealed partial class FtpCommandRouter
         long kb = bytes / 1024;
         if (kb <= 0) return;
 
-        long delta;
+        long earned = kb;
+
+        // FXP uploads (server receiving)
+        if (_isFxp)
+        {
+            // FXP-IN free credits?
+            // earned = 0;
+
+            // or half credits?
+            // earned = earned / 2;
+        }
+
+        // Apply section ratio
         if (!section.FreeLeech &&
             section.RatioUploadUnit > 0 &&
             section.RatioDownloadUnit > 0)
         {
-            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
-            delta = (long)Math.Round(kb * factor);
-        }
-        else
-        {
-            // Default 1:1 if free-leech or ratio not configured properly
-            delta = kb;
+            // ratio: upload earns credits proportional to uploadRatio
+            earned = (long)Math.Round(kb * ((double)section.RatioDownloadUnit / section.RatioUploadUnit));
         }
 
-        var updated = account with { CreditsKb = account.CreditsKb + delta };
+        var updated = account with { CreditsKb = account.CreditsKb + earned };
+
         if (_s.Users.TryUpdateUser(updated, out _))
             _s.SetAccount(updated);
     }
@@ -223,9 +321,7 @@ internal sealed partial class FtpCommandRouter
     {
         // CIDR: 1.2.3.0/24
         if (mask.Contains('/'))
-        {
             return IsIpInCidr(addr, mask);
-        }
 
         // Wildcard v4: 1.2.3.* or 10.*.*.*
         if (mask.Contains('*'))
@@ -239,7 +335,7 @@ internal sealed partial class FtpCommandRouter
             if (addrParts.Length != 4 || maskParts.Length != 4)
                 return false;
 
-            for (int i = 0; i < 4; i++)
+            for (var i = 0; i < 4; i++)
             {
                 if (maskParts[i] == "*")
                     continue;
@@ -251,10 +347,7 @@ internal sealed partial class FtpCommandRouter
         }
 
         // Exact match
-        if (IPAddress.TryParse(mask, out var exact))
-            return addr.Equals(exact);
-
-        return false;
+        return IPAddress.TryParse(mask, out var exact) && addr.Equals(exact);
     }
 
     private static bool IsIpInCidr(IPAddress addr, string cidr)
@@ -275,8 +368,8 @@ internal sealed partial class FtpCommandRouter
         if (addrBytes.Length != netBytes.Length)
             return false;
 
-        int bits = prefixLength;
-        for (int i = 0; i < addrBytes.Length && bits > 0; i++)
+        var bits = prefixLength;
+        for (var i = 0; i < addrBytes.Length && bits > 0; i++)
         {
             int mask;
             if (bits >= 8)
@@ -319,16 +412,16 @@ internal sealed partial class FtpCommandRouter
         }
 
         await using var stream = client.GetStream();
-        using var writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true);
+        await using var writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true);
         using var reader = new StreamReader(stream, Encoding.ASCII, false, leaveOpen: true);
 
         // Request: "server-port , client-port\r\n"
         // server-port = our local port; client-port = their remote port
         var query = $"{localEp.Port} , {remoteEp.Port}\r\n";
         await writer.WriteAsync(query);
-        await writer.FlushAsync();
+        await writer.FlushAsync(cts.Token);
 
-        var line = await reader.ReadLineAsync();
+        var line = await reader.ReadLineAsync(cts.Token);
         if (string.IsNullOrEmpty(line))
             return null;
 
@@ -340,5 +433,20 @@ internal sealed partial class FtpCommandRouter
         var userPart = parts[3].Trim();
         return string.IsNullOrWhiteSpace(userPart) ? null : userPart;
     }
+    private string ResolveSectionFromPath(string fullPath)
+    {
+        // Normalize
+        fullPath = fullPath.Replace('\\', '/').TrimEnd('/');
 
+        foreach (var s in _sections.GetSections())
+        {
+            // Sections define virtual roots like "/mp3", "/x264", "/0day"
+            // If the path starts with that virtual root, we consider it in that section.
+            if (fullPath.StartsWith(s.VirtualRoot, StringComparison.OrdinalIgnoreCase))
+                return s.Name;
+        }
+
+        // fallback to default if unknown
+        return "default";
+    }
 }
