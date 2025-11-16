@@ -218,6 +218,7 @@ internal sealed partial class FtpCommandRouter
 
         return totalBytes;
     }
+    
     private async Task<bool> CheckDownloadCreditsAsync(FtpSection section, long bytes, CancellationToken ct)
     {
         var account = _s.Account;
@@ -227,18 +228,16 @@ internal sealed partial class FtpCommandRouter
         var kb = bytes / 1024;
         if (kb <= 0) return true;
 
-        // Default cost
         long cost = kb;
 
-        // Ratio (your original ratio logic)
+        // Apply section ratio first (your original logic)
         if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
         {
-            // "ratio" in your original was (DU/UU); we keep that for backwards compatibility
             var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
             cost = (long)Math.Round(kb * factor);
         }
 
-        // Script hook (credits.msl)
+        // AMScript: credits.msl
         if (_creditScript is not null)
         {
             var ctx = BuildCreditContext(section, bytes) with { CostDownload = cost };
@@ -282,14 +281,13 @@ internal sealed partial class FtpCommandRouter
             cost = (long)Math.Round(kb * factor);
         }
 
-        // Script hook
         if (_creditScript is not null)
         {
             var ctx = BuildCreditContext(section, bytes) with { CostDownload = cost };
             var result = _creditScript.EvaluateDownload(ctx);
 
             if (result.Action == AMRuleAction.Deny)
-                return; // policy decided not to charge
+                return; // rule says "don't charge" or "block" silently here
 
             cost = result.CostDownload;
         }
@@ -322,7 +320,6 @@ internal sealed partial class FtpCommandRouter
             earned = kb;
         }
 
-        // Script hook
         if (_creditScript is not null)
         {
             var ctx = BuildCreditContext(section, bytes) with { EarnedUpload = earned };

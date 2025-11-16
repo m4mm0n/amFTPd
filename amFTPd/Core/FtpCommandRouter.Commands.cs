@@ -22,8 +22,8 @@ namespace amFTPd.Core
                 UserGroup: account.GroupName ?? string.Empty,
                 Bytes: bytes,
                 Kb: kb,
-                CostDownload: kb,  // default: 1:1
-                EarnedUpload: kb   // default: 1:1
+                CostDownload: kb,   // default cost = 1:1
+                EarnedUpload: kb    // default earn = 1:1
             );
         }
 
@@ -45,6 +45,7 @@ namespace amFTPd.Core
                 EarnedUpload: 0
             );
         }
+
 
 
         // --- Auth / TLS ---
@@ -315,14 +316,16 @@ namespace amFTPd.Core
 
         private async Task PASV(CancellationToken ct)
         {
-            int port = await _s.OpenPassiveAsync(ct);
+            var port = await _s.OpenPassiveAsync(ct);
 
-            var ip = _cfg.BindAddress;
+            var ep = (IPEndPoint)_s.Control.Client.LocalEndPoint!;
+            var ip = ep.Address;
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
 
+            // FXP detection: passive IP != control connection IP
             _isFxp = !ip.Equals(remote.Address);
 
-            // FXP script hook
+            // FXP script hook (if any)
             if (_fxpScript is not null && _isFxp)
             {
                 var ctx = BuildSimpleContextForFxpAndActive();
@@ -334,6 +337,7 @@ namespace amFTPd.Core
                 }
             }
 
+            // Built-in FXP policy
             var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
             if (!allowFxp && _isFxp)
             {
@@ -341,33 +345,22 @@ namespace amFTPd.Core
                 return;
             }
 
-            var b = ip.GetAddressBytes();
-            await _s.WriteAsync(
-                $"227 Entering Passive Mode ({b[0]},{b[1]},{b[2]},{b[3]},{port >> 8},{port & 255})\r\n",
-                ct
-            );
+            var bytes = ip.GetAddressBytes();
+            var h = string.Join(",", bytes);
+            var p1 = port / 256;
+            var p2 = port % 256;
+            await _s.WriteAsync($"227 Entering Passive Mode ({h},{p1},{p2}).\r\n", ct);
         }
 
-        private Task EPSV(CancellationToken ct)
-            => EPSV(null, ct);
-
-        private async Task EPSV(string? arg, CancellationToken ct)
+        private async Task EPSV(CancellationToken ct)
         {
-            // EPSV ALL
-            if (!string.IsNullOrEmpty(arg) &&
-                arg.Trim().Equals("ALL", StringComparison.OrdinalIgnoreCase))
-            {
-                await _s.WriteAsync("200 EPSV ALL command successful.\r\n", ct);
-                return;
-            }
+            var port = await _s.OpenPassiveAsync(ct);
 
-            // family checks kept simple or removed if you prefer
-
-            int port = await _s.OpenPassiveAsync(ct);
-
-            // In EPSV, FXP detection is a bit looser; you can treat EPSV as local-only
-            var ip = _cfg.BindAddress;
+            var ep = (IPEndPoint)_s.Control.Client.LocalEndPoint!;
+            var ip = ep.Address;
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
+
+            // Treat EPSV similarly for FXP detection
             _isFxp = !ip.Equals(remote.Address);
 
             if (_fxpScript is not null && _isFxp)
@@ -413,9 +406,10 @@ namespace amFTPd.Core
             var requestedIp = IPAddress.Parse(ipString);
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
 
+            // FXP detection: active target != control IP
             _isFxp = !requestedIp.Equals(remote.Address);
 
-            // Active-mode script hook
+            // Active-mode policy via script
             if (_activeScript is not null)
             {
                 var ctx = BuildSimpleContextForFxpAndActive();
@@ -427,7 +421,7 @@ namespace amFTPd.Core
                 }
             }
 
-            // FXP script hook
+            // FXP via script
             if (_fxpScript is not null && _isFxp)
             {
                 var ctx = BuildSimpleContextForFxpAndActive();
@@ -439,6 +433,7 @@ namespace amFTPd.Core
                 }
             }
 
+            // Built-in FXP policy
             var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
             if (!allowFxp && _isFxp)
             {
@@ -459,48 +454,23 @@ namespace amFTPd.Core
                 return;
             }
 
-            // Format: |<af>|<host>|<port>|
-            // Example: |1|192.168.1.5|52344|
-            //          |2|2001:db8::1|50200|
-            if (!arg.StartsWith('|') || arg.Count(c => c == '|') < 3)
+            var tok = arg.Split('|', StringSplitOptions.RemoveEmptyEntries);
+            if (tok.Length < 3)
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
                 return;
             }
 
-            var parts = arg.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length != 3)
-            {
-                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
-                return;
-            }
-
-            // parts[0] = address family (1 = IPv4, 2 = IPv6)
-            // parts[1] = IP
-            // parts[2] = port
-            var af = parts[0];
-            var host = parts[1];
-            var portString = parts[2];
-
-            if (!int.TryParse(portString, out int port))
-            {
-                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
-                return;
-            }
-
-            IPAddress requestedIp;
-            if (!IPAddress.TryParse(host, out requestedIp))
-            {
-                await _s.WriteAsync("500 Invalid address.\r\n", ct);
-                return;
-            }
+            // tok[0] = proto (1 = IPv4, 2 = IPv6, etc.)
+            var ip = IPAddress.Parse(tok[1]);
+            var port = int.Parse(tok[2]);
 
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
 
-            // --- FXP DETECTION (same rule as PORT) ---
-            _isFxp = !requestedIp.Equals(remote.Address);
+            // FXP detection
+            _isFxp = !ip.Equals(remote.Address);
 
-            // Active-mode script hook
+            // Active-mode policy via script
             if (_activeScript is not null)
             {
                 var ctx = BuildSimpleContextForFxpAndActive();
@@ -512,7 +482,7 @@ namespace amFTPd.Core
                 }
             }
 
-            // FXP script hook
+            // FXP via script
             if (_fxpScript is not null && _isFxp)
             {
                 var ctx = BuildSimpleContextForFxpAndActive();
@@ -524,6 +494,7 @@ namespace amFTPd.Core
                 }
             }
 
+            // Built-in FXP policy
             var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
             if (!allowFxp && _isFxp)
             {
@@ -531,7 +502,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            await _s.OpenActiveAsync(requestedIp, port, ct);
+            await _s.OpenActiveAsync(ip, port, ct);
             await _s.WriteAsync(FtpResponses.CmdOkay, ct);
         }
 
