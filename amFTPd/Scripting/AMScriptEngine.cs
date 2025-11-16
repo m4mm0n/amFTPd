@@ -13,7 +13,7 @@ public sealed class AMScriptEngine
     private readonly string _filePath;
     private FileSystemWatcher? _watcher;
 
-    public Action<string>? DebugLog;
+    public Action<string>? DebugLog { get; set; }
 
     public AMScriptEngine(string filePath)
     {
@@ -22,13 +22,17 @@ public sealed class AMScriptEngine
         Watch();
     }
 
+    // ---------------------------------------------------------
+    // Load + Watch
+    // ---------------------------------------------------------
+
     public void Load()
     {
         _rules.Clear();
 
         if (!File.Exists(_filePath))
         {
-            DebugLog?.Invoke($"[AMScript] No rule file found at {_filePath}");
+            DebugLog?.Invoke($"[AMScript] Rule file not found: {_filePath}");
             return;
         }
 
@@ -40,158 +44,124 @@ public sealed class AMScriptEngine
             if (line.Length == 0) continue;
             if (line.StartsWith('#')) continue;
 
-            // expected: if (<condition>) <action>;
-            if (!line.StartsWith("if")) continue;
+            if (!line.StartsWith("if", StringComparison.OrdinalIgnoreCase))
+                continue;
 
             int start = line.IndexOf('(');
             int end = line.IndexOf(')');
             if (start < 0 || end < start) continue;
 
-            string condition = line.Substring(start + 1, end - start - 1).Trim();
-            string action = line[(end + 1)..].Trim().TrimEnd(';');
+            var cond = line.Substring(start + 1, end - start - 1).Trim();
+            var action = line[(end + 1)..].Trim().TrimEnd(';');
 
-            _rules.Add(new AMRule(condition, action));
+            if (cond.Length == 0 || action.Length == 0)
+                continue;
+
+            _rules.Add(new AMRule(cond, action));
         }
 
-        DebugLog?.Invoke($"[AMScript] Loaded {_rules.Count} rules.");
-    }
-
-    private AMScriptResult ApplyAction(AMScriptContext ctx, string action, bool isDownload)
-    {
-        action = action.Trim().ToLower();
-
-        if (action == "return allow")
-            return AMScriptResult.Allow(ctx);
-
-        if (action == "return deny")
-            return AMScriptResult.Deny(ctx);
-
-        long cost = ctx.CostDownload;
-        long earn = ctx.EarnedUpload;
-
-        if (action.StartsWith("cost_download ="))
-        {
-            long v = long.Parse(action.Split('=')[1].Trim());
-            cost = v;
-        }
-        else if (action.StartsWith("cost_download *="))
-        {
-            long v = long.Parse(action.Split("*=")[1].Trim());
-            cost *= v;
-        }
-        else if (action.StartsWith("earned_upload ="))
-        {
-            long v = long.Parse(action.Split('=')[1].Trim());
-            earn = v;
-        }
-        else if (action.StartsWith("earned_upload *="))
-        {
-            long v = long.Parse(action.Split("*=")[1].Trim());
-            earn *= v;
-        }
-        else if (action.StartsWith("log"))
-        {
-            var msg = action.Substring(3).Trim().Trim('"');
-            DebugLog?.Invoke($"[AMScript] {msg}");
-        }
-
-        return new AMScriptResult(AMRuleAction.None, cost, earn);
+        DebugLog?.Invoke($"[AMScript] Loaded {_rules.Count} rules from {_filePath}");
     }
 
     private void Watch()
     {
-        var dir = Path.GetDirectoryName(_filePath)!;
-        var file = Path.GetFileName(_filePath)!;
+        var dir = Path.GetDirectoryName(_filePath);
+        var file = Path.GetFileName(_filePath);
+        if (dir is null || file is null) return;
 
-        _watcher = new FileSystemWatcher(dir, file);
-        _watcher.NotifyFilter = NotifyFilters.LastWrite;
-
-        _watcher.Changed += (_, __) =>
+        _watcher = new FileSystemWatcher(dir, file)
         {
-            Task.Delay(100).Wait(); // debounce
-            try
-            {
-                Load();
-            }
-            catch
-            {
-            }
+            NotifyFilter = NotifyFilters.LastWrite
+        };
+
+        _watcher.Changed += (_, _) =>
+        {
+            // Debounce a bit to avoid partial writes
+            Task.Delay(100).Wait();
+            try { Load(); } catch { /* ignore */ }
         };
 
         _watcher.EnableRaisingEvents = true;
     }
 
-    // Evaluate for download
+    // ---------------------------------------------------------
+    // Public evaluation entrypoints
+    // ---------------------------------------------------------
+
     public AMScriptResult EvaluateDownload(AMScriptContext ctx)
-        => Evaluate(ctx, true);
+        => EvaluateInternal(ctx);
 
-    // Evaluate for upload
     public AMScriptResult EvaluateUpload(AMScriptContext ctx)
-        => Evaluate(ctx, false);
+        => EvaluateInternal(ctx);
 
-    private AMScriptResult Evaluate(AMScriptContext ctx, bool isDownload)
+    // Generic: we treat download/upload same in v1, context decides meaning
+    private AMScriptResult EvaluateInternal(AMScriptContext ctx)
     {
-        foreach (var r in _rules)
+        foreach (var rule in _rules)
         {
-            if (EvaluateCondition(ctx, r.Condition))
+            if (EvaluateCondition(ctx, rule.Condition))
             {
-                return ApplyAction(ctx, r.Action, isDownload);
+                return ApplyAction(ctx, rule.Action);
             }
         }
 
         return AMScriptResult.NoChange(ctx);
     }
 
+    // ---------------------------------------------------------
+    // Condition evaluation
+    // ---------------------------------------------------------
+
     private bool EvaluateCondition(AMScriptContext ctx, string cond)
     {
         cond = cond.Trim();
+        if (cond.Length == 0) return false;
 
-        // Basic OR
-        var orParts = cond.Split("||", StringSplitOptions.RemoveEmptyEntries);
-        foreach (var orPart in orParts)
+        // OR
+        var orParts = cond.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var or in orParts)
         {
-            if (EvaluateAndPart(ctx, orPart))
+            if (EvaluateAndPart(ctx, or))
                 return true;
         }
-
         return false;
     }
 
     private bool EvaluateAndPart(AMScriptContext ctx, string cond)
     {
-        var andParts = cond.Split("&&", StringSplitOptions.RemoveEmptyEntries);
+        var andParts = cond.Split(new[] { "&&" }, StringSplitOptions.RemoveEmptyEntries);
         foreach (var part in andParts)
         {
             if (!EvaluateAtomic(ctx, part.Trim()))
                 return false;
         }
-
         return true;
     }
 
     private bool EvaluateAtomic(AMScriptContext ctx, string atom)
     {
+        atom = atom.Trim();
+        if (atom.Length == 0) return false;
+
         // !expr
-        if (atom.StartsWith("!"))
+        if (atom[0] == '!')
             return !EvaluateAtomic(ctx, atom[1..].Trim());
 
-        // Equality
-        if (atom.Contains("=="))
+        if (atom.Contains("==", StringComparison.Ordinal))
         {
-            var p = atom.Split("==", 2);
-            return GetValue(ctx, p[0].Trim())
-                   == GetValue(ctx, p[1].Trim());
+            var p = atom.Split(new[] { "==" }, 2, StringSplitOptions.None);
+            return GetValue(ctx, p[0].Trim()) == GetValue(ctx, p[1].Trim());
         }
 
-        if (atom.Contains("!="))
+        if (atom.Contains("!=", StringComparison.Ordinal))
         {
-            var p = atom.Split("!=", 2);
-            return GetValue(ctx, p[0].Trim())
-                   != GetValue(ctx, p[1].Trim());
+            var p = atom.Split(new[] { "!=" }, 2, StringSplitOptions.None);
+            return GetValue(ctx, p[0].Trim()) != GetValue(ctx, p[1].Trim());
         }
 
-        // Boolean symbol
-        return GetValue(ctx, atom).ToLower() == "true";
+        // Boolean check: treat token as variable
+        var v = GetValue(ctx, atom);
+        return v.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 
     private string GetValue(AMScriptContext ctx, string token)
@@ -199,8 +169,8 @@ public sealed class AMScriptEngine
         token = token.Trim();
 
         // String literal
-        if (token.StartsWith("\"") && token.EndsWith("\""))
-            return token.Trim('"');
+        if (token.Length >= 2 && token[0] == '"' && token[^1] == '"')
+            return token[1..^1];
 
         return token switch
         {
@@ -213,8 +183,66 @@ public sealed class AMScriptEngine
             "$kb" => ctx.Kb.ToString(),
             "$cost_download" => ctx.CostDownload.ToString(),
             "$earned_upload" => ctx.EarnedUpload.ToString(),
-            _ => ""
+            _ => token // unknown tokens: return as-is
         };
     }
 
+    // ---------------------------------------------------------
+    // Action evaluation
+    // ---------------------------------------------------------
+
+    private AMScriptResult ApplyAction(AMScriptContext ctx, string action)
+    {
+        action = action.Trim();
+
+        if (action.Equals("return allow", StringComparison.OrdinalIgnoreCase))
+            return AMScriptResult.Allow(ctx);
+
+        if (action.Equals("return deny", StringComparison.OrdinalIgnoreCase))
+            return AMScriptResult.Deny(ctx);
+
+        long cost = ctx.CostDownload;
+        long earn = ctx.EarnedUpload;
+        string? msg = null;
+
+        // Very simple grammar: single statement, v1
+        if (action.StartsWith("cost_download", StringComparison.OrdinalIgnoreCase))
+        {
+            ParseNumericAssignment(action, ref cost);
+        }
+        else if (action.StartsWith("earned_upload", StringComparison.OrdinalIgnoreCase))
+        {
+            ParseNumericAssignment(action, ref earn);
+        }
+        else if (action.StartsWith("log", StringComparison.OrdinalIgnoreCase))
+        {
+            var body = action["log".Length..].Trim();
+            if (body.Length >= 2 && body[0] == '"' && body[^1] == '"')
+                msg = body[1..^1];
+            DebugLog?.Invoke($"[AMScript] {msg}");
+        }
+
+        return new AMScriptResult(AMRuleAction.None, cost, earn, msg);
+    }
+
+    private static void ParseNumericAssignment(string expr, ref long value)
+    {
+        // Forms:
+        // cost_download = 123
+        // cost_download *= 2
+        expr = expr.Trim();
+
+        if (expr.Contains("*="))
+        {
+            var parts = expr.Split(new[] { "*=" }, 2, StringSplitOptions.None);
+            if (long.TryParse(parts[1].Trim(), out var mul))
+                value *= mul;
+        }
+        else if (expr.Contains("=", StringComparison.Ordinal))
+        {
+            var parts = expr.Split('=', 2);
+            if (long.TryParse(parts[1].Trim(), out var set))
+                value = set;
+        }
+    }
 }

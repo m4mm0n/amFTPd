@@ -13,18 +13,16 @@
   </PropertyGroup>
 
   <Target Name="GitInfo" BeforeTargets="GenerateAssemblyInfo">
-    <!-- Read short git hash (always 6 chars) -->
-    <Exec Command="git rev-parse --short=6 HEAD"
-          StandardOutputImportance="High"
-          ConsoleToMSBuild="true">
+    <!-- fixed length short hash -->
+    <Exec Command="git rev-parse --short=6 HEAD" StandardOutputImportance="High" ConsoleToMSBuild="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitCommit" />
     </Exec>
 
-    <!-- Fallback for non-repo or publish artifacts -->
     <PropertyGroup>
+      <!-- fallback when building outside git repo -->
       <GitCommit Condition="'$(GitCommit)' == ''">local</GitCommit>
 
-      <!-- Build Style A version -->
+      <!-- Style A: vMAJOR.MINOR.PATCH-shortSha -->
       <InformationalVersion>v$(Version)-$(GitCommit)</InformationalVersion>
     </PropertyGroup>
   </Target>

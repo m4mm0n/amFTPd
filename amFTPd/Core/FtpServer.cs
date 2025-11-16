@@ -1,8 +1,10 @@
-﻿using amFTPd.Logging;
+﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Scripting;
+using amFTPd.Logging;
+using amFTPd.Scripting;
 using amFTPd.Security;
 using System.Net;
 using System.Net.Sockets;
-using amFTPd.Config.Ftpd;
 
 namespace amFTPd.Core;
 
@@ -60,8 +62,35 @@ public sealed class FtpServer
         _listener.Start();
         _log.Log(FtpLogLevel.Info, $"FTP(S) server listening on {_cfg.BindAddress}:{_cfg.Port}");
 
+        // Shared filesystem instance
         var fs = new FtpFileSystem(_cfg.RootPath);
 
+        // --------------------------------------------------------------------
+        // AMScript: load script config and ensure default rule-sets
+        // --------------------------------------------------------------------
+        var baseDir = AppContext.BaseDirectory;
+        var scriptCfgPath = Path.Combine(baseDir, "config", "scripts.json");
+        var scriptConfig = ScriptConfig.Load(scriptCfgPath);
+
+        // Resolve rules base path: absolute stays absolute, relative is based on app dir
+        var rulesBase = scriptConfig.RulesPath;
+        if (!Path.IsPathRooted(rulesBase))
+            rulesBase = Path.GetFullPath(Path.Combine(baseDir, rulesBase));
+
+        AMScriptDefaults.EnsureAll(rulesBase);
+
+        var creditScript = new AMScriptEngine(Path.Combine(rulesBase, "credits.msl"));
+        var fxpScript = new AMScriptEngine(Path.Combine(rulesBase, "fxp.msl"));
+        var activeScript = new AMScriptEngine(Path.Combine(rulesBase, "active.msl"));
+
+        // Optional: pipe AMScript debug into your logger
+        creditScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+        fxpScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+        activeScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+
+        // --------------------------------------------------------------------
+        // Main accept loop
+        // --------------------------------------------------------------------
         while (!_cts.IsCancellationRequested)
         {
             TcpClient client;
@@ -94,6 +123,14 @@ public sealed class FtpServer
                     _tls);
 
                 var router = new FtpCommandRouter(session, _log, fs, _cfg, _tls, _sections);
+
+                // Attach script engines so router can use AMScript in credits/FXP/active
+                router.AttachScriptEngines(
+                    credit: creditScript,
+                    fxp: fxpScript,
+                    active: activeScript
+                );
+
                 var ct = _cts!.Token;
 
                 try

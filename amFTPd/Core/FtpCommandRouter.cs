@@ -2,6 +2,7 @@
 using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
+using amFTPd.Scripting;
 using amFTPd.Security;
 using System.Diagnostics;
 using System.Net;
@@ -32,6 +33,9 @@ internal sealed partial class FtpCommandRouter
     private readonly IUserStore _users;
     private readonly IGroupStore _groups;
     private bool _isFxp;
+    private AMScriptEngine? _creditScript;
+    private AMScriptEngine? _fxpScript;
+    private AMScriptEngine? _activeScript;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpCommandRouter"/> class, which is responsible for routing and
@@ -138,6 +142,16 @@ internal sealed partial class FtpCommandRouter
                 break;
         }
     }
+    public void AttachScriptEngines(
+        AMScriptEngine? credit,
+        AMScriptEngine? fxp,
+        AMScriptEngine? active)
+    {
+        _creditScript = credit;
+        _fxpScript = fxp;
+        _activeScript = active;
+    }
+
     private FtpSection GetSectionForVirtual(string virtPath)
         => _sections.GetSectionForPath(virtPath);
     private static async Task<long> CopyWithThrottleAsync(
@@ -208,35 +222,38 @@ internal sealed partial class FtpCommandRouter
     {
         var account = _s.Account;
         if (account is null) return true;
+        if (section.FreeLeech) return true;
 
-        // FREELEECH → always allowed
-        if (section.FreeLeech)
-            return true;
+        var kb = bytes / 1024;
+        if (kb <= 0) return true;
 
-        // Convert to KB
-        long kb = bytes / 1024;
-        if (kb <= 0)
-            return true;
-
-        // FXP-IN (server sending data to remote FTP server)
-        // If FXP should be FREE on download:
-        if (_isFxp)
-        {
-            // uncomment if needed:
-            // return true;
-
-            // or: double cost FXP? 
-            // kb *= 2;
-        }
-
-        // APPLY SECTION DOWNLOAD RATIO
-        // ratio: how many KB of credit consumed per KB downloaded
+        // Default cost
         long cost = kb;
 
+        // Ratio (your original ratio logic)
         if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
         {
-            // Example: DU:2 means download costs twice normal
-            cost = (long)Math.Ceiling(kb * (double)section.RatioDownloadUnit);
+            // "ratio" in your original was (DU/UU); we keep that for backwards compatibility
+            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
+            cost = (long)Math.Round(kb * factor);
+        }
+
+        // Script hook (credits.msl)
+        if (_creditScript is not null)
+        {
+            var ctx = BuildCreditContext(section, bytes) with { CostDownload = cost };
+            var result = _creditScript.EvaluateDownload(ctx);
+
+            if (result.Action == AMRuleAction.Deny)
+            {
+                await _s.WriteAsync("550 Download denied by policy.\r\n", ct);
+                return false;
+            }
+
+            if (result.Action == AMRuleAction.Allow)
+                return true;
+
+            cost = result.CostDownload;
         }
 
         if (account.CreditsKb < cost)
@@ -254,29 +271,30 @@ internal sealed partial class FtpCommandRouter
         if (account is null) return;
         if (section.FreeLeech) return;
 
-        long kb = bytes / 1024;
+        var kb = bytes / 1024;
         if (kb <= 0) return;
 
         long cost = kb;
 
-        // Apply FXP rules if desired
-        if (_isFxp)
-        {
-            // Free FXP?
-            // return;
-
-            // or double cost?
-            // cost *= 2;
-        }
-
-        // Apply section ratio
         if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
         {
-            cost = (long)Math.Ceiling(kb * (double)section.RatioDownloadUnit);
+            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
+            cost = (long)Math.Round(kb * factor);
+        }
+
+        // Script hook
+        if (_creditScript is not null)
+        {
+            var ctx = BuildCreditContext(section, bytes) with { CostDownload = cost };
+            var result = _creditScript.EvaluateDownload(ctx);
+
+            if (result.Action == AMRuleAction.Deny)
+                return; // policy decided not to charge
+
+            cost = result.CostDownload;
         }
 
         var updated = account with { CreditsKb = Math.Max(0, account.CreditsKb - cost) };
-
         if (_s.Users.TryUpdateUser(updated, out _))
             _s.SetAccount(updated);
     }
@@ -287,32 +305,36 @@ internal sealed partial class FtpCommandRouter
         if (account is null) return;
         if (bytes <= 0) return;
 
-        long kb = bytes / 1024;
+        var kb = bytes / 1024;
         if (kb <= 0) return;
 
-        long earned = kb;
+        long earned;
 
-        // FXP uploads (server receiving)
-        if (_isFxp)
-        {
-            // FXP-IN free credits?
-            // earned = 0;
-
-            // or half credits?
-            // earned = earned / 2;
-        }
-
-        // Apply section ratio
         if (!section.FreeLeech &&
             section.RatioUploadUnit > 0 &&
             section.RatioDownloadUnit > 0)
         {
-            // ratio: upload earns credits proportional to uploadRatio
-            earned = (long)Math.Round(kb * ((double)section.RatioDownloadUnit / section.RatioUploadUnit));
+            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
+            earned = (long)Math.Round(kb * factor);
+        }
+        else
+        {
+            earned = kb;
+        }
+
+        // Script hook
+        if (_creditScript is not null)
+        {
+            var ctx = BuildCreditContext(section, bytes) with { EarnedUpload = earned };
+            var result = _creditScript.EvaluateUpload(ctx);
+
+            if (result.Action == AMRuleAction.Deny)
+                return; // no credits awarded
+
+            earned = result.EarnedUpload;
         }
 
         var updated = account with { CreditsKb = account.CreditsKb + earned };
-
         if (_s.Users.TryUpdateUser(updated, out _))
             _s.SetAccount(updated);
     }

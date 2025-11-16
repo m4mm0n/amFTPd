@@ -1,20 +1,23 @@
 ﻿namespace amFTPd.Scripting
 {
     /// <summary>
-    /// Represents the result of executing an AM script, including the action to take and associated cost and earnings.
+    /// Represents the result of executing an AM script, including the action to take, associated costs, rewards, and an
+    /// optional message.
     /// </summary>
-    /// <remarks>This record encapsulates the outcome of a script execution, including the specified action
-    /// and any associated cost or earnings. Use the static methods <see cref="NoChange(AMScriptContext)"/>, <see
-    /// cref="Allow(AMScriptContext)"/>, and <see cref="Deny(AMScriptContext)"/>  to create predefined results based on
-    /// the provided script context.</remarks>
-    /// <param name="Action">The action to be taken as a result of the script execution. Possible values are defined in <see
-    /// cref="AMRuleAction"/>.</param>
-    /// <param name="CostDownload">The cost incurred for downloading, measured in arbitrary units.</param>
-    /// <param name="EarnedUpload">The earnings gained from uploading, measured in arbitrary units.</param>
+    /// <remarks>This record encapsulates the outcome of a script execution, including the action to be
+    /// performed, the cost incurred for downloading, the upload reward earned, and an optional message providing
+    /// additional context or details.</remarks>
+    /// <param name="Action">The action to be taken as a result of the script execution. Possible values are defined in the <see
+    /// cref="AMRuleAction"/> enumeration.</param>
+    /// <param name="CostDownload">The cost incurred for downloading, represented as a long integer.</param>
+    /// <param name="EarnedUpload">The reward earned for uploading, represented as a long integer.</param>
+    /// <param name="Message">An optional message providing additional context or details about the script result. This value can be <see
+    /// langword="null"/>.</param>
     public sealed record AMScriptResult(
         AMRuleAction Action,
         long CostDownload,
-        long EarnedUpload
+        long EarnedUpload,
+        string? Message = null
     )
     {
         public static AMScriptResult NoChange(AMScriptContext ctx)
