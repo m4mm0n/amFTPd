@@ -38,6 +38,7 @@ internal sealed partial class FtpCommandRouter
     private AMScriptEngine? _activeScript;
     private AMScriptEngine? _sectionRoutingScript;
     private AMScriptEngine? _siteScript;
+    private AMScriptEngine? _userScript;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpCommandRouter"/> class, which is responsible for routing and
@@ -87,6 +88,25 @@ internal sealed partial class FtpCommandRouter
         _s.Touch();
         _log.Log(FtpLogLevel.Debug, $"CMD: {cmd} ARG: {arg}");
 
+        // ------------------------------------------------------------------
+        // AMSCRIPT USER RULES (per-command)
+        // ------------------------------------------------------------------
+        if (_userScript is not null && _s.Account != null)
+        {
+            var ctx = BuildUserContext(cmd, arg);
+            var rule = _userScript.EvaluateDownload(ctx);
+
+            if (rule.Action == AMRuleAction.Deny)
+            {
+                var reason = rule.DenyReason ?? "550 Command denied by policy.";
+                await _s.WriteAsync(reason + "\r\n", ct);
+                return; // skip command execution entirely
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Normal command handling
+        // ------------------------------------------------------------------
         switch (cmd)
         {
             // Auth / TLS
@@ -136,7 +156,7 @@ internal sealed partial class FtpCommandRouter
             case "RNFR": _s.RenameFrom = arg; await _s.WriteAsync("350 Ready for RNTO.\r\n", ct); break;
             case "RNTO": await RNTO(arg, ct); break;
 
-            // SITE stub
+            // SITE command
             case "SITE": await SITE(arg, ct); break;
 
             default:
@@ -157,6 +177,7 @@ internal sealed partial class FtpCommandRouter
         _sectionRoutingScript = sectionRouting;
         _siteScript = site;
     }
+    public void AttachUserScript(AMScriptEngine? script) => _userScript = script;
 
     private FtpSection GetSectionForVirtual(string virtPath)
     {
@@ -465,6 +486,29 @@ internal sealed partial class FtpCommandRouter
         }
 
         return true;
+    }
+
+    private static FtpUser CreatePseudoUser()
+    {
+        return new FtpUser(
+            UserName: "UNKNOWN",
+            PasswordHash: "",
+            HomeDir: "/",
+            IsAdmin: false,
+            AllowFxp: false,
+            AllowUpload: false,
+            AllowDownload: false,
+            AllowActiveMode: false,
+            MaxConcurrentLogins: 0,
+            IdleTimeout: TimeSpan.FromMinutes(5),
+            MaxUploadKbps: 0,
+            MaxDownloadKbps: 0,
+            GroupName: null,
+            CreditsKb: 0,
+            AllowedIpMask: null,
+            RequireIdentMatch: false,
+            RequiredIdent: null
+        );
     }
 
     private static async Task<string?> QueryIdentAsync(

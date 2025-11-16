@@ -84,6 +84,7 @@ public sealed class FtpServer
         var activeScript = new AMScriptEngine(Path.Combine(rulesBase, "active.msl"));
         var sectionRoutingScript = new AMScriptEngine(Path.Combine(rulesBase, "section-routing.msl"));
         var siteScript = new AMScriptEngine(Path.Combine(rulesBase, "site.msl"));
+        var userScript = new AMScriptEngine(Path.Combine(rulesBase, "user-rules.msl"));
 
         // Optional: pipe AMScript debug into your logger
         creditScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
@@ -91,6 +92,8 @@ public sealed class FtpServer
         activeScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         sectionRoutingScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         siteScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+        userScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+
 
         // --------------------------------------------------------------------
         // Main accept loop
@@ -136,6 +139,7 @@ public sealed class FtpServer
                     sectionRoutingScript,
                     siteScript
                 );
+                router.AttachUserScript(userScript);
 
                 var ct = _cts!.Token;
 

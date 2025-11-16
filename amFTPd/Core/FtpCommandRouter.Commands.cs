@@ -100,6 +100,39 @@ namespace amFTPd.Core
             );
         }
 
+        private AMScriptContext BuildUserContext(string? cmd = "", string? args = "")
+        {
+            var acc = _s.Account ?? CreatePseudoUser();
+
+            string virt = _s.Cwd;
+
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(virt);
+            }
+            catch
+            {
+                phys = string.Empty;
+            }
+
+            var section = _sections.GetSectionForPath(virt);
+
+            return new AMScriptContext(
+                IsFxp: _isFxp,
+                Section: section.Name,
+                FreeLeech: section.FreeLeech,
+                UserName: acc.UserName,
+                UserGroup: acc.GroupName ?? "",
+                Bytes: 0,
+                Kb: 0,
+                CostDownload: 0,
+                EarnedUpload: 0,
+                VirtualPath: virt,
+                PhysicalPath: phys
+            );
+        }
+
         // --- Auth / TLS ---
 
         private async Task USER(string arg, CancellationToken ct)
@@ -131,83 +164,61 @@ namespace amFTPd.Core
 
         private async Task PASS(string arg, CancellationToken ct)
         {
-            // USER must be sent first
             if (_s.PendingUser is null)
             {
-                await _s.WriteAsync(FtpResponses.BadSeq, ct); // 503
+                await _s.WriteAsync("503 Login with USER first.\r\n", ct);
                 return;
             }
 
-            var pending = _s.PendingUser;
+            var username = _s.PendingUser;
 
-            // Anonymous login (if allowed)
-            if (_cfg.AllowAnonymous && pending.Equals("anonymous", StringComparison.OrdinalIgnoreCase))
+            if (!_s.Users.TryAuthenticate(username, arg, out var account) || account is null)
             {
-                // We ignore the password, but clients still send something (usually email).
-                var anon = new FtpUser(
-                    UserName: "anonymous",
-                    PasswordHash: string.Empty,  // not used
-                    HomeDir: "/",
-                    IsAdmin: false,
-                    AllowFxp: false,
-                    AllowUpload: false,          // typically no uploads for anon
-                    AllowDownload: true,
-                    AllowActiveMode: true,
-                    MaxConcurrentLogins: 100,
-                    IdleTimeout: TimeSpan.FromMinutes(15),
-                    MaxUploadKbps: 0,
-                    MaxDownloadKbps: 0,
-                    GroupName: "anonymous",
-                    CreditsKb: 0,
-                    AllowedIpMask: null,         // no IP restriction
-                    RequireIdentMatch: false,
-                    RequiredIdent: null
+                await _s.WriteAsync("530 Login incorrect.\r\n", ct);
+                return;
+            }
+
+            // ------------------------------------------------------------------
+            // AMSCRIPT USER RULES (login)
+            // ------------------------------------------------------------------
+            if (_userScript is not null)
+            {
+                var ctx = new AMScriptContext(
+                    IsFxp: false,
+                    Section: "/",
+                    FreeLeech: false,
+                    UserName: account.UserName,
+                    UserGroup: account.GroupName ?? "",
+                    Bytes: 0,
+                    Kb: 0,
+                    CostDownload: 0,
+                    EarnedUpload: 0,
+                    VirtualPath: "/",
+                    PhysicalPath: ""
                 );
 
-                _s.Login(anon);
-                _s.PendingUser = null;
-                await _s.WriteAsync(FtpResponses.AuthOk, ct); // 230
-                return;
-            }
+                var rule = _userScript.EvaluateDownload(ctx);
 
-            // Normal authenticated user
-            if (!_s.Users.TryAuthenticate(pending, arg, out var account) || account is null)
-            {
-                await _s.WriteAsync(FtpResponses.NotLoggedIn, ct); // 530
-                return;
-            }
-
-            // ---- IP restriction ----------------------------------------------------
-            if (!string.IsNullOrWhiteSpace(account.AllowedIpMask))
-            {
-                var remoteEp = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
-                if (!IsIpAllowed(remoteEp.Address, account.AllowedIpMask))
+                if (rule.Action == AMRuleAction.Deny)
                 {
-                    await _s.WriteAsync("530 Login not allowed from this IP.\r\n", ct);
+                    var reason = rule.DenyReason ?? "530 Login denied by policy.";
+                    await _s.WriteAsync(reason + "\r\n", ct);
                     return;
                 }
+
+                if (rule.NewUploadLimit is int ul)
+                    account = account with { MaxUploadKbps = ul };
+
+                if (rule.NewDownloadLimit is int dl)
+                    account = account with { MaxDownloadKbps = dl };
+
+                if (rule.CreditDelta is long cd)
+                    account = account with { CreditsKb = account.CreditsKb + cd };
             }
 
-            // ---- IDENT check -------------------------------------------------------
-            if (account.RequireIdentMatch && !string.IsNullOrWhiteSpace(account.RequiredIdent))
-            {
-                var remoteEp = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
-                var localEp = (IPEndPoint)_s.Control.Client.LocalEndPoint!;
-
-                var ident = await QueryIdentAsync(localEp, remoteEp, ct);
-
-                if (ident is null ||
-                    !string.Equals(ident, account.RequiredIdent, StringComparison.OrdinalIgnoreCase))
-                {
-                    await _s.WriteAsync("530 Ident mismatch.\r\n", ct);
-                    return;
-                }
-            }
-
-            // All good → log in
-            _s.Login(account);
-            _s.PendingUser = null;
-            await _s.WriteAsync(FtpResponses.AuthOk, ct); // 230
+            // Normal login
+            _s.SetAccount(account);
+            await _s.WriteAsync("230 Login successful.\r\n", ct);
         }
 
         private async Task AUTH(string arg, CancellationToken ct)
