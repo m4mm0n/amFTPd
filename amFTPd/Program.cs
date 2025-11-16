@@ -64,7 +64,8 @@ namespace amFTPd
                 @"    |___|      |___|  :/      |___|          :/      ",
                 @"                      :                      :       "
             }.WriteBoxedBanner();
-            var ver = Assembly.GetExecutingAssembly().GetName().Version;
+            var ver = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion;
             $"amFTPd - a managed FTP daemon v{ver}".WriteBoxedBanner();
             "Press Ctrl+C to stop.\n".WriteStyledLogLine();
         }

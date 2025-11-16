@@ -5,13 +5,29 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Base versions -->
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Nerdbank.GitVersioning" Version="3.9.50">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-  </ItemGroup>
+  <Target Name="GitInfo" BeforeTargets="GenerateAssemblyInfo">
+    <!-- Read short git hash (always 6 chars) -->
+    <Exec Command="git rev-parse --short=6 HEAD"
+          StandardOutputImportance="High"
+          ConsoleToMSBuild="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitCommit" />
+    </Exec>
+
+    <!-- Fallback for non-repo or publish artifacts -->
+    <PropertyGroup>
+      <GitCommit Condition="'$(GitCommit)' == ''">local</GitCommit>
+
+      <!-- Build Style A version -->
+      <InformationalVersion>v$(Version)-$(GitCommit)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
 
 </Project>
