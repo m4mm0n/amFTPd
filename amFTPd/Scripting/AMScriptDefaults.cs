@@ -23,6 +23,7 @@
             CreateIfMissing(Path.Combine(baseDir, "group.msl"), DefaultGroup);
             CreateIfMissing(Path.Combine(baseDir, "section-rules.msl"), DefaultSectionRules);
             CreateIfMissing(Path.Combine(baseDir, "messages.msl"), DefaultMessages);
+            CreateIfMissing(Path.Combine(baseDir, "section-routing.msl"), DefaultSectionRouting);
         }
 
         private static void CreateIfMissing(string path, string content)
@@ -36,6 +37,11 @@
         // ---------------------------------------------------------
         // Defaults
         // ---------------------------------------------------------
+        private const string DefaultSectionRouting = """
+                                                     # Section routing rules
+                                                     # Example:
+                                                     # if ($virtual_path startswith "/incoming") return section "INCOMING";
+                                                     """;
 
         private const string DefaultCredits = """
 # Default credits rules.
@@ -71,8 +77,11 @@ if ($freeleech) cost_download = 0;
 """;
 
         private const string DefaultSite = """
-# SITE command rules, v1 placeholder.
-""";
+                                           # SITE command scripting
+                                           # Examples:
+                                           # if ($site.command == "HELLO") return output "Hello $user.name!";
+                                           # if ($site.command == "SHUTDOWN" && !$is_admin) return deny;
+                                           """;
 
         private const string DefaultSpeed = """
 # Speed limit rules, v1 placeholder.

@@ -2,7 +2,6 @@
 using amFTPd.Scripting;
 using amFTPd.Security;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 
 namespace amFTPd.Core
@@ -12,7 +11,7 @@ namespace amFTPd.Core
         private AMScriptContext BuildCreditContext(FtpSection section, long bytes)
         {
             var account = _s.Account!;
-            long kb = Math.Max(1L, bytes / 1024L);
+            var kb = Math.Max(1L, bytes / 1024L);
 
             return new AMScriptContext(
                 IsFxp: _isFxp,
@@ -46,7 +45,60 @@ namespace amFTPd.Core
             );
         }
 
+        private AMScriptContext BuildSectionRoutingContext(string virtualPath, string physicalPath, FtpSection section)
+        {
+            var account = _s.Account!;
 
+            return new AMScriptContext(
+                IsFxp: _isFxp,
+                Section: section.Name,
+                FreeLeech: section.FreeLeech,
+                UserName: account.UserName,
+                UserGroup: account.GroupName ?? "",
+                Bytes: 0,
+                Kb: 0,
+                CostDownload: 0,
+                EarnedUpload: 0,
+                VirtualPath: virtualPath,
+                PhysicalPath: physicalPath
+            );
+        }
+
+        private AMScriptContext BuildSiteContext(string command, string args)
+        {
+            var acc = _s.Account!;
+
+            // Virtual working directory = Cwd
+            var virtPath = _s.Cwd;
+
+            // Resolve physical path (safe fallback)
+            string physicalPath;
+            try
+            {
+                physicalPath = _fs.MapToPhysical(virtPath);
+            }
+            catch
+            {
+                physicalPath = string.Empty;
+            }
+
+            // Resolve section based on virtual path
+            var section = _sections.GetSectionForPath(virtPath);
+
+            return new AMScriptContext(
+                IsFxp: _isFxp,
+                Section: section.Name,
+                FreeLeech: section.FreeLeech,
+                UserName: acc.UserName,
+                UserGroup: acc.GroupName ?? "",
+                Bytes: 0,
+                Kb: 0,
+                CostDownload: 0,
+                EarnedUpload: 0,
+                VirtualPath: virtPath,
+                PhysicalPath: physicalPath
+            );
+        }
 
         // --- Auth / TLS ---
 
@@ -643,7 +695,7 @@ namespace amFTPd.Core
             }
 
             var fi = new FileInfo(phys);
-            long length = fi.Length;
+            var length = fi.Length;
             var rest = _s.RestOffset;
             if (rest.HasValue && rest.Value > 0 && rest.Value < length)
                 length -= rest.Value;
@@ -995,10 +1047,45 @@ namespace amFTPd.Core
                 return;
             }
 
+            // Parse original input
             var parts = arg.Split(' ', 2, StringSplitOptions.TrimEntries);
             var sub = parts[0].ToUpperInvariant();
             var rest = parts.Length > 1 ? parts[1] : string.Empty;
 
+            // --------------------------------------------------------------------------------------------------
+            // AMSCRIPT PRE-HOOK: Allow scripts to block, override, or output custom responses.
+            // --------------------------------------------------------------------------------------------------
+            if (_siteScript is not null)
+            {
+                var ctx = BuildSiteContext(sub, rest);
+                var result = _siteScript.EvaluateUpload(ctx);
+
+                // 1) Script rule BLOCKS (DENY)
+                if (result.Action == AMRuleAction.Deny)
+                {
+                    await _s.WriteAsync("550 SITE command denied by rule.\r\n", ct);
+                    return;
+                }
+
+                // 2) Script provides custom OUTPUT
+                if (!string.IsNullOrEmpty(result.SiteOutput))
+                {
+                    await _s.WriteAsync($"200 {result.SiteOutput}\r\n", ct);
+                    return;
+                }
+
+                // 3) Script provides OVERRIDE (return override)
+                if (result.Message == "SITE_OVERRIDE")
+                {
+                    // The override is complete; script handles output. We simply return success.
+                    await _s.WriteAsync("200 OK\r\n", ct);
+                    return;
+                }
+            }
+
+            // --------------------------------------------------------------------------------------------------
+            // NO SCRIPT OVERRIDE OCCURRED → PROCESS BUILT-IN SITE COMMANDS AS NORMAL
+            // --------------------------------------------------------------------------------------------------
             switch (sub)
             {
                 case "HELP":
@@ -1020,8 +1107,12 @@ namespace amFTPd.Core
                         " SITE IDENT <user> <ident>\r\n" +
                         " SITE REQIDENT <user> <on|off>\r\n" +
                         " SITE SHOWUSER <user>\r\n" +
-                        "   Flags: +admin,-admin,+fxp,-fxp,+upload,-upload,+download,-download,+active,-active\r\n" +
-                        "214 End\r\n", ct);
+                        " SITE CREDITS <user>\r\n" +
+                        " SITE GIVECRED <user> <amount>\r\n" +
+                        " SITE TAKECRED <user> <amount>\r\n" +
+                        " SITE SECTIONS\r\n" +
+                        "214 End\r\n"
+                        , ct);
                     break;
 
                 case "WHO":
@@ -1059,6 +1150,7 @@ namespace amFTPd.Core
                 case "SETLIMITS":
                     await SITE_SETLIMITS(rest, ct);
                     break;
+
                 case "ADDIP":
                     await SITE_ADDIP(rest, ct);
                     break;
@@ -1070,29 +1162,35 @@ namespace amFTPd.Core
                 case "IDENT":
                     await SITE_IDENT(rest, ct);
                     break;
-                case "SHOWUSER":
-                    await SITE_SHOWUSER(rest, ct);
-                    break;
 
                 case "REQIDENT":
                     await SITE_REQIDENT(rest, ct);
                     break;
 
+                case "SHOWUSER":
+                    await SITE_SHOWUSER(rest, ct);
+                    break;
+
                 case "SETFLAGS":
                     await SITE_SETFLAGS(rest, ct);
                     break;
+
                 case "CREDITS":
                     await SITE_CREDITS(rest, ct);
                     break;
+
                 case "GIVECRED":
                     await SITE_GIVECRED(rest, ct);
                     break;
+
                 case "TAKECRED":
                     await SITE_TAKECRED(rest, ct);
                     break;
+
                 case "SECTIONS":
                     await SITE_SECTIONS(ct);
                     break;
+
                 default:
                     await _s.WriteAsync("502 SITE subcommand not implemented.\r\n", ct);
                     break;
@@ -1395,7 +1493,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            long deltaKb = mb * 1024;
+            var deltaKb = mb * 1024;
             var updated = user with { CreditsKb = user.CreditsKb + deltaKb };
 
             if (_s.Users.TryUpdateUser(updated, out var error))
@@ -1437,7 +1535,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            long deltaKb = mb * 1024;
+            var deltaKb = mb * 1024;
             var updated = user with { CreditsKb = Math.Max(0, user.CreditsKb - deltaKb) };
 
             if (_s.Users.TryUpdateUser(updated, out var error))
@@ -1660,11 +1758,11 @@ namespace amFTPd.Core
                 return;
             }
 
-            bool isAdmin = existing.IsAdmin;
-            bool allowFxp = existing.AllowFxp;
-            bool allowUpload = existing.AllowUpload;
-            bool allowDownload = existing.AllowDownload;
-            bool allowActive = existing.AllowActiveMode;
+            var isAdmin = existing.IsAdmin;
+            var allowFxp = existing.AllowFxp;
+            var allowUpload = existing.AllowUpload;
+            var allowDownload = existing.AllowDownload;
+            var allowActive = existing.AllowActiveMode;
 
             var flags = flagsStr.Split(new[] { ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var raw in flags)
@@ -1675,7 +1773,7 @@ namespace amFTPd.Core
                 var op = f[0];
                 var name = f[1..].ToLowerInvariant();
 
-                bool value = op == '+';
+                var value = op == '+';
 
                 switch (name)
                 {

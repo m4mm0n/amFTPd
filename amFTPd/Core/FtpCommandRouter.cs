@@ -36,6 +36,8 @@ internal sealed partial class FtpCommandRouter
     private AMScriptEngine? _creditScript;
     private AMScriptEngine? _fxpScript;
     private AMScriptEngine? _activeScript;
+    private AMScriptEngine? _sectionRoutingScript;
+    private AMScriptEngine? _siteScript;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpCommandRouter"/> class, which is responsible for routing and
@@ -145,15 +147,71 @@ internal sealed partial class FtpCommandRouter
     public void AttachScriptEngines(
         AMScriptEngine? credit,
         AMScriptEngine? fxp,
-        AMScriptEngine? active)
+        AMScriptEngine? active,
+        AMScriptEngine? sectionRouting = null,
+        AMScriptEngine? site = null)
     {
         _creditScript = credit;
         _fxpScript = fxp;
         _activeScript = active;
+        _sectionRoutingScript = sectionRouting;
+        _siteScript = site;
     }
 
     private FtpSection GetSectionForVirtual(string virtPath)
-        => _sections.GetSectionForPath(virtPath);
+    {
+        // Normal routing first
+        var section = _sections.GetSectionForPath(virtPath);
+
+        // No script? return original selection
+        if (_sectionRoutingScript is null)
+            return section;
+
+        // physical path may fail → ignore
+        string physPath;
+        try
+        {
+            physPath = _fs.MapToPhysical(virtPath);
+        }
+        catch
+        {
+            physPath = "";
+        }
+
+        var ctx = new AMScriptContext(
+            IsFxp: _isFxp,
+            Section: section.Name,
+            FreeLeech: section.FreeLeech,
+            UserName: _s.Account?.UserName ?? "",
+            UserGroup: _s.Account?.GroupName ?? "",
+            Bytes: 0,
+            Kb: 0,
+            CostDownload: 0,
+            EarnedUpload: 0,
+            VirtualPath: virtPath,
+            PhysicalPath: physPath
+        );
+
+        var result = _sectionRoutingScript.EvaluateDownload(ctx);
+
+        // Check for: return section "NAME"
+        if (result.Message is string msg &&
+            msg.StartsWith("SECTION_OVERRIDE::", StringComparison.Ordinal))
+        {
+            var secName = msg["SECTION_OVERRIDE::".Length..];
+
+            var overrideSection = _sections
+                .GetSections()
+                .FirstOrDefault(s =>
+                    s.Name.Equals(secName, StringComparison.OrdinalIgnoreCase));
+
+            if (overrideSection != null)
+                return overrideSection;
+        }
+
+        return section;
+    }
+
     private static async Task<long> CopyWithThrottleAsync(
         Stream source,
         Stream destination,

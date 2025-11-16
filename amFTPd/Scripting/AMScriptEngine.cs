@@ -210,17 +210,81 @@ public sealed class AMScriptEngine
         {
             ParseNumericAssignment(action, ref cost);
         }
-        else if (action.StartsWith("earned_upload", StringComparison.OrdinalIgnoreCase))
+        if (action.StartsWith("earned_upload", StringComparison.OrdinalIgnoreCase))
         {
             ParseNumericAssignment(action, ref earn);
         }
-        else if (action.StartsWith("log", StringComparison.OrdinalIgnoreCase))
+        if (action.StartsWith("log", StringComparison.OrdinalIgnoreCase))
         {
             var body = action["log".Length..].Trim();
             if (body.Length >= 2 && body[0] == '"' && body[^1] == '"')
                 msg = body[1..^1];
             DebugLog?.Invoke($"[AMScript] {msg}");
         }
+        // return deny "message"
+        if (action.StartsWith("return deny", StringComparison.OrdinalIgnoreCase))
+        {
+            msg = action["return deny".Length..].Trim().Trim('"');
+            return AMScriptResult.DenyWithReason(msg);
+        }
+
+        // return output "TEXT"
+        if (action.StartsWith("return output", StringComparison.OrdinalIgnoreCase))
+        {
+            msg = action["return output".Length..].Trim().Trim('"');
+            return AMScriptResult.CustomOutput(msg);
+        }
+
+        // return override (for SITE)
+        if (action.StartsWith("return override", StringComparison.OrdinalIgnoreCase))
+        {
+            return AMScriptResult.SiteOverride();
+        }
+
+        // return section "NAME"
+        if (action.StartsWith("return section", StringComparison.OrdinalIgnoreCase))
+        {
+            var name = action["return section".Length..].Trim().Trim('"');
+            return new AMScriptResult(
+                AMRuleAction.Allow,
+                ctx.CostDownload,
+                ctx.EarnedUpload,
+                Message: $"SECTION_OVERRIDE::{name}"
+            );
+        }
+
+        // return set_dl 123
+        if (action.StartsWith("return set_dl", StringComparison.OrdinalIgnoreCase))
+        {
+            var v = int.Parse(action["return set_dl".Length..].Trim());
+            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
+                NewDownloadLimit: v);
+        }
+
+        // return set_ul 456
+        if (action.StartsWith("return set_ul", StringComparison.OrdinalIgnoreCase))
+        {
+            var v = int.Parse(action["return set_ul".Length..].Trim());
+            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
+                NewUploadLimit: v);
+        }
+
+        // return add_credits 100
+        if (action.StartsWith("return add_credits", StringComparison.OrdinalIgnoreCase))
+        {
+            var v = long.Parse(action["return add_credits".Length..].Trim());
+            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
+                CreditDelta: v);
+        }
+
+        // return sub_credits 50
+        if (action.StartsWith("return sub_credits", StringComparison.OrdinalIgnoreCase))
+        {
+            var v = long.Parse(action["return sub_credits".Length..].Trim());
+            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
+                CreditDelta: -v);
+        }
+
 
         return new AMScriptResult(AMRuleAction.None, cost, earn, msg);
     }

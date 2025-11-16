@@ -82,11 +82,15 @@ public sealed class FtpServer
         var creditScript = new AMScriptEngine(Path.Combine(rulesBase, "credits.msl"));
         var fxpScript = new AMScriptEngine(Path.Combine(rulesBase, "fxp.msl"));
         var activeScript = new AMScriptEngine(Path.Combine(rulesBase, "active.msl"));
+        var sectionRoutingScript = new AMScriptEngine(Path.Combine(rulesBase, "section-routing.msl"));
+        var siteScript = new AMScriptEngine(Path.Combine(rulesBase, "site.msl"));
 
         // Optional: pipe AMScript debug into your logger
         creditScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         fxpScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         activeScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+        sectionRoutingScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+        siteScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
 
         // --------------------------------------------------------------------
         // Main accept loop
@@ -126,9 +130,11 @@ public sealed class FtpServer
 
                 // Attach script engines so router can use AMScript in credits/FXP/active
                 router.AttachScriptEngines(
-                    credit: creditScript,
-                    fxp: fxpScript,
-                    active: activeScript
+                    creditScript,
+                    fxpScript,
+                    activeScript,
+                    sectionRoutingScript,
+                    siteScript
                 );
 
                 var ct = _cts!.Token;
