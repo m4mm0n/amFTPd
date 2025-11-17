@@ -179,6 +179,44 @@ namespace amFTPd.Core
             }
 
             // ------------------------------------------------------------------
+            // AMSCRIPT GROUP RULES (login)
+            // ------------------------------------------------------------------
+            if (_groupScript is not null && !string.IsNullOrWhiteSpace(account.GroupName))
+            {
+                var gctx = new AMScriptContext(
+                    IsFxp: false,
+                    Section: "/",
+                    FreeLeech: false,
+                    UserName: account.UserName,
+                    UserGroup: account.GroupName ?? "",
+                    Bytes: 0,
+                    Kb: 0,
+                    CostDownload: 0,
+                    EarnedUpload: 0,
+                    VirtualPath: "/",
+                    PhysicalPath: ""
+                );
+
+                var gRule = _groupScript.EvaluateGroup(gctx);
+
+                if (gRule.Action == AMRuleAction.Deny)
+                {
+                    var reason = gRule.DenyReason ?? "530 Login denied by group policy.";
+                    await _s.WriteAsync(reason + "\r\n", ct);
+                    return;
+                }
+
+                if (gRule.NewUploadLimit is int gul)
+                    account = account with { MaxUploadKbps = gul };
+
+                if (gRule.NewDownloadLimit is int gdl)
+                    account = account with { MaxDownloadKbps = gdl };
+
+                if (gRule.CreditDelta is long gcd)
+                    account = account with { CreditsKb = account.CreditsKb + gcd };
+            }
+
+            // ------------------------------------------------------------------
             // AMSCRIPT USER RULES (login)
             // ------------------------------------------------------------------
             if (_userScript is not null)
@@ -295,10 +333,10 @@ namespace amFTPd.Core
             var sb = new StringBuilder();
             sb.AppendLine("211-FTP server status:");
             sb.AppendLine($" Connected: {(_s.Control.Connected ? "Yes" : "No")}");
-            sb.AppendLine($" Logged in: {(_s.LoggedIn ? "Yes" : "No")}");
+            sb.AppendLine($" Logged in: {(_s.Account is not null ? "Yes" : "No")}");
             sb.AppendLine($" User: {_s.UserName ?? "(none)"}");
             sb.AppendLine($" CWD: {_s.Cwd}");
-            sb.AppendLine("211 End of status.");
+            sb.AppendLine("211 End.");
 
             await _s.WriteAsync(sb.ToString().Replace("\n", "\r\n"), ct);
         }
@@ -307,7 +345,7 @@ namespace amFTPd.Core
 
         private async Task CWD(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -353,7 +391,7 @@ namespace amFTPd.Core
 
         private async Task CDUP(CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -588,7 +626,7 @@ namespace amFTPd.Core
 
         private async Task LIST(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -651,7 +689,7 @@ namespace amFTPd.Core
 
         private async Task NLST(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -714,7 +752,7 @@ namespace amFTPd.Core
 
         private async Task RETR(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -797,7 +835,7 @@ namespace amFTPd.Core
 
         private async Task STOR(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -869,7 +907,7 @@ namespace amFTPd.Core
 
         private async Task APPE(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -936,7 +974,7 @@ namespace amFTPd.Core
 
         private async Task REST(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -1142,7 +1180,7 @@ namespace amFTPd.Core
 
         private async Task SIZE(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
@@ -1193,7 +1231,7 @@ namespace amFTPd.Core
 
         private async Task MDTM(string arg, CancellationToken ct)
         {
-            if (!_s.LoggedIn)
+            if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;

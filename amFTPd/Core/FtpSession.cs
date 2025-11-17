@@ -60,6 +60,7 @@ internal sealed class FtpSession : IAsyncDisposable
     {
         Account = account;
         UserName = account.UserName;
+        LoggedIn = true; // ensure the session is considered logged in
     }
 
     public FtpSession(

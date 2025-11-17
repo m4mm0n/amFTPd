@@ -40,6 +40,7 @@ internal sealed partial class FtpCommandRouter
     private AMScriptEngine? _sectionRoutingScript;
     private AMScriptEngine? _siteScript;
     private AMScriptEngine? _userScript;
+    private AMScriptEngine? _groupScript;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpCommandRouter"/> class, which is responsible for routing and
@@ -179,6 +180,7 @@ internal sealed partial class FtpCommandRouter
         _siteScript = site;
     }
     public void AttachUserScript(AMScriptEngine? script) => _userScript = script;
+    public void AttachGroupScript(AMScriptEngine? script) => _groupScript = script;
 
     private FtpSection GetSectionForVirtual(string virtPath)
     {

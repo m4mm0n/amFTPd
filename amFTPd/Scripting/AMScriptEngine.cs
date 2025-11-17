@@ -125,6 +125,20 @@ public sealed class AMScriptEngine
     /// <returns>An <see cref="AMScriptResult"/> representing the outcome of the evaluation.</returns>
     public AMScriptResult EvaluateUser(AMScriptContext ctx) 
         => EvaluateInternal(ctx);
+    /// <summary>
+    /// Evaluates the provided context against the group-related rules defined in the AMScript file.
+    /// </summary>
+    /// <param name="ctx">The context containing information about the current operation, such as user group, section, and file details.</param>
+    /// <returns>
+    /// An <see cref="AMScriptResult"/> indicating the result of the evaluation, including the action to be taken
+    /// (e.g., allow, deny, or no change), and any additional information such as messages or limits.
+    /// </returns>
+    /// <remarks>
+    /// This method processes the rules specific to user groups and determines the appropriate action based on the
+    /// conditions defined in the AMScript file.
+    /// </remarks>
+    public AMScriptResult EvaluateGroup(AMScriptContext ctx)
+        => EvaluateInternal(ctx);
 
     // Generic: we treat download/upload same in v1, context decides meaning
     private AMScriptResult EvaluateInternal(AMScriptContext ctx)
