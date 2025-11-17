@@ -59,5 +59,33 @@ namespace amFTPd.Security
                 // Default: allow unless you want a strict whitelist
                 _ => true
             };
+        /// <summary>
+        /// Returns true if the given command is allowed before the user has logged in.
+        /// All non-whitelisted commands should get a "530 Please login" response.
+        /// </summary>
+        public static bool IsCommandAllowedUnauthenticated(string command)
+            => command.ToUpperInvariant() switch
+            {
+                // Auth / TLS negotiation
+                "USER" => true,
+                "PASS" => true,
+                "AUTH" => true,
+                "PBSZ" => true,
+                "PROT" => true,
+
+                // Informational / meta
+                "FEAT" => true,
+                "SYST" => true,
+                "NOOP" => true,
+                "OPTS" => true,
+                "HELP" => true,
+                "STAT" => true,
+
+                // Session shutdown
+                "QUIT" => true,
+
+                // Everything else requires login
+                _ => false
+            };
     }
 }

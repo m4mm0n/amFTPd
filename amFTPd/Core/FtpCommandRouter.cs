@@ -91,6 +91,16 @@ internal sealed partial class FtpCommandRouter
         _log.Log(FtpLogLevel.Debug, $"CMD: {cmd} ARG: {arg}");
 
         // ------------------------------------------------------------------
+        // Unauthenticated command whitelist (central)
+        // ------------------------------------------------------------------
+        if (_s.Account is null &&
+            !FtpAuthorization.IsCommandAllowedUnauthenticated(cmd))
+        {
+            await _s.WriteAsync("530 Please login with USER and PASS.\r\n", ct);
+            return;
+        }
+
+        // ------------------------------------------------------------------
         // AMSCRIPT GROUP RULES (per-command)
         // ------------------------------------------------------------------
         if (_groupScript is not null &&
@@ -109,6 +119,16 @@ internal sealed partial class FtpCommandRouter
                 await _s.WriteAsync(msg, ct);
                 return; // skip actual command handling
             }
+        }
+
+        // ------------------------------------------------------------------
+        // Static per-user permission checks (FtpUser flags)
+        // ------------------------------------------------------------------
+        if (_s.Account is not null &&
+            !FtpAuthorization.IsCommandAllowedForUser(_s.Account, cmd, arg))
+        {
+            await _s.WriteAsync("550 Permission denied.\r\n", ct);
+            return;
         }
 
         // ------------------------------------------------------------------
