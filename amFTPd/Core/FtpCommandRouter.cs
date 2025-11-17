@@ -23,6 +23,7 @@ namespace amFTPd.Core;
 /// configuration to perform its operations.</remarks>
 internal sealed partial class FtpCommandRouter
 {
+    private const int DataBufferSize = 64 * 1024;
     private readonly FtpSession _s;
     private readonly IFtpLogger _log;
     private readonly FtpFileSystem _fs;
@@ -234,70 +235,64 @@ internal sealed partial class FtpCommandRouter
     }
 
     private static async Task<long> CopyWithThrottleAsync(
-        Stream source,
-        Stream destination,
+        Stream input,
+        Stream output,
         int maxKbps,
         CancellationToken ct)
     {
-        const int bufferSize = 16 * 1024;
-        var buffer = new byte[bufferSize];
+        var buffer = new byte[DataBufferSize];
+        long total = 0;
 
-        // Unlimited: we still count bytes manually
+        // No limit? Just copy
         if (maxKbps <= 0)
         {
-            long total = 0;
             int read;
-            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+            while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
             {
-                await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+                await output.WriteAsync(buffer.AsMemory(0, read), ct);
                 total += read;
             }
+
+            await output.FlushAsync(ct);
             return total;
         }
 
-        long totalBytes = 0;
-        var bytesPerSecondLimit = maxKbps * 1024L;
+        // Throttled copy
+        var maxBytesPerSecond = maxKbps * 1024L;
         long bytesThisWindow = 0;
-        var windowStartTicks = Stopwatch.GetTimestamp();
-        double ticksPerSecond = Stopwatch.Frequency;
+        var sw = Stopwatch.StartNew();
 
-        while (true)
+        int r;
+        while ((r = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
         {
-            var read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
-            if (read <= 0)
-                break;
+            await output.WriteAsync(buffer.AsMemory(0, r), ct);
+            total += r;
+            bytesThisWindow += r;
 
-            await destination.WriteAsync(buffer.AsMemory(0, read), ct);
-            totalBytes += read;
-            bytesThisWindow += read;
+            var elapsedMs = sw.ElapsedMilliseconds;
 
-            var elapsedSeconds = (Stopwatch.GetTimestamp() - windowStartTicks) / ticksPerSecond;
-            if (elapsedSeconds > 0)
+            if (elapsedMs >= 1000)
             {
-                var currentRate = bytesThisWindow / elapsedSeconds; // bytes/s
-                if (currentRate > bytesPerSecondLimit)
-                {
-                    var desiredSeconds = (double)bytesThisWindow / bytesPerSecondLimit;
-                    var sleepSeconds = desiredSeconds - elapsedSeconds;
-                    if (sleepSeconds > 0)
-                    {
-                        var delayMs = (int)(sleepSeconds * 1000.0);
-                        if (delayMs > 0)
-                            await Task.Delay(delayMs, ct);
-                    }
-                }
+                // New window
+                sw.Restart();
+                bytesThisWindow = 0;
+            }
+            else if (bytesThisWindow > maxBytesPerSecond)
+            {
+                // We’ve exceeded the budget for this second
+                var remainingMs = 1000 - (int)elapsedMs;
+                if (remainingMs > 0)
+                    await Task.Delay(remainingMs, ct);
 
-                if (elapsedSeconds >= 1.0)
-                {
-                    windowStartTicks = Stopwatch.GetTimestamp();
-                    bytesThisWindow = 0;
-                }
+                sw.Restart();
+                bytesThisWindow = 0;
             }
         }
 
-        return totalBytes;
+        await output.FlushAsync(ct);
+        return total;
     }
-    
+
     private async Task<bool> CheckDownloadCreditsAsync(FtpSection section, long bytes, CancellationToken ct)
     {
         var account = _s.Account;
@@ -307,7 +302,7 @@ internal sealed partial class FtpCommandRouter
         var kb = bytes / 1024;
         if (kb <= 0) return true;
 
-        long cost = kb;
+        var cost = kb;
 
         // Apply section ratio first (your original logic)
         if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
@@ -352,7 +347,7 @@ internal sealed partial class FtpCommandRouter
         var kb = bytes / 1024;
         if (kb <= 0) return;
 
-        long cost = kb;
+        var cost = kb;
 
         if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
         {

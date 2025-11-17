@@ -104,7 +104,7 @@ namespace amFTPd.Core
         {
             var acc = _s.Account ?? CreatePseudoUser();
 
-            string virt = _s.Cwd;
+            var virt = _s.Cwd;
 
             string phys;
             try
@@ -311,6 +311,21 @@ namespace amFTPd.Core
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
+            }
+
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("CWD", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 CWD denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
             }
 
             var newV = FtpPath.Normalize(_s.Cwd, arg);
@@ -579,6 +594,21 @@ namespace amFTPd.Core
                 return;
             }
 
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("LIST", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 LIST denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
             string phys;
             try
@@ -625,6 +655,21 @@ namespace amFTPd.Core
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
+            }
+
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("NLST", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 NLST denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
             }
 
             var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
@@ -679,6 +724,21 @@ namespace amFTPd.Core
             {
                 await _s.WriteAsync("550 Download not allowed for this user.\r\n", ct);
                 return;
+            }
+
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("RETR", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 RETR denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(arg))
@@ -749,6 +809,21 @@ namespace amFTPd.Core
                 return;
             }
 
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("STOR", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 STOR denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(arg))
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
@@ -806,6 +881,21 @@ namespace amFTPd.Core
                 return;
             }
 
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("APPE", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 APPE denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(arg))
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
@@ -852,7 +942,22 @@ namespace amFTPd.Core
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(arg) || !long.TryParse(arg, out var offset) || offset < 0)
+            // AMScript user-based rule (optional)
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("REST", arg);
+                var res = _userScript.EvaluateDownload(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.DenyReason ?? "550 REST denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
+            if (!long.TryParse(arg, out var offset) || offset < 0)
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
                 return;
@@ -866,6 +971,21 @@ namespace amFTPd.Core
 
         private async Task DELE(string arg, CancellationToken ct)
         {
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("DELE", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 DELE denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             var target = FtpPath.Normalize(_s.Cwd, arg);
             string phys;
             try
@@ -891,6 +1011,21 @@ namespace amFTPd.Core
 
         private async Task MKD(string arg, CancellationToken ct)
         {
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("MKD", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 MKD denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             var target = FtpPath.Normalize(_s.Cwd, arg);
             string phys;
             try
@@ -909,6 +1044,21 @@ namespace amFTPd.Core
 
         private async Task RMD(string arg, CancellationToken ct)
         {
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("RMD", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 RMD denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             var target = FtpPath.Normalize(_s.Cwd, arg);
             string phys;
             try
@@ -934,6 +1084,21 @@ namespace amFTPd.Core
 
         private async Task RNTO(string arg, CancellationToken ct)
         {
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("RNTO", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 RNTO denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(_s.RenameFrom))
             {
                 await _s.WriteAsync(FtpResponses.BadSeq, ct);
@@ -983,6 +1148,21 @@ namespace amFTPd.Core
                 return;
             }
 
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("SIZE", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 SIZE denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(arg))
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
@@ -1017,6 +1197,21 @@ namespace amFTPd.Core
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
                 return;
+            }
+
+            // AMScript user-based rule
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("MDTM", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 MDTM denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(arg))

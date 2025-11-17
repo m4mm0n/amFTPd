@@ -13,8 +13,18 @@ public sealed class AMScriptEngine
     private readonly string _filePath;
     private FileSystemWatcher? _watcher;
 
+    /// <summary>
+    /// Gets or sets the delegate used to log debug messages.
+    /// </summary>
+    /// <remarks>Use this property to provide a custom logging mechanism for debug messages.  Assign a
+    /// delegate that processes or outputs the debug messages as needed.</remarks>
     public Action<string>? DebugLog { get; set; }
-
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AMScriptEngine"/> class with the specified script file path.
+    /// </summary>
+    /// <remarks>The constructor loads the script file and sets up a file watcher to monitor changes to the
+    /// specified file. Ensure the provided file path is valid and accessible.</remarks>
+    /// <param name="filePath">The path to the script file to be loaded and monitored. Cannot be null or empty.</param>
     public AMScriptEngine(string filePath)
     {
         _filePath = filePath;
@@ -25,7 +35,13 @@ public sealed class AMScriptEngine
     // ---------------------------------------------------------
     // Load + Watch
     // ---------------------------------------------------------
-
+    /// <summary>
+    /// Loads rules from the specified file and populates the internal rule collection.
+    /// </summary>
+    /// <remarks>This method reads the file located at the path specified by <c>_filePath</c>. Each line in
+    /// the file is processed to extract rules in the format <c>if(condition) action;</c>. Lines that are empty, start
+    /// with a comment character (<c>#</c>), or do not conform to the expected format are ignored. If the file does not
+    /// exist, the method logs a message and exits without modifying the rule collection.</remarks>
     public void Load()
     {
         _rules.Clear();
@@ -47,8 +63,8 @@ public sealed class AMScriptEngine
             if (!line.StartsWith("if", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            int start = line.IndexOf('(');
-            int end = line.IndexOf(')');
+            var start = line.IndexOf('(');
+            var end = line.IndexOf(')');
             if (start < 0 || end < start) continue;
 
             var cond = line.Substring(start + 1, end - start - 1).Trim();
@@ -87,23 +103,34 @@ public sealed class AMScriptEngine
     // ---------------------------------------------------------
     // Public evaluation entrypoints
     // ---------------------------------------------------------
-
+    /// <summary>
+    /// Evaluates the download operation within the specified context.
+    /// </summary>
+    /// <param name="ctx">The context in which the download evaluation is performed. This parameter cannot be null.</param>
+    /// <returns>An <see cref="AMScriptResult"/> representing the result of the evaluation.</returns>
     public AMScriptResult EvaluateDownload(AMScriptContext ctx)
         => EvaluateInternal(ctx);
-
+    /// <summary>
+    /// Evaluates the provided upload context and returns the result of the evaluation.
+    /// </summary>
+    /// <param name="ctx">The context of the upload to be evaluated, containing relevant data and parameters.</param>
+    /// <returns>An <see cref="AMScriptResult"/> representing the outcome of the evaluation.</returns>
     public AMScriptResult EvaluateUpload(AMScriptContext ctx)
+        => EvaluateInternal(ctx);
+    /// <summary>
+    /// Evaluates the user within the specified AMScript context and returns the result of the evaluation.
+    /// </summary>
+    /// <param name="ctx">The <see cref="AMScriptContext"/> containing the context information for the evaluation. This parameter cannot
+    /// be null.</param>
+    /// <returns>An <see cref="AMScriptResult"/> representing the outcome of the evaluation.</returns>
+    public AMScriptResult EvaluateUser(AMScriptContext ctx) 
         => EvaluateInternal(ctx);
 
     // Generic: we treat download/upload same in v1, context decides meaning
     private AMScriptResult EvaluateInternal(AMScriptContext ctx)
     {
-        foreach (var rule in _rules)
-        {
-            if (EvaluateCondition(ctx, rule.Condition))
-            {
-                return ApplyAction(ctx, rule.Action);
-            }
-        }
+        foreach (var rule in _rules.Where(rule => EvaluateCondition(ctx, rule.Condition)))
+            return ApplyAction(ctx, rule.Action);
 
         return AMScriptResult.NoChange(ctx);
     }
@@ -119,49 +146,66 @@ public sealed class AMScriptEngine
 
         // OR
         var orParts = cond.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var or in orParts)
-        {
-            if (EvaluateAndPart(ctx, or))
-                return true;
-        }
-        return false;
+        return orParts.Any(or => EvaluateAndPart(ctx, or));
     }
 
     private bool EvaluateAndPart(AMScriptContext ctx, string cond)
     {
         var andParts = cond.Split(new[] { "&&" }, StringSplitOptions.RemoveEmptyEntries);
-        foreach (var part in andParts)
-        {
-            if (!EvaluateAtomic(ctx, part.Trim()))
-                return false;
-        }
-        return true;
+        return andParts.All(part => EvaluateAtomic(ctx, part.Trim()));
     }
 
     private bool EvaluateAtomic(AMScriptContext ctx, string atom)
     {
         atom = atom.Trim();
-        if (atom.Length == 0) return false;
+        if (atom.Length == 0)
+            return false;
 
-        // !expr
+        // Handle unary NOT
         if (atom[0] == '!')
             return !EvaluateAtomic(ctx, atom[1..].Trim());
 
+        string op = null!;
+        string left = null!, right = null!;
+
+        // Determine operator
         if (atom.Contains("==", StringComparison.Ordinal))
         {
-            var p = atom.Split(new[] { "==" }, 2, StringSplitOptions.None);
-            return GetValue(ctx, p[0].Trim()) == GetValue(ctx, p[1].Trim());
+            op = "==";
         }
-
-        if (atom.Contains("!=", StringComparison.Ordinal))
+        else if (atom.Contains("!=", StringComparison.Ordinal))
         {
-            var p = atom.Split(new[] { "!=" }, 2, StringSplitOptions.None);
-            return GetValue(ctx, p[0].Trim()) != GetValue(ctx, p[1].Trim());
+            op = "!=";
+        }
+        else
+        {
+            op = "bool";
         }
 
-        // Boolean check: treat token as variable
-        var v = GetValue(ctx, atom);
-        return v.Equals("true", StringComparison.OrdinalIgnoreCase);
+        switch (op)
+        {
+            case "==":
+            {
+                var parts = atom.Split(new[] { "==" }, 2, StringSplitOptions.None);
+                left = parts[0].Trim();
+                right = parts[1].Trim();
+                return GetValue(ctx, left) == GetValue(ctx, right);
+            }
+
+            case "!=":
+            {
+                var parts = atom.Split(new[] { "!=" }, 2, StringSplitOptions.None);
+                left = parts[0].Trim();
+                right = parts[1].Trim();
+                return GetValue(ctx, left) != GetValue(ctx, right);
+            }
+
+            case "bool":
+            default:
+                // Treat variable token as boolean
+                var v = GetValue(ctx, atom);
+                return v.Equals("true", StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     private string GetValue(AMScriptContext ctx, string token)
@@ -195,96 +239,105 @@ public sealed class AMScriptEngine
     {
         action = action.Trim();
 
-        if (action.Equals("return allow", StringComparison.OrdinalIgnoreCase))
-            return AMScriptResult.Allow(ctx);
-
-        if (action.Equals("return deny", StringComparison.OrdinalIgnoreCase))
-            return AMScriptResult.Deny(ctx);
-
-        long cost = ctx.CostDownload;
-        long earn = ctx.EarnedUpload;
+        var cost = ctx.CostDownload;
+        var earn = ctx.EarnedUpload;
         string? msg = null;
 
-        // Very simple grammar: single statement, v1
-        if (action.StartsWith("cost_download", StringComparison.OrdinalIgnoreCase))
-        {
-            ParseNumericAssignment(action, ref cost);
-        }
-        if (action.StartsWith("earned_upload", StringComparison.OrdinalIgnoreCase))
-        {
-            ParseNumericAssignment(action, ref earn);
-        }
-        if (action.StartsWith("log", StringComparison.OrdinalIgnoreCase))
-        {
-            var body = action["log".Length..].Trim();
-            if (body.Length >= 2 && body[0] == '"' && body[^1] == '"')
-                msg = body[1..^1];
-            DebugLog?.Invoke($"[AMScript] {msg}");
-        }
-        // return deny "message"
-        if (action.StartsWith("return deny", StringComparison.OrdinalIgnoreCase))
-        {
-            msg = action["return deny".Length..].Trim().Trim('"');
-            return AMScriptResult.DenyWithReason(msg);
-        }
+        // single first token
+        var first = action.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var keyword = first.Length > 0 ? first[0].ToLowerInvariant() : string.Empty;
+        var rest = first.Length > 1 ? first[1] : string.Empty;
 
-        // return output "TEXT"
-        if (action.StartsWith("return output", StringComparison.OrdinalIgnoreCase))
+        switch (keyword)
         {
-            msg = action["return output".Length..].Trim().Trim('"');
-            return AMScriptResult.CustomOutput(msg);
-        }
+            case "return":
+                {
+                    // handle the "return ____" subcommands
+                    var parts = rest.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    var sub = parts.Length > 0 ? parts[0].ToLowerInvariant() : string.Empty;
+                    var tail = parts.Length > 1 ? parts[1] : string.Empty;
 
-        // return override (for SITE)
-        if (action.StartsWith("return override", StringComparison.OrdinalIgnoreCase))
-        {
-            return AMScriptResult.SiteOverride();
-        }
+                    switch (sub)
+                    {
+                        case "allow":
+                            return AMScriptResult.Allow(ctx);
 
-        // return section "NAME"
-        if (action.StartsWith("return section", StringComparison.OrdinalIgnoreCase))
-        {
-            var name = action["return section".Length..].Trim().Trim('"');
-            return new AMScriptResult(
-                AMRuleAction.Allow,
-                ctx.CostDownload,
-                ctx.EarnedUpload,
-                Message: $"SECTION_OVERRIDE::{name}"
-            );
-        }
+                        case "deny":
+                            // return deny "message"
+                            msg = tail.Trim().Trim('"');
+                            return AMScriptResult.DenyWithReason(msg);
 
-        // return set_dl 123
-        if (action.StartsWith("return set_dl", StringComparison.OrdinalIgnoreCase))
-        {
-            var v = int.Parse(action["return set_dl".Length..].Trim());
-            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
-                NewDownloadLimit: v);
-        }
+                        case "output":
+                            msg = tail.Trim().Trim('"');
+                            return AMScriptResult.CustomOutput(msg);
 
-        // return set_ul 456
-        if (action.StartsWith("return set_ul", StringComparison.OrdinalIgnoreCase))
-        {
-            var v = int.Parse(action["return set_ul".Length..].Trim());
-            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
-                NewUploadLimit: v);
-        }
+                        case "override":
+                            return AMScriptResult.SiteOverride();
 
-        // return add_credits 100
-        if (action.StartsWith("return add_credits", StringComparison.OrdinalIgnoreCase))
-        {
-            var v = long.Parse(action["return add_credits".Length..].Trim());
-            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
-                CreditDelta: v);
-        }
+                        case "section":
+                            var sectionName = tail.Trim().Trim('"');
+                            return new AMScriptResult(
+                                AMRuleAction.Allow,
+                                ctx.CostDownload,
+                                ctx.EarnedUpload,
+                                Message: $"SECTION_OVERRIDE::{sectionName}"
+                            );
 
-        // return sub_credits 50
-        if (action.StartsWith("return sub_credits", StringComparison.OrdinalIgnoreCase))
-        {
-            var v = long.Parse(action["return sub_credits".Length..].Trim());
-            return new AMScriptResult(AMRuleAction.Allow, ctx.CostDownload, ctx.EarnedUpload,
-                CreditDelta: -v);
-        }
+                        case "set_dl":
+                            var dl = int.Parse(tail);
+                            return new AMScriptResult(
+                                AMRuleAction.Allow,
+                                ctx.CostDownload,
+                                ctx.EarnedUpload,
+                                NewDownloadLimit: dl
+                            );
 
+                        case "set_ul":
+                            var ul = int.Parse(tail);
+                            return new AMScriptResult(
+                                AMRuleAction.Allow,
+                                ctx.CostDownload,
+                                ctx.EarnedUpload,
+                                NewUploadLimit: ul
+                            );
+
+                        case "add_credits":
+                            var add = long.Parse(tail);
+                            return new AMScriptResult(
+                                AMRuleAction.Allow,
+                                ctx.CostDownload,
+                                ctx.EarnedUpload,
+                                CreditDelta: add
+                            );
+
+                        case "sub_credits":
+                            var subc = long.Parse(tail);
+                            return new AMScriptResult(
+                                AMRuleAction.Allow,
+                                ctx.CostDownload,
+                                ctx.EarnedUpload,
+                                CreditDelta: -subc
+                            );
+                    }
+
+                    break;
+                }
+
+            case "cost_download":
+                ParseNumericAssignment(action, ref cost);
+                break;
+
+            case "earned_upload":
+                ParseNumericAssignment(action, ref earn);
+                break;
+
+            case "log":
+                var body = action["log".Length..].Trim();
+                if (body.Length >= 2 && body[0] == '"' && body[^1] == '"')
+                    msg = body[1..^1];
+                DebugLog?.Invoke($"[AMScript] {msg}");
+                break;
+        }
 
         return new AMScriptResult(AMRuleAction.None, cost, earn, msg);
     }

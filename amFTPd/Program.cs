@@ -26,16 +26,16 @@ namespace amFTPd
                 logger,
                 runtime.Sections);
 
-            $"[amFTPd] Root path : {runtime.FtpConfig.RootPath}".WriteStyledLogLine();
-            $"[amFTPd] Bind      : {runtime.FtpConfig.BindAddress}:{runtime.FtpConfig.Port}".WriteStyledLogLine();
-            $"[amFTPd] Users DB  : {Path.GetFullPath(configFile)}".WriteStyledLogLine();
+            logger.Log(FtpLogLevel.Info, $"[amFTPd] Root path : {runtime.FtpConfig.RootPath}");
+            logger.Log(FtpLogLevel.Info, $"[amFTPd] Bind      : {runtime.FtpConfig.BindAddress}:{runtime.FtpConfig.Port}");
+            logger.Log(FtpLogLevel.Info, $"[amFTPd] Users DB  : {Path.GetFullPath(configFile)}");
 
             var serverTask = server.StartAsync();
 
             Console.CancelKeyPress += (_, e) =>
             {
                 e.Cancel = true;
-                "[amFTPd] Shutdown requested, stopping server...".WriteStyledLogLine();
+                logger.Log(FtpLogLevel.Info, "[amFTPd] Shutdown requested, stopping server...");
                 server.Stop();
             };
 
@@ -48,7 +48,8 @@ namespace amFTPd
                 logger.Log(FtpLogLevel.Error, "Server crashed", ex);
             }
 
-            "[amFTPd] Server stopped.".WriteStyledLogLine();
+            logger.Log(FtpLogLevel.Info, "[amFTPd] Server stopped.");
+            logger.Dispose();
         }
 
         static void PrintBanner()
