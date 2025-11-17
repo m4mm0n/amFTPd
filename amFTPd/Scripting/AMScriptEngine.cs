@@ -126,17 +126,10 @@ public sealed class AMScriptEngine
     public AMScriptResult EvaluateUser(AMScriptContext ctx) 
         => EvaluateInternal(ctx);
     /// <summary>
-    /// Evaluates the provided context against the group-related rules defined in the AMScript file.
+    /// 
     /// </summary>
-    /// <param name="ctx">The context containing information about the current operation, such as user group, section, and file details.</param>
-    /// <returns>
-    /// An <see cref="AMScriptResult"/> indicating the result of the evaluation, including the action to be taken
-    /// (e.g., allow, deny, or no change), and any additional information such as messages or limits.
-    /// </returns>
-    /// <remarks>
-    /// This method processes the rules specific to user groups and determines the appropriate action based on the
-    /// conditions defined in the AMScript file.
-    /// </remarks>
+    /// <param name="ctx"></param>
+    /// <returns></returns>
     public AMScriptResult EvaluateGroup(AMScriptContext ctx)
         => EvaluateInternal(ctx);
 

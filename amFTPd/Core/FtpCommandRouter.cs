@@ -91,18 +91,23 @@ internal sealed partial class FtpCommandRouter
         _log.Log(FtpLogLevel.Debug, $"CMD: {cmd} ARG: {arg}");
 
         // ------------------------------------------------------------------
-        // AMSCRIPT USER RULES (per-command)
+        // AMSCRIPT GROUP RULES (per-command)
         // ------------------------------------------------------------------
-        if (_userScript is not null && _s.Account != null)
+        if (_groupScript is not null &&
+            _s.Account is not null &&
+            !string.IsNullOrWhiteSpace(_s.Account.GroupName))
         {
-            var ctx = BuildUserContext(cmd, arg);
-            var rule = _userScript.EvaluateDownload(ctx);
+            var gctx = BuildUserContext(cmd, arg);
+            var gRes = _groupScript.EvaluateGroup(gctx);
 
-            if (rule.Action == AMRuleAction.Deny)
+            if (gRes.Action == AMRuleAction.Deny)
             {
-                var reason = rule.DenyReason ?? "550 Command denied by policy.";
-                await _s.WriteAsync(reason + "\r\n", ct);
-                return; // skip command execution entirely
+                var msg = gRes.DenyReason ?? "550 Command denied by group policy.\r\n";
+                if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                    msg += "\r\n";
+
+                await _s.WriteAsync(msg, ct);
+                return; // skip actual command handling
             }
         }
 
