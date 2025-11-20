@@ -131,6 +131,10 @@ internal sealed class FtpSession : IAsyncDisposable
     /// Gets or sets the offset value used to determine the starting point for processing or retrieval operations.
     /// </summary>
     public long? RestOffset { get; set; }
+    /// <summary>
+    /// Gets the identifier of the remote entity associated with this instance.
+    /// </summary>
+    public string? RemoteIdent { get; private set; }
     #endregion
     /// <summary>
     /// Sets the current FTP user account and updates the session state.
@@ -375,6 +379,86 @@ internal sealed class FtpSession : IAsyncDisposable
                     break;
             }
         }
+    }
+    /// <summary>
+    /// Queries the remote client for its user identifier (IDENT) using the Identification Protocol (RFC 1413).
+    /// </summary>
+    /// <remarks>This method attempts to establish a connection to the remote client's IDENT service on port
+    /// 113 and sends a query based on the local and remote port numbers. The response is parsed to extract the user
+    /// identifier. If the IDENT service is unreachable, times out, or returns an invalid response, the method returns
+    /// <see langword="null"/>.</remarks>
+    /// <param name="ct">A <see cref="CancellationToken"/> to observe while waiting for the operation to complete.</param>
+    /// <returns>A <see cref="string"/> containing the user identifier provided by the remote client, or <see langword="null"/>
+    /// if the identifier cannot be retrieved or the IDENT service is unavailable.</returns>
+    public async Task<string?> QueryIdentAsync(CancellationToken ct)
+    {
+        if (Control.Client.RemoteEndPoint is not IPEndPoint remote ||
+            Control.Client.LocalEndPoint is not IPEndPoint local)
+            return null;
+
+        // RFC 1413: query is "server-port , client-port"
+        // server-port = local.Port (our FTP server)
+        // client-port = remote.Port (client's ephemeral port)
+        var serverPort = local.Port;
+        var clientPort = remote.Port;
+
+        using var identClient = new TcpClient();
+        try
+        {
+            // Small timeout so ident can't hang login forever.
+            identClient.ReceiveTimeout = 5000;
+            identClient.SendTimeout = 5000;
+
+            await identClient.ConnectAsync(remote.Address, 113, ct);
+        }
+        catch
+        {
+            // Ident not reachable
+            return null;
+        }
+
+        await using var stream = identClient?.GetStream();
+
+        var query = Encoding.ASCII.GetBytes($"{serverPort} , {clientPort}\r\n");
+        try
+        {
+            await stream?.WriteAsync(query, 0, query.Length, ct);
+            await stream?.FlushAsync(ct);
+        }
+        catch
+        {
+            return null;
+        }
+
+        var buffer = new byte[512];
+        int read;
+        try
+        {
+            read = await stream?.ReadAsync(buffer, 0, buffer.Length, ct);
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (read <= 0)
+            return null;
+
+        var resp = Encoding.ASCII.GetString(buffer, 0, read);
+
+        // Expected format:
+        // "server-port , client-port : USERID : <OS> : <username>\r\n"
+        var parts = resp.Split(':');
+        if (parts.Length < 3)
+            return null;
+
+        var userField = parts[^1].Trim();
+
+        if (string.IsNullOrWhiteSpace(userField))
+            return null;
+
+        RemoteIdent = userField;
+        return userField;
     }
     /// <summary>
     /// Asynchronously releases the resources used by the current instance.

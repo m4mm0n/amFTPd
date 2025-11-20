@@ -16,6 +16,7 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
 using System.Net;
@@ -193,6 +194,39 @@ namespace amFTPd.Core
             {
                 await _s.WriteAsync("530 Login incorrect.\r\n", ct);
                 return;
+            }
+
+            // ------------------------------------------------------------------
+            // IDENT ENFORCEMENT (if configured for this user)
+            // ------------------------------------------------------------------
+            if ((account.RequireIdentMatch || !string.IsNullOrWhiteSpace(account.RequiredIdent)))
+            {
+                var identName = await _s.QueryIdentAsync(ct);
+
+                if (identName is null)
+                {
+                    if (account.RequireIdentMatch)
+                    {
+                        await _s.WriteAsync("530 Login denied: IDENT required but not available.\r\n", ct);
+                        return;
+                    }
+                    // If RequireIdentMatch is false but RequiredIdent is set, you can decide
+                    // whether to treat "no ident" as failure or just log it.
+                }
+                else
+                {
+                    // Case-insensitive compare is typically what you want here.
+                    if (!string.IsNullOrWhiteSpace(account.RequiredIdent) &&
+                        !identName.Equals(account.RequiredIdent, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _s.WriteAsync("530 Login denied: IDENT mismatch.\r\n", ct);
+                        return;
+                    }
+                }
+
+                // Optionally: log successful ident
+                _log.Log(FtpLogLevel.Debug,
+                    $"IDENT: user={account.UserName}, ident={identName ?? "<none>"}, required={account.RequiredIdent ?? "<none>"}");
             }
 
             // ------------------------------------------------------------------
