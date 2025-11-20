@@ -8,7 +8,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Text.RegularExpressions;
 using FtpSection = amFTPd.Config.Ftpd.FtpSection;
 
 namespace amFTPd.Core;
@@ -191,21 +190,38 @@ internal sealed partial class FtpCommandRouter
                 break;
         }
     }
+    /// <summary>
+    /// Attaches the specified script engines to their respective roles within the system.
+    /// </summary>
+    /// <remarks>This method assigns the provided script engines to their respective roles. Any parameter set
+    /// to <see langword="null"/> indicates that the corresponding role will not have an associated script
+    /// engine.</remarks>
+    /// <param name="credit">The script engine responsible for handling credit-related operations. Can be <see langword="null"/> if not
+    /// applicable.</param>
+    /// <param name="fxp">The script engine responsible for handling FXP-related operations. Can be <see langword="null"/> if not
+    /// applicable.</param>
+    /// <param name="active">The script engine responsible for managing active operations. Cannot be <see langword="null"/>.</param>
+    /// <param name="sectionRouting">The script engine responsible for section routing operations. Can be <see langword="null"/> if not applicable.</param>
+    /// <param name="site">The script engine responsible for site-related operations. Can be <see langword="null"/> if not applicable.</param>
+    /// <param name="users">The script engine responsible for user-related operations. Can be <see langword="null"/> if not applicable.</param>
+    /// <param name="groups">The script engine responsible for group-related operations. Can be <see langword="null"/> if not applicable.</param>
     public void AttachScriptEngines(
         AMScriptEngine? credit,
         AMScriptEngine? fxp,
         AMScriptEngine? active,
         AMScriptEngine? sectionRouting = null,
-        AMScriptEngine? site = null)
+        AMScriptEngine? site = null,
+        AMScriptEngine? users = null,
+        AMScriptEngine? groups = null)
     {
         _creditScript = credit;
         _fxpScript = fxp;
         _activeScript = active;
         _sectionRoutingScript = sectionRouting;
         _siteScript = site;
+        _userScript = users;
+        _groupScript = groups;
     }
-    public void AttachUserScript(AMScriptEngine? script) => _userScript = script;
-    public void AttachGroupScript(AMScriptEngine? script) => _groupScript = script;
 
     private FtpSection GetSectionForVirtual(string virtPath)
     {

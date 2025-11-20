@@ -60,7 +60,7 @@ public sealed class FtpServer
         _cts = new CancellationTokenSource();
         _listener = new TcpListener(new IPEndPoint(_cfg.BindAddress, _cfg.Port));
         _listener.Start();
-        _log.Log(FtpLogLevel.Info, $"FTP(S) server listening on {_cfg.BindAddress}:{_cfg.Port}");
+        _log.Log(FtpLogLevel.Info, $"Server listening on {_cfg.BindAddress}:{_cfg.Port}");
 
         // Shared filesystem instance
         var fs = new FtpFileSystem(_cfg.RootPath);
@@ -139,10 +139,9 @@ public sealed class FtpServer
                     fxpScript,
                     activeScript,
                     sectionRoutingScript,
-                    siteScript
+                    siteScript,
+                    userScript, groupScript
                 );
-                router.AttachUserScript(userScript);
-                router.AttachGroupScript(groupScript);
                 
                 var ct = _cts!.Token;
 
