@@ -1,4 +1,22 @@
-﻿using amFTPd.Config.Daemon;
+﻿/*
+ * ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-11-15
+ *  Last Modified:  2025-11-20
+ *  
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original
+ *      author.
+ * ====================================================================================================
+ */
+
+
+using amFTPd.Config.Daemon;
 using amFTPd.Core;
 using amFTPd.Logging;
 using System.Reflection;
