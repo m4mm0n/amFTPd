@@ -4,51 +4,63 @@ namespace amFTPd.Security
 {
     public static class FtpAuthorization
     {
+        /// <summary>
+        /// Per-user, per-command authorization based on FtpUser flags.
+        /// This is a coarse gate; individual handlers and AMScript may still
+        /// apply more specific checks (FXP rules, section rules, etc.).
+        /// </summary>
         public static bool IsCommandAllowedForUser(
             FtpUser user,
             string command,
             string? arguments)
             => command.ToUpperInvariant() switch
             {
-                // --- Login / negotiation: always allowed pre-login; once logged in it’s fine too ---
+                // --- Login / negotiation & meta: always allowed once logged in ---
                 "USER" => true,
                 "PASS" => true,
                 "AUTH" => true,
                 "PBSZ" => true,
                 "PROT" => true,
+
                 "FEAT" => true,
                 "SYST" => true,
+                "NOOP" => true,
+                "OPTS" => true,
+                "HELP" => true,
+                "STAT" => true,
+                "ALLO" => true,
+                "MODE" => true,
+                "STRU" => true,
+                "ABOR" => true,
+                "TYPE" => true,
                 "QUIT" => true,
 
-                // --- Purely informational / harmless commands, no extra restriction ---
-                "NOOP" => true,
-                "TYPE" => true,
-                "OPTS" => true,
-
-                // --- Download-ish: listing and retrieval ---
-                // If you want “list but no data download”, you can special-case LIST/NLST separately.
+                // --- Directory listing & download ---
+                // LIST / NLST / RETR => require download permission.
                 "LIST" or "NLST" or "RETR" =>
                     user.AllowDownload,
 
-                // --- Upload-ish ---
+                // --- Upload / write-ish operations ---
+                // STOR / APPE => actual data uploads.
                 "STOR" or "APPE" =>
                     user.AllowUpload,
 
-                // --- Directory modification ---
-                "MKD" or "RMD" or "DELE" or "RNFR" or "RNTO" =>
-                    user.AllowUpload, // treat as upload/write permission
+                // DELE / MKD / RMD / RNFR / RNTO => modifications to filesystem.
+                "DELE" or "MKD" or "RMD" or "RNFR" or "RNTO" =>
+                    user.AllowUpload,
 
-                // --- Changing working directory: often allowed if they can at least list/download ---
+                // --- Navigation ---
+                // Changing directories is generally allowed if user can at least read OR write.
                 "CWD" or "CDUP" =>
                     user.AllowDownload || user.AllowUpload,
 
-                // --- FXP (server-to-server transfers) ---
-                // Depending on your implementation, FXP may be triggered by PORT/EPRT or via a dedicated SITE command.
+                // --- Data connection setup ---
+                // Active mode requires AllowActiveMode; FXP specifics are handled
+                // later in the command handlers (using _isFxp + AllowFxp + AMScript).
                 "PORT" or "EPRT" =>
-                    user.AllowActiveMode && user.AllowFxp,
+                    user.AllowActiveMode,
 
-                // --- Active/Passive modes generally ---
-                // If you want to restrict active but not passive:
+                // Passive mode is generally allowed; FXP rules again live in handlers/scripts.
                 "PASV" or "EPSV" =>
                     true,
 
@@ -56,12 +68,13 @@ namespace amFTPd.Security
                 "SITE" =>
                     user.IsAdmin,
 
-                // Default: allow unless you want a strict whitelist
+                // Default: allow, and let handler/AMScript decide more fine-grained policy.
                 _ => true
             };
+
         /// <summary>
         /// Returns true if the given command is allowed before the user has logged in.
-        /// All non-whitelisted commands should get a "530 Please login" response.
+        /// Non-whitelisted commands should get a "530 Please login with USER and PASS." response.
         /// </summary>
         public static bool IsCommandAllowedUnauthenticated(string command)
             => command.ToUpperInvariant() switch
@@ -73,7 +86,7 @@ namespace amFTPd.Security
                 "PBSZ" => true,
                 "PROT" => true,
 
-                // Informational / meta
+                // Informational / harmless
                 "FEAT" => true,
                 "SYST" => true,
                 "NOOP" => true,
