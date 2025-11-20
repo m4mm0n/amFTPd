@@ -1,5 +1,28 @@
 ﻿namespace amFTPd.Config.Ftpd
 {
+    /// <summary>
+    /// Represents an FTP user with configurable permissions, resource limits, and access restrictions.
+    /// </summary>
+    /// <remarks>This record encapsulates the configuration and permissions for an FTP user, including
+    /// authentication details, directory access, bandwidth limits, and security settings. It is designed to be
+    /// immutable and thread-safe.</remarks>
+    /// <param name="UserName"></param>
+    /// <param name="PasswordHash"></param>
+    /// <param name="HomeDir"></param>
+    /// <param name="IsAdmin"></param>
+    /// <param name="AllowFxp"></param>
+    /// <param name="AllowUpload"></param>
+    /// <param name="AllowDownload"></param>
+    /// <param name="AllowActiveMode"></param>
+    /// <param name="MaxConcurrentLogins"></param>
+    /// <param name="IdleTimeout"></param>
+    /// <param name="MaxUploadKbps"></param>
+    /// <param name="MaxDownloadKbps"></param>
+    /// <param name="GroupName"></param>
+    /// <param name="CreditsKb"></param>
+    /// <param name="AllowedIpMask"></param>
+    /// <param name="RequireIdentMatch"></param>
+    /// <param name="RequiredIdent"></param>
     public sealed record FtpUser(
         string UserName,
         string PasswordHash,

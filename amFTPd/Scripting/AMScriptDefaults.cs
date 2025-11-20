@@ -9,6 +9,15 @@
     /// messages. These files are initialized with predefined content.</remarks>
     public static class AMScriptDefaults
     {
+        /// <summary>
+        /// Ensures that all required files and directories exist within the specified base directory.
+        /// </summary>
+        /// <remarks>This method verifies the existence of specific files within the given base directory.
+        /// If any of the required files are missing, they will be created with default content. The method ensures that
+        /// the directory structure and necessary files are in place for the application to function
+        /// correctly.</remarks>
+        /// <param name="baseDir">The path to the base directory where the required files and directories should be created. If the directory
+        /// does not exist, it will be created.</param>
         public static void EnsureAll(string baseDir)
         {
             Directory.CreateDirectory(baseDir);

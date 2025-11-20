@@ -1,6 +1,22 @@
 ﻿namespace amFTPd.Scripting;
 
-
+/// <summary>
+/// Represents the context for an AMScript operation, providing details about the user, section, and file transfer
+/// parameters.
+/// </summary>
+/// <param name="IsFxp">Indicates whether the operation is an FXP (File eXchange Protocol) transfer. <see langword="true"/> if FXP;
+/// otherwise, <see langword="false"/>.</param>
+/// <param name="Section">The name of the section associated with the operation.</param>
+/// <param name="FreeLeech">Indicates whether the operation is marked as free leech. <see langword="true"/> if free leech; otherwise, <see
+/// langword="false"/>.</param>
+/// <param name="UserName">The name of the user performing the operation.</param>
+/// <param name="UserGroup">The group to which the user belongs.</param>
+/// <param name="Bytes">The total size of the file(s) involved in the operation, in bytes.</param>
+/// <param name="Kb">The total size of the file(s) involved in the operation, in kilobytes.</param>
+/// <param name="CostDownload">The cost, in bytes, associated with downloading the file(s).</param>
+/// <param name="EarnedUpload">The amount, in bytes, earned as upload credit from the operation.</param>
+/// <param name="VirtualPath">The virtual path associated with the operation. Defaults to an empty string if not specified.</param>
+/// <param name="PhysicalPath">The physical path associated with the operation. Defaults to an empty string if not specified.</param>
 public sealed record AMScriptContext(
     bool IsFxp,
     string Section,

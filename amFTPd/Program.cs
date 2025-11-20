@@ -6,8 +6,23 @@ using amFTPd.Utils;
 
 namespace amFTPd
 {
+    /// <summary>
+    /// Represents the entry point of the amFTPd application, a managed FTP daemon.
+    /// </summary>
+    /// <remarks>This class initializes the FTP server, loads the configuration, sets up logging, and handles
+    /// the server lifecycle, including graceful shutdown on cancellation requests.</remarks>
     internal class Program
     {
+        /// <summary>
+        /// The entry point of the application that initializes and starts the FTP server.
+        /// </summary>
+        /// <remarks>This method configures logging, loads the server configuration, and starts the FTP
+        /// server. It also handles graceful shutdown on receiving a cancellation signal (e.g., Ctrl+C). The
+        /// configuration file path can be provided as a command-line argument; otherwise, a default configuration file
+        /// named "amftpd.json" is used.</remarks>
+        /// <param name="args">An array of command-line arguments. The first argument, if provided, specifies the path to the server
+        /// configuration file.</param>
+        /// <returns>A task that represents the asynchronous operation of the server.</returns>
         static async Task Main(string[] args)
         {
             PrintBanner();
