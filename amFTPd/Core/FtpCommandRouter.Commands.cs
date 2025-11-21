@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-21
  *  
  *  License:
  *      MIT License
@@ -346,7 +346,7 @@ namespace amFTPd.Core
             => _s.WriteAsync(
                 "211-Features:\r\n" +
                 " UTF8\r\n EPSV\r\n EPRT\r\n PASV\r\n PBSZ\r\n PROT\r\n AUTH TLS\r\n" +
-                " SIZE\r\n MDTM\r\n REST STREAM\r\n" +
+                " SIZE\r\n MDTM\r\n REST STREAM\r\n MLSD\r\n MLST\r\n" +
                 "211 End\r\n", ct);
 
         private async Task OPTS(string arg, CancellationToken ct)
@@ -799,6 +799,140 @@ namespace amFTPd.Core
             }, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
+        }
+
+        private async Task MLSD(string arg, CancellationToken ct)
+        {
+            if (_s.Account is null)
+            {
+                await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
+                return;
+            }
+
+            // AMScript user-based rule (same pattern as LIST/NLST)
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("MLSD", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 MLSD denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
+            var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(target);
+            }
+            catch
+            {
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                return;
+            }
+
+            if (!Directory.Exists(phys) && !File.Exists(phys))
+            {
+                await _s.WriteAsync("550 Not found.\r\n", ct);
+                return;
+            }
+
+            await _s.WriteAsync(FtpResponses.FileOk, ct);
+
+            await _s.WithDataAsync(async stream =>
+            {
+                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+
+                if (Directory.Exists(phys))
+                {
+                    foreach (var dir in Directory.EnumerateDirectories(phys))
+                        await wr.WriteLineAsync(_fs.ToMlsdLine(new DirectoryInfo(dir)));
+
+                    foreach (var file in Directory.EnumerateFiles(phys))
+                        await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(file)));
+                }
+                else
+                {
+                    await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(phys)));
+                }
+            }, ct);
+
+            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+        }
+
+        private async Task MLST(string arg, CancellationToken ct)
+        {
+            if (_s.Account is null)
+            {
+                await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
+                return;
+            }
+
+            // AMScript user-based rule (same pattern as LIST/NLST/MLSD)
+            if (_userScript is not null && _s.Account is not null)
+            {
+                var ctx = BuildUserContext("MLST", arg);
+                var res = _userScript.EvaluateUser(ctx);
+                if (res.Action == AMRuleAction.Deny)
+                {
+                    var msg = res.Message ?? "550 MLST denied by policy.\r\n";
+                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
+                        msg += "\r\n";
+
+                    await _s.WriteAsync(msg, ct);
+                    return;
+                }
+            }
+
+            var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(target);
+            }
+            catch
+            {
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                return;
+            }
+
+            FileSystemInfo? fsi = null;
+
+            if (Directory.Exists(phys))
+            {
+                fsi = new DirectoryInfo(phys);
+            }
+            else if (File.Exists(phys))
+            {
+                fsi = new FileInfo(phys);
+            }
+
+            if (fsi is null)
+            {
+                await _s.WriteAsync("550 Not found.\r\n", ct);
+                return;
+            }
+
+            // Reuse the MLSD fact-line generator for MLST (single item).
+            var facts = _fs.ToMlsdLine(fsi);
+
+            // Simple RFC 3659-ish MLST response:
+            // 250-Listing
+            //  <facts>
+            // 250 End.
+            var sb = new StringBuilder();
+            sb.Append("250-Listing\r\n");
+            sb.Append(' ');
+            sb.AppendLine(facts);
+            sb.Append("250 End.\r\n");
+
+            await _s.WriteAsync(sb.ToString(), ct);
         }
 
         private async Task RETR(string arg, CancellationToken ct)

@@ -1,0 +1,26 @@
+﻿   ________  ________  ________  ________   ________  ________  ________ 
+  ╱    ╱   ╲╱        ╲╱        ╲╱        ╲ ╱        ╲╱        ╲╱    ╱   ╲
+ ╱         ╱         ╱         ╱        _╱_╱       ╱╱         ╱         ╱
+ ╲        ╱        _╱        _╱-        ╱╱         ╱         ╱         ╱ 
+  ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
+                           [ VERSION HISTORY ]
+
+[ v0.1.1.0 - 21.11.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+- Now includes a proper version history for each update, with partially detailed
+  information on whats changed in the source...
+
+Core/FtpFileSystem.cs:
++ added "ToMlsdLine"...
+
+Core/FtpCommandRouter.Commands.cs:
++ added "MLSD"...
++ added "MLST"...
+* changed "FEAT" to include MLSD and MLST support...
+
+Core/FtpCommandRouter.cs:
+* changed "HandleAsync" to include MLSD and MLST support...
+
+Security/FtpAuthorization.cs:
+* changed "IsCommandAllowedForUser" to include MLSD and MLST support...

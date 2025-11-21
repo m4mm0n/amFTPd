@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-21
  *  
  *  License:
  *      MIT License
@@ -75,6 +75,61 @@ internal sealed class FtpFileSystem
         var dt = fsi.LastWriteTime;
         sb.Append(dt.ToString("MMM dd HH:mm", CultureInfo.InvariantCulture)).Append(' ');
         sb.Append(fsi.Name);
+        return sb.ToString();
+    }
+    /// <summary>
+    /// Converts the specified <see cref="FileSystemInfo"/> object into an MLSD (Machine-Readable List Directory) line
+    /// as defined in RFC 3659.
+    /// </summary>
+    /// <param name="fsi">The <see cref="FileSystemInfo"/> object representing the file or directory to be converted.</param>
+    /// <returns>A string representing the MLSD line for the specified file or directory, including attributes such as
+    /// type, modification time, size, and permissions.</returns>
+    /// <remarks>
+    /// The generated MLSD line includes the following attributes:
+    /// - <c>type</c>: Indicates whether the entry is a file or directory.
+    /// - <c>modify</c>: The last modification time in UTC, formatted as YYYYMMDDHHMMSS.
+    /// - <c>size</c>: The size of the file in bytes (only for files).
+    /// - <c>perm</c>: Permissions, where directories have "el" (enter, list) and files have "rl" (read, list).
+    /// The name of the file or directory is appended at the end of the line.
+    /// </remarks>
+    public string ToMlsdLine(FileSystemInfo fsi)
+    {
+        var isDir = (fsi.Attributes & FileAttributes.Directory) != 0;
+
+        var sb = new StringBuilder();
+
+        // type
+        sb.Append("type=");
+        sb.Append(isDir ? "dir" : "file");
+        sb.Append(';');
+
+        // modify (UTC, RFC-3659 style YYYYMMDDHHMMSS)
+        var dt = fsi.LastWriteTimeUtc;
+        sb.Append("modify=");
+        sb.Append(dt.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture));
+        sb.Append(';');
+
+        // size (for files only)
+        if (!isDir && fsi is FileInfo fi)
+        {
+            sb.Append("size=");
+            sb.Append(fi.Length.ToString(CultureInfo.InvariantCulture));
+            sb.Append(';');
+        }
+
+        // very simple permissions model: dirs = el, files = rl
+        if (isDir)
+        {
+            sb.Append("perm=el;");
+        }
+        else
+        {
+            sb.Append("perm=rl;");
+        }
+
+        sb.Append(' ');
+        sb.Append(fsi.Name);
+
         return sb.ToString();
     }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-21
  *  
  *  License:
  *      MIT License
@@ -53,8 +53,8 @@ namespace amFTPd.Security
                 "QUIT" => true,
 
                 // --- Directory listing & download ---
-                // LIST / NLST / RETR => require download permission.
-                "LIST" or "NLST" or "RETR" =>
+                // LIST / NLST / MLSD / MLST / RETR => require download permission.
+                "LIST" or "NLST" or "MLSD" or "MLST" or "RETR" =>
                     user.AllowDownload,
 
                 // --- Upload / write-ish operations ---

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-21
  *  
  *  License:
  *      MIT License
@@ -187,6 +187,8 @@ internal sealed partial class FtpCommandRouter
             // Listing and transfer
             case "LIST": await LIST(arg, ct); break;
             case "NLST": await NLST(arg, ct); break;
+            case "MLSD": await MLSD(arg, ct); break;
+            case "MLST": await MLST(arg, ct); break;
             case "RETR": await RETR(arg, ct); break;
             case "STOR": await STOR(arg, ct); break;
             case "APPE": await APPE(arg, ct); break;
