@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -16,6 +16,8 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ident;
+using amFTPd.Config.Vfs;
 using amFTPd.Security;
 
 namespace amFTPd.Config.Daemon
@@ -45,5 +47,13 @@ namespace amFTPd.Config.Daemon
         /// Gets the TLS configuration settings required for secure communication.
         /// </summary>
         public required TlsConfig TlsConfig { get; init; }
+        /// <summary>
+        /// Gets the configuration settings for identity management.
+        /// </summary>
+        public required IdentConfig IdentConfig { get; init; }
+        /// <summary>
+        /// Gets the configuration settings for the virtual file system (VFS).
+        /// </summary>
+        public required VfsConfig VfsConfig { get; init; }
     }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -16,7 +16,9 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ident;
 using amFTPd.Config.Scripting;
+using amFTPd.Config.Vfs;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
@@ -44,23 +46,37 @@ public sealed class FtpServer
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private readonly SectionManager _sections;
+
+    private readonly IdentConfig _identCfg;
+    private readonly VfsConfig _vfsCfg;
     #endregion
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpServer"/> class with the specified configuration, user store,
-    /// TLS settings, logger, and section manager.
+    /// TLS settings, logger, section manager, identity configuration, and virtual file system configuration.
     /// </summary>
-    /// <param name="cfg">The configuration settings for the FTP server.</param>
-    /// <param name="users">The user store that manages authentication and user data.</param>
+    /// <param name="cfg">The FTP server configuration settings.</param>
+    /// <param name="users">The user store used to manage FTP user accounts.</param>
     /// <param name="tls">The TLS configuration for secure connections.</param>
-    /// <param name="log">The logger used to record server activity and diagnostics.</param>
-    /// <param name="sections">The section manager that handles server sections and their behavior.</param>
-    public FtpServer(FtpConfig cfg, IUserStore users, TlsConfig tls, IFtpLogger log, SectionManager sections)
+    /// <param name="log">The logger instance for recording server events and diagnostics.</param>
+    /// <param name="sections">The section manager responsible for managing server sections and their settings.</param>
+    /// <param name="identCfg">The identity configuration for managing authentication and identity-related settings.</param>
+    /// <param name="vfsCfg">The virtual file system configuration for managing file system operations.</param>
+    public FtpServer(
+        FtpConfig cfg,
+        IUserStore users,
+        TlsConfig tls,
+        IFtpLogger log,
+        SectionManager sections,
+        IdentConfig identCfg,
+        VfsConfig vfsCfg)
     {
         _cfg = cfg;
         _users = users;
         _tls = tls;
         _log = log;
         _sections = sections;
+        _identCfg = identCfg;
+        _vfsCfg = vfsCfg;
     }
     /// <summary>
     /// Starts the FTP(S) server and begins listening for incoming client connections.
@@ -146,7 +162,9 @@ public sealed class FtpServer
                     _users,
                     fs,
                     _cfg.DataChannelProtectionDefault,
-                    _tls);
+                    _tls,
+                    _identCfg,
+                    _vfsCfg);
 
                 var router = new FtpCommandRouter(session, _log, fs, _cfg, _tls, _sections);
 

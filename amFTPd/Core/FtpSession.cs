@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -16,6 +16,10 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ident;
+using amFTPd.Config.Vfs;
+using amFTPd.Core.Ident;
+using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Security;
 using System.Collections.Concurrent;
@@ -90,12 +94,6 @@ internal sealed class FtpSession : IAsyncDisposable
     /// </summary>
     public DateTimeOffset LastActivity { get; private set; } = DateTimeOffset.UtcNow;
     /// <summary>
-    /// Updates the <see cref="LastActivity"/> property to the current UTC date and time.
-    /// </summary>
-    /// <remarks>This method is typically used to record the most recent activity timestamp.  It sets the <see
-    /// cref="LastActivity"/> property to <see cref="DateTimeOffset.UtcNow"/>.</remarks>
-    public void Touch() => LastActivity = DateTimeOffset.UtcNow;
-    /// <summary>
     /// Gets a value indicating whether TLS (Transport Layer Security) is currently active.
     /// </summary>
     public bool TlsActive { get; private set; }
@@ -135,32 +133,30 @@ internal sealed class FtpSession : IAsyncDisposable
     /// Gets the identifier of the remote entity associated with this instance.
     /// </summary>
     public string? RemoteIdent { get; private set; }
+    /// <summary>
+    /// Gets the instance of the <see cref="IdentManager"/> used to manage identity-related operations.
+    /// </summary>
+    public IdentManager IdentManager { get; }
+    /// <summary>
+    /// Gets the virtual file system manager responsible for managing file system operations.
+    /// </summary>
+    public VfsManager VfsManager { get; }
     #endregion
     /// <summary>
-    /// Sets the current FTP user account and updates the session state.
-    /// </summary>
-    /// <remarks>This method updates the session to reflect the specified user account, including setting the
-    /// username and marking the session as logged in.</remarks>
-    /// <param name="account">The <see cref="FtpUser"/> object representing the user account to set. Cannot be <c>null</c>.</param>
-    public void SetAccount(FtpUser account)
-    {
-        Account = account;
-        UserName = account.UserName;
-        LoggedIn = true; // ensure the session is considered logged in
-    }
-    /// <summary>
     /// Initializes a new instance of the <see cref="FtpSession"/> class, representing an FTP session with the specified
-    /// configuration, user store, and file system.
+    /// configuration, logging, and file system components.
     /// </summary>
-    /// <remarks>This constructor initializes the session with the provided dependencies and assigns a unique
-    /// session ID. The session is added to the internal session tracking collection upon creation.</remarks>
+    /// <remarks>This constructor initializes the session with the provided components and configuration. It
+    /// sets up the control stream, initializes the Ident and VFS managers, and assigns a unique session ID.</remarks>
     /// <param name="control">The <see cref="TcpClient"/> used to manage the control connection for the FTP session.</param>
-    /// <param name="log">The logger instance used to record session activity and diagnostics.</param>
-    /// <param name="cfg">The configuration settings for the FTP session.</param>
-    /// <param name="users">The user store that provides authentication and user management for the session.</param>
-    /// <param name="fs">The file system interface used to manage file operations within the session.</param>
-    /// <param name="defaultProt">The default protection level for the session, such as "Clear" or "Private".</param>
-    /// <param name="tls">The TLS configuration used to secure the session, if applicable.</param>
+    /// <param name="log">The logger instance implementing <see cref="IFtpLogger"/> for logging session activity.</param>
+    /// <param name="cfg">The <see cref="FtpConfig"/> object containing configuration settings for the FTP session.</param>
+    /// <param name="users">The <see cref="IUserStore"/> instance used to manage user authentication and authorization.</param>
+    /// <param name="fs">The <see cref="FtpFileSystem"/> instance representing the file system for the session.</param>
+    /// <param name="defaultProt">The default protection level for the session, specified as a string.</param>
+    /// <param name="tls">The <see cref="TlsConfig"/> object containing TLS configuration settings for secure communication.</param>
+    /// <param name="identCfg">The <see cref="IdentConfig"/> object used to configure the Ident protocol for the session.</param>
+    /// <param name="vfsCfg">The <see cref="VfsConfig"/> object used to configure the virtual file system for the session.</param>
     public FtpSession(
         TcpClient control,
         IFtpLogger log,
@@ -168,7 +164,9 @@ internal sealed class FtpSession : IAsyncDisposable
         IUserStore users,
         FtpFileSystem fs,
         string defaultProt,
-        TlsConfig tls)
+        TlsConfig tls,
+        IdentConfig identCfg,
+        VfsConfig vfsCfg)
     {
         Control = control;
         _log = log;
@@ -181,6 +179,8 @@ internal sealed class FtpSession : IAsyncDisposable
         TlsActive = false;
         _tls = tls;
 
+        IdentManager = new IdentManager(identCfg);
+        VfsManager = new VfsManager(vfsCfg, fs);
         SessionId = Interlocked.Increment(ref _nextSessionId);
         _sessions[SessionId] = this;
     }
@@ -196,6 +196,24 @@ internal sealed class FtpSession : IAsyncDisposable
     /// <remarks>This method resets the <see cref="RestOffset"/> property to its default state.  Use this
     /// method when the offset is no longer needed or should be cleared.</remarks>
     public void ClearRestOffset() => RestOffset = null;
+    /// <summary>
+    /// Sets the current FTP user account and updates the session state.
+    /// </summary>
+    /// <remarks>This method updates the session to reflect the specified user account, including setting the
+    /// username and marking the session as logged in.</remarks>
+    /// <param name="account">The <see cref="FtpUser"/> object representing the user account to set. Cannot be <c>null</c>.</param>
+    public void SetAccount(FtpUser account)
+    {
+        Account = account;
+        UserName = account.UserName;
+        LoggedIn = true; // ensure the session is considered logged in
+    }
+    /// <summary>
+    /// Updates the <see cref="LastActivity"/> property to the current UTC date and time.
+    /// </summary>
+    /// <remarks>This method is typically used to record the most recent activity timestamp.  It sets the <see
+    /// cref="LastActivity"/> property to <see cref="DateTimeOffset.UtcNow"/>.</remarks>
+    public void Touch() => LastActivity = DateTimeOffset.UtcNow;
     /// <summary>
     /// Writes the specified string to the underlying stream asynchronously.
     /// </summary>

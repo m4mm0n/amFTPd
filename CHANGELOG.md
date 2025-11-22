@@ -1,11 +1,11 @@
-﻿   ________  ________  ________  ________   ________  ________  ________ 
+   ________  ________  ________  ________   ________  ________  ________ 
   ╱    ╱   ╲╱        ╲╱        ╲╱        ╲ ╱        ╲╱        ╲╱    ╱   ╲
  ╱         ╱         ╱         ╱        _╱_╱       ╱╱         ╱         ╱
  ╲        ╱        _╱        _╱-        ╱╱         ╱         ╱         ╱ 
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
-[ v0.2.0.0 - 22.11.2025 ]
+## [ v0.2.0.0 - 22.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
 - Now includes a more extensive Ident mode, a more extensive VFS implementation,
@@ -63,9 +63,8 @@ Core/FtpFileSystem.cs:
 Program.cs:
 * changed FTPServer initialization to include IdentManager, and VfsManager...
 
-<------------------------------------------------------------------------------------------------------------------->
 
-[ v0.1.1.0 - 21.11.2025 ]
+## [ v0.1.1.0 - 21.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
 - Now includes a proper version history for each update, with partially detailed

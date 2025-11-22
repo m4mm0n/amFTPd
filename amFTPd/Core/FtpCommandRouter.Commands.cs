@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-21
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -16,6 +16,8 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Core.Ident;
+using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
@@ -196,9 +198,37 @@ namespace amFTPd.Core
                 return;
             }
 
-            // ------------------------------------------------------------------
-            // IDENT ENFORCEMENT (if configured for this user)
-            // ------------------------------------------------------------------
+            // ==================================================================
+            // GLOBAL IDENT POLICY (via IdentManager) - SAFE VERSION
+            // ==================================================================
+            try
+            {
+                if (_s.IdentManager is not null)
+                {
+                    var identResult = await _s.IdentManager.QueryAndApplyPolicyAsync(
+                        _s.Control,
+                        username,
+                        clientCert: null,                 // no client cert support yet
+                        isUserInGroup: _ => false,        // no session-group tracking yet
+                        addUserToGroup: _ => { },         // no-op for now
+                        logInfo: msg => _log.Log(FtpLogLevel.Info, msg),
+                        logWarn: msg => _log.Log(FtpLogLevel.Warn, msg),
+                        ct);
+
+                    // If you want, you can stash this:
+                    // _s.RemoteIdent = identResult.Username ?? _s.RemoteIdent;
+                }
+            }
+            catch (IdentPolicyException ex)
+            {
+                _log.Log(FtpLogLevel.Warn, $"IDENT policy denied user '{username}': {ex.Message}");
+                await _s.WriteAsync("530 Login denied by IDENT policy.\r\n", ct);
+                return;
+            }
+
+            // ==================================================================
+            // PER-USER IDENT ENFORCEMENT (your existing logic)
+            // ==================================================================
             if ((account.RequireIdentMatch || !string.IsNullOrWhiteSpace(account.RequiredIdent)))
             {
                 var identName = await _s.QueryIdentAsync(ct);
@@ -210,12 +240,11 @@ namespace amFTPd.Core
                         await _s.WriteAsync("530 Login denied: IDENT required but not available.\r\n", ct);
                         return;
                     }
-                    // If RequireIdentMatch is false but RequiredIdent is set, you can decide
-                    // whether to treat "no ident" as failure or just log it.
+                    // else: RequireIdentMatch == false, RequiredIdent may still be set – you
+                    // decided earlier to treat "no ident" as "not fatal, just log".
                 }
                 else
                 {
-                    // Case-insensitive compare is typically what you want here.
                     if (!string.IsNullOrWhiteSpace(account.RequiredIdent) &&
                         !identName.Equals(account.RequiredIdent, StringComparison.OrdinalIgnoreCase))
                     {
@@ -224,14 +253,13 @@ namespace amFTPd.Core
                     }
                 }
 
-                // Optionally: log successful ident
                 _log.Log(FtpLogLevel.Debug,
                     $"IDENT: user={account.UserName}, ident={identName ?? "<none>"}, required={account.RequiredIdent ?? "<none>"}");
             }
 
-            // ------------------------------------------------------------------
+            // ==================================================================
             // AMSCRIPT GROUP RULES (login)
-            // ------------------------------------------------------------------
+            // ==================================================================
             if (_groupScript is not null && !string.IsNullOrWhiteSpace(account.GroupName))
             {
                 var gctx = new AMScriptContext(
@@ -267,9 +295,9 @@ namespace amFTPd.Core
                     account = account with { CreditsKb = account.CreditsKb + gcd };
             }
 
-            // ------------------------------------------------------------------
+            // ==================================================================
             // AMSCRIPT USER RULES (login)
-            // ------------------------------------------------------------------
+            // ==================================================================
             if (_userScript is not null)
             {
                 var ctx = new AMScriptContext(
@@ -305,7 +333,9 @@ namespace amFTPd.Core
                     account = account with { CreditsKb = account.CreditsKb + cd };
             }
 
-            // Normal login
+            // ==================================================================
+            // NORMAL LOGIN
+            // ==================================================================
             _s.SetAccount(account);
             await _s.WriteAsync("230 Login successful.\r\n", ct);
         }
@@ -698,40 +728,59 @@ namespace amFTPd.Core
                 }
             }
 
-            var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
-            string phys;
-            try
+            var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+
+            var vfsResult = _s.VfsManager.Resolve(_s.Account.UserName, _s.Cwd, target);
+            if (!vfsResult.Success || vfsResult.Node is null)
             {
-                phys = _fs.MapToPhysical(target);
-            }
-            catch
-            {
-                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            if (!Directory.Exists(phys) && !File.Exists(phys))
-            {
-                await _s.WriteAsync("550 Not found.\r\n", ct);
-                return;
-            }
+            var node = vfsResult.Node;
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             await _s.WithDataAsync(async stream =>
             {
                 using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
-                if (Directory.Exists(phys))
-                {
-                    foreach (var dir in Directory.EnumerateDirectories(phys))
-                        await wr.WriteLineAsync(_fs.ToUnixListLine(new DirectoryInfo(dir)));
 
-                    foreach (var file in Directory.EnumerateFiles(phys))
-                        await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(file)));
-                }
-                else
+                switch (node.Type)
                 {
-                    await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(phys)));
+                    case VfsNodeType.PhysicalDirectory:
+                        {
+                            var dirPath = node.PhysicalPath!;
+                            foreach (var dir in Directory.EnumerateDirectories(dirPath))
+                                await wr.WriteLineAsync(_fs.ToUnixListLine(new DirectoryInfo(dir)));
+
+                            foreach (var file in Directory.EnumerateFiles(dirPath))
+                                await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(file)));
+                            break;
+                        }
+
+                    case VfsNodeType.PhysicalFile:
+                        {
+                            await wr.WriteLineAsync(_fs.ToUnixListLine((FileInfo)node.FileSystemInfo!));
+                            break;
+                        }
+
+                    case VfsNodeType.VirtualDirectory:
+                        {
+                            var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                            if (string.IsNullOrEmpty(name))
+                                name = "/";
+                            // Simple synthetic directory listing line
+                            await wr.WriteLineAsync($"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}");
+                            break;
+                        }
+
+                    case VfsNodeType.VirtualFile:
+                        {
+                            var name = Path.GetFileName(node.VirtualPath);
+                            var size = node.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                            await wr.WriteLineAsync($"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}");
+                            break;
+                        }
                 }
             }, ct);
 
@@ -761,40 +810,46 @@ namespace amFTPd.Core
                 }
             }
 
-            var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
-            string phys;
-            try
+            var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+
+            var vfsResult = _s.VfsManager.Resolve(_s.Account.UserName, _s.Cwd, target);
+            if (!vfsResult.Success || vfsResult.Node is null)
             {
-                phys = _fs.MapToPhysical(target);
-            }
-            catch
-            {
-                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            if (!Directory.Exists(phys) && !File.Exists(phys))
-            {
-                await _s.WriteAsync("550 Not found.\r\n", ct);
-                return;
-            }
+            var node = vfsResult.Node;
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             await _s.WithDataAsync(async stream =>
             {
                 using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
-                if (Directory.Exists(phys))
-                {
-                    foreach (var dir in Directory.EnumerateDirectories(phys))
-                        await wr.WriteLineAsync(Path.GetFileName(dir));
 
-                    foreach (var file in Directory.EnumerateFiles(phys))
-                        await wr.WriteLineAsync(Path.GetFileName(file));
-                }
-                else
+                switch (node.Type)
                 {
-                    await wr.WriteLineAsync(Path.GetFileName(phys));
+                    case VfsNodeType.PhysicalDirectory:
+                        {
+                            var dirPath = node.PhysicalPath!;
+                            foreach (var dir in Directory.EnumerateDirectories(dirPath))
+                                await wr.WriteLineAsync(Path.GetFileName(dir));
+
+                            foreach (var file in Directory.EnumerateFiles(dirPath))
+                                await wr.WriteLineAsync(Path.GetFileName(file));
+                            break;
+                        }
+
+                    case VfsNodeType.PhysicalFile:
+                    case VfsNodeType.VirtualFile:
+                    case VfsNodeType.VirtualDirectory:
+                        {
+                            var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                            if (string.IsNullOrEmpty(name))
+                                name = "/";
+                            await wr.WriteLineAsync(name);
+                            break;
+                        }
                 }
             }, ct);
 
@@ -809,7 +864,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule (same pattern as LIST/NLST)
+            // AMScript user-based rule
             if (_userScript is not null && _s.Account is not null)
             {
                 var ctx = BuildUserContext("MLSD", arg);
@@ -819,47 +874,63 @@ namespace amFTPd.Core
                     var msg = res.Message ?? "550 MLSD denied by policy.\r\n";
                     if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
                         msg += "\r\n";
-
                     await _s.WriteAsync(msg, ct);
                     return;
                 }
             }
 
-            var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
-            string phys;
-            try
+            var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+
+            var vfsResult = _s.VfsManager.Resolve(_s.Account.UserName, _s.Cwd, target);
+            if (!vfsResult.Success || vfsResult.Node is null)
             {
-                phys = _fs.MapToPhysical(target);
-            }
-            catch
-            {
-                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 MLSD failed.\r\n", ct);
                 return;
             }
 
-            if (!Directory.Exists(phys) && !File.Exists(phys))
-            {
-                await _s.WriteAsync("550 Not found.\r\n", ct);
-                return;
-            }
+            var node = vfsResult.Node;
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             await _s.WithDataAsync(async stream =>
             {
-                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+                using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
 
-                if (Directory.Exists(phys))
+                switch (node.Type)
                 {
-                    foreach (var dir in Directory.EnumerateDirectories(phys))
-                        await wr.WriteLineAsync(_fs.ToMlsdLine(new DirectoryInfo(dir)));
+                    case VfsNodeType.PhysicalDirectory:
+                        {
+                            var dirPath = node.PhysicalPath!;
+                            foreach (var dir in Directory.EnumerateDirectories(dirPath))
+                                await wr.WriteLineAsync(_fs.ToMlsdLine(new DirectoryInfo(dir)));
 
-                    foreach (var file in Directory.EnumerateFiles(phys))
-                        await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(file)));
-                }
-                else
-                {
-                    await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(phys)));
+                            foreach (var file in Directory.EnumerateFiles(dirPath))
+                                await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(file)));
+                            break;
+                        }
+
+                    case VfsNodeType.PhysicalFile:
+                        {
+                            await wr.WriteLineAsync(_fs.ToMlsdLine((FileInfo)node.FileSystemInfo!));
+                            break;
+                        }
+
+                    case VfsNodeType.VirtualDirectory:
+                        {
+                            var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                            if (string.IsNullOrEmpty(name))
+                                name = "/";
+                            await wr.WriteLineAsync($"type=dir;perm=el; {name}");
+                            break;
+                        }
+
+                    case VfsNodeType.VirtualFile:
+                        {
+                            var name = Path.GetFileName(node.VirtualPath);
+                            var size = node.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                            await wr.WriteLineAsync($"type=file;size={size};perm=rl; {name}");
+                            break;
+                        }
                 }
             }, ct);
 
@@ -874,7 +945,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule (same pattern as LIST/NLST/MLSD)
+            // AMScript user-based rule
             if (_userScript is not null && _s.Account is not null)
             {
                 var ctx = BuildUserContext("MLST", arg);
@@ -884,48 +955,49 @@ namespace amFTPd.Core
                     var msg = res.Message ?? "550 MLST denied by policy.\r\n";
                     if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
                         msg += "\r\n";
-
                     await _s.WriteAsync(msg, ct);
                     return;
                 }
             }
 
-            var target = FtpPath.Normalize(_s.Cwd, string.IsNullOrWhiteSpace(arg) ? "." : arg);
-            string phys;
-            try
+            var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+
+            var vfsResult = _s.VfsManager.Resolve(_s.Account.UserName, _s.Cwd, target);
+            if (!vfsResult.Success || vfsResult.Node is null)
             {
-                phys = _fs.MapToPhysical(target);
-            }
-            catch
-            {
-                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 MLST failed.\r\n", ct);
                 return;
             }
 
-            FileSystemInfo? fsi = null;
+            var node = vfsResult.Node;
 
-            if (Directory.Exists(phys))
+            string facts;
+            switch (node.Type)
             {
-                fsi = new DirectoryInfo(phys);
-            }
-            else if (File.Exists(phys))
-            {
-                fsi = new FileInfo(phys);
+                case VfsNodeType.PhysicalDirectory:
+                case VfsNodeType.PhysicalFile:
+                    facts = _fs.ToMlsdLine(node.FileSystemInfo!);
+                    break;
+
+                case VfsNodeType.VirtualDirectory:
+                    {
+                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                        if (string.IsNullOrEmpty(name))
+                            name = "/";
+                        facts = $"type=dir;perm=el; {name}";
+                        break;
+                    }
+
+                case VfsNodeType.VirtualFile:
+                default:
+                    {
+                        var name = Path.GetFileName(node.VirtualPath);
+                        var size = node.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                        facts = $"type=file;size={size};perm=rl; {name}";
+                        break;
+                    }
             }
 
-            if (fsi is null)
-            {
-                await _s.WriteAsync("550 Not found.\r\n", ct);
-                return;
-            }
-
-            // Reuse the MLSD fact-line generator for MLST (single item).
-            var facts = _fs.ToMlsdLine(fsi);
-
-            // Simple RFC 3659-ish MLST response:
-            // 250-Listing
-            //  <facts>
-            // 250 End.
             var sb = new StringBuilder();
             sb.Append("250-Listing\r\n");
             sb.Append(' ');
@@ -970,26 +1042,54 @@ namespace amFTPd.Core
                 return;
             }
 
-            var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
-            string phys;
-            try
+            var vfsResult = _s.VfsManager.Resolve(_s.Account.UserName, _s.Cwd, arg);
+            if (!vfsResult.Success || vfsResult.Node is null)
             {
-                phys = _fs.MapToPhysical(virtTarget);
-            }
-            catch
-            {
-                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            if (!File.Exists(phys))
+            var node = vfsResult.Node;
+
+            if (node.Type != VfsNodeType.PhysicalFile && node.Type != VfsNodeType.VirtualFile)
             {
                 await _s.WriteAsync("550 File not found.\r\n", ct);
                 return;
             }
 
-            var fi = new FileInfo(phys);
-            var length = fi.Length;
+            var virtTarget = node.VirtualPath;
+
+            long length;
+            Stream sourceStream;
+            try
+            {
+                if (node.Type == VfsNodeType.PhysicalFile)
+                {
+                    var phys = node.PhysicalPath!;
+                    if (!File.Exists(phys))
+                    {
+                        await _s.WriteAsync("550 File not found.\r\n", ct);
+                        return;
+                    }
+
+                    var fi = new FileInfo(phys);
+                    length = fi.Length;
+                    sourceStream = new FileStream(phys, FileMode.Open, FileAccess.Read, FileShare.Read);
+                }
+                else
+                {
+                    var content = node.VirtualContent ?? string.Empty;
+                    var buffer = Encoding.UTF8.GetBytes(content);
+                    length = buffer.LongLength;
+                    sourceStream = new MemoryStream(buffer, writable: false);
+                }
+            }
+            catch
+            {
+                await _s.WriteAsync("550 File not accessible.\r\n", ct);
+                return;
+            }
+
             var rest = _s.RestOffset;
             if (rest.HasValue && rest.Value > 0 && rest.Value < length)
                 length -= rest.Value;
@@ -997,7 +1097,10 @@ namespace amFTPd.Core
             var section = GetSectionForVirtual(virtTarget);
 
             if (!await CheckDownloadCreditsAsync(section, length, ct))
+            {
+                await sourceStream.DisposeAsync();
                 return;
+            }
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
@@ -1006,13 +1109,15 @@ namespace amFTPd.Core
 
             await _s.WithDataAsync(async s =>
             {
-                await using var fs = new FileStream(phys, FileMode.Open, FileAccess.Read, FileShare.Read);
-                if (offset.HasValue && offset.Value > 0)
-                    fs.Seek(offset.Value, SeekOrigin.Begin);
+                await using (sourceStream)
+                {
+                    if (offset.HasValue && offset.Value > 0 && sourceStream.CanSeek)
+                        sourceStream.Seek(offset.Value, SeekOrigin.Begin);
 
-                var maxKbps = _s.Account?.MaxDownloadKbps ?? 0;
-                var transferred = await CopyWithThrottleAsync(fs, s, maxKbps, ct);
-                ApplyDownloadCredits(section, transferred);
+                    var maxKbps = _s.Account?.MaxDownloadKbps ?? 0;
+                    var transferred = await CopyWithThrottleAsync(sourceStream, s, maxKbps, ct);
+                    ApplyDownloadCredits(section, transferred);
+                }
             }, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
@@ -1053,17 +1158,36 @@ namespace amFTPd.Core
                 return;
             }
 
+            // Normalize the virtual path using existing logic
             var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
-            string phys;
+
+            // Resolve the parent directory through VFS so mounts/overlays are respected
+            var dirVirtRaw = Path.GetDirectoryName(virtTarget);
+            var dirVirt = string.IsNullOrEmpty(dirVirtRaw) || dirVirtRaw == "\\" ? "/" : dirVirtRaw.Replace('\\', '/');
+            var fileName = Path.GetFileName(virtTarget);
+
+            string physDir;
             try
             {
-                phys = _fs.MapToPhysical(virtTarget);
+                var dirResult = _s.VfsManager.Resolve(_s.Account.UserName, "/", dirVirt);
+                if (dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
+                {
+                    physDir = node.PhysicalPath!;
+                }
+                else
+                {
+                    // Fallback to legacy behaviour if VFS has no opinion
+                    physDir = Path.GetDirectoryName(_fs.MapToPhysical(virtTarget))
+                              ?? throw new UnauthorizedAccessException();
+                }
             }
             catch
             {
                 await _s.WriteAsync("550 Permission denied.\r\n", ct);
                 return;
             }
+
+            var phys = Path.Combine(physDir, fileName);
 
             Directory.CreateDirectory(Path.GetDirectoryName(phys)!);
 

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -16,11 +16,13 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ident;
+using amFTPd.Config.Vfs;
+using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Security;
 using System.Net;
 using System.Text.Json;
-using amFTPd.Db;
 
 namespace amFTPd.Config.Daemon;
 
@@ -82,7 +84,9 @@ public static class AmFtpdConfigLoader
                     SectionsPath: "amftpd-sections.json",
                     UserStoreBackend: "binary",
                     MasterPassword: "CHANGE_ME"
-                )
+                ),
+                Ident: new IdentConfig(),   // <<<<<<<<<<<<<<<<<<<< IMPORTANT
+                Vfs: new VfsConfig()        // <<<<<<<<<<<<<<<<<<<< IMPORTANT
             );
 
             var jsonDefault = JsonSerializer.Serialize(
@@ -158,7 +162,10 @@ public static class AmFtpdConfigLoader
             FtpConfig = ftpCfg,
             UserStore = userStore,
             Sections = sections,
-            TlsConfig = tlsCfg
+            TlsConfig = tlsCfg,
+            IdentConfig = root.Ident ?? new IdentConfig(), // if your IdentConfig has a parameterless ctor
+            VfsConfig = root.Vfs ?? new VfsConfig()
         };
+
     }
 }

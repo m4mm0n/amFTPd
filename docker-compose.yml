@@ -1,0 +1,19 @@
+version: "3.9"
+services:
+  amftpd:
+    image: amftpd:latest
+    container_name: amftpd
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "2121:2121"
+      - "50000-50100:50000-50100"
+    volumes:
+      # Config: contains amftpd.json, certs, etc.
+      - ./config:/config
+      # Data: FTP root and other storage
+      - ./data:/data
+    # If your amFTPd program accepts a config path as arg, this passes it explicitly.
+    command: ["/config/amftpd.json"]

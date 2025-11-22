@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-21
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -28,7 +28,7 @@ namespace amFTPd.Core;
 /// physical directory. It ensures that all mapped paths remain within the bounds of the root directory for security
 /// purposes. Additionally, it provides functionality to format file system entries in a Unix-style listing
 /// format.</remarks>
-internal sealed class FtpFileSystem
+public sealed class FtpFileSystem
 {
     private readonly string _rootFs; // physical root (full path)
     /// <summary>
@@ -49,8 +49,7 @@ internal sealed class FtpFileSystem
     {
         var rel = virtualPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
         var full = Path.GetFullPath(Path.Combine(_rootFs, rel));
-        if (!full.StartsWith(_rootFs, StringComparison.Ordinal)) throw new UnauthorizedAccessException();
-        return full;
+        return !full.StartsWith(_rootFs, StringComparison.Ordinal) ? throw new UnauthorizedAccessException() : full;
     }
     /// <summary>
     /// Converts the specified <see cref="FileSystemInfo"/> object into a Unix-style file listing line.
@@ -118,14 +117,7 @@ internal sealed class FtpFileSystem
         }
 
         // very simple permissions model: dirs = el, files = rl
-        if (isDir)
-        {
-            sb.Append("perm=el;");
-        }
-        else
-        {
-            sb.Append("perm=rl;");
-        }
+        sb.Append(isDir ? "perm=el;" : "perm=rl;");
 
         sb.Append(' ');
         sb.Append(fsi.Name);
