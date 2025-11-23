@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -16,6 +16,7 @@
  */
 
 using amFTPd.Security;
+using System.Collections.Immutable;
 using System.Text.Json;
 
 namespace amFTPd.Config.Ftpd
@@ -81,11 +82,13 @@ namespace amFTPd.Config.Ftpd
                     IdleTimeout: TimeSpan.FromMinutes(30),
                     MaxUploadKbps: 0,
                     MaxDownloadKbps: 0,
-                    GroupName: "admins",
-                    CreditsKb: 1024 * 1024,    // 1 GB credits, tweak if you want
+                    PrimaryGroup: "admins",
+                    SecondaryGroups: ImmutableArray<string>.Empty,
+                    CreditsKb: 1024 * 1024, // 1GB default credits
                     AllowedIpMask: null,
                     RequireIdentMatch: false,
-                    RequiredIdent: null
+                    RequiredIdent: null,
+                    FlagsRaw: string.Empty
                 );
 
                 var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase)
@@ -117,11 +120,13 @@ namespace amFTPd.Config.Ftpd
                     IdleTimeout: TimeSpan.FromSeconds(u.IdleTimeoutSeconds),
                     MaxUploadKbps: u.MaxUploadKbps,
                     MaxDownloadKbps: u.MaxDownloadKbps,
-                    GroupName: u.GroupName,
+                    PrimaryGroup: u.GroupName ?? "users",
+                    SecondaryGroups: ImmutableArray<string>.Empty,
                     CreditsKb: u.CreditsKb,
                     AllowedIpMask: u.AllowedIpMask,
                     RequireIdentMatch: u.RequireIdentMatch,
-                    RequiredIdent: u.RequiredIdent
+                    RequiredIdent: u.RequiredIdent,
+                    FlagsRaw: string.Empty
                 );
             }
 

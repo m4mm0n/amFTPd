@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -15,6 +15,7 @@
  * ====================================================================================================
  */
 
+using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Scripting;
@@ -49,34 +50,32 @@ public sealed class FtpServer
 
     private readonly IdentConfig _identCfg;
     private readonly VfsConfig _vfsCfg;
+
+    private readonly AmFtpdRuntimeConfig _runtime;
     #endregion
     /// <summary>
-    /// Initializes a new instance of the <see cref="FtpServer"/> class with the specified configuration, user store,
-    /// TLS settings, logger, section manager, identity configuration, and virtual file system configuration.
+    /// Initializes a new instance of the FtpServer class using the specified runtime configuration and logger.
     /// </summary>
-    /// <param name="cfg">The FTP server configuration settings.</param>
-    /// <param name="users">The user store used to manage FTP user accounts.</param>
-    /// <param name="tls">The TLS configuration for secure connections.</param>
-    /// <param name="log">The logger instance for recording server events and diagnostics.</param>
-    /// <param name="sections">The section manager responsible for managing server sections and their settings.</param>
-    /// <param name="identCfg">The identity configuration for managing authentication and identity-related settings.</param>
-    /// <param name="vfsCfg">The virtual file system configuration for managing file system operations.</param>
+    /// <remarks>This constructor sets up the FTP server with the provided configuration and logging
+    /// components. The runtime configuration supplies all necessary operational details, while the logger enables
+    /// monitoring and troubleshooting of server activity.</remarks>
+    /// <param name="runtime">The runtime configuration containing FTP server settings, user store, TLS configuration, and other operational
+    /// parameters. Cannot be null.</param>
+    /// <param name="log">The logger used to record FTP server events and diagnostics. Cannot be null.</param>
     public FtpServer(
-        FtpConfig cfg,
-        IUserStore users,
-        TlsConfig tls,
-        IFtpLogger log,
-        SectionManager sections,
-        IdentConfig identCfg,
-        VfsConfig vfsCfg)
+        AmFtpdRuntimeConfig runtime,
+        IFtpLogger log)
     {
-        _cfg = cfg;
-        _users = users;
-        _tls = tls;
+        _runtime = runtime;
         _log = log;
-        _sections = sections;
-        _identCfg = identCfg;
-        _vfsCfg = vfsCfg;
+
+        // Assign all local fields from runtime
+        _cfg = runtime.FtpConfig;
+        _users = runtime.UserStore;
+        _tls = runtime.TlsConfig;
+        _sections = runtime.Sections;
+        _identCfg = runtime.IdentConfig;
+        _vfsCfg = runtime.VfsConfig;
     }
     /// <summary>
     /// Starts the FTP(S) server and begins listening for incoming client connections.
@@ -166,7 +165,7 @@ public sealed class FtpServer
                     _identCfg,
                     _vfsCfg);
 
-                var router = new FtpCommandRouter(session, _log, fs, _cfg, _tls, _sections);
+                var router = new FtpCommandRouter(session, _log, fs, _cfg, _tls, _sections, _runtime);
 
                 // Attach script engines so router can use AMScript in credits/FXP/active
                 router.AttachScriptEngines(

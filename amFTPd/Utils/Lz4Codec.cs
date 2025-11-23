@@ -47,13 +47,13 @@ namespace amFTPd.Utils
 
             while (s < src.Length)
             {
-                int runStart = s;
+                var runStart = s;
                 s++;
 
                 while (s < src.Length && src[s] == src[s - 1] && (s - runStart) < 255)
                     s++;
 
-                int runLen = s - runStart;
+                var runLen = s - runStart;
 
                 // literal
                 dst[d++] = (byte)runLen;

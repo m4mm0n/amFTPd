@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -16,16 +16,22 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Core.Ident;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
+using System.Collections.Immutable;
 using System.Net;
+using System.Reflection;
 using System.Text;
 
 namespace amFTPd.Core
 {
+    /// <summary>
+    /// Partial class for handling FTP commands within the FtpCommandRouter.
+    /// </summary>
     internal sealed partial class FtpCommandRouter
     {
         private AMScriptContext BuildCreditContext(FtpSection section, long bytes)
@@ -46,22 +52,38 @@ namespace amFTPd.Core
             );
         }
 
-        private AMScriptContext BuildSimpleContextForFxpAndActive()
+        private AMScriptContext BuildSimpleContextForFxpAndActive(string command)
         {
             var account = _s.Account;
             var userName = account?.UserName ?? string.Empty;
             var userGroup = account?.GroupName ?? string.Empty;
 
+            var virt = _s.Cwd;
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(virt);
+            }
+            catch
+            {
+                phys = string.Empty;
+            }
+
+            var section = _sections.GetSectionForPath(virt);
+
             return new AMScriptContext(
                 IsFxp: _isFxp,
-                Section: string.Empty,
-                FreeLeech: false,
+                Section: section.Name,
+                FreeLeech: section.FreeLeech,
                 UserName: userName,
                 UserGroup: userGroup,
                 Bytes: 0,
                 Kb: 0,
                 CostDownload: 0,
-                EarnedUpload: 0
+                EarnedUpload: 0,
+                VirtualPath: virt,
+                PhysicalPath: phys,
+                Event: command.ToUpperInvariant()   // "PASV", "EPSV", "PORT", "EPRT"
             );
         }
 
@@ -80,7 +102,8 @@ namespace amFTPd.Core
                 CostDownload: 0,
                 EarnedUpload: 0,
                 VirtualPath: virtualPath,
-                PhysicalPath: physicalPath
+                PhysicalPath: physicalPath,
+                Event: "ROUTE"
             );
         }
 
@@ -116,7 +139,8 @@ namespace amFTPd.Core
                 CostDownload: 0,
                 EarnedUpload: 0,
                 VirtualPath: virtPath,
-                PhysicalPath: physicalPath
+                PhysicalPath: physicalPath,
+                Event: $"SITE {command.ToUpperInvariant()}"
             );
         }
 
@@ -137,6 +161,7 @@ namespace amFTPd.Core
             }
 
             var section = _sections.GetSectionForPath(virt);
+            var evt = string.IsNullOrWhiteSpace(cmd) ? string.Empty : cmd.ToUpperInvariant();
 
             return new AMScriptContext(
                 IsFxp: _isFxp,
@@ -149,7 +174,8 @@ namespace amFTPd.Core
                 CostDownload: 0,
                 EarnedUpload: 0,
                 VirtualPath: virt,
-                PhysicalPath: phys
+                PhysicalPath: phys,
+                Event: evt
             );
         }
 
@@ -273,7 +299,8 @@ namespace amFTPd.Core
                     CostDownload: 0,
                     EarnedUpload: 0,
                     VirtualPath: "/",
-                    PhysicalPath: ""
+                    PhysicalPath: "",
+                    Event: "LOGIN"
                 );
 
                 var gRule = _groupScript.EvaluateGroup(gctx);
@@ -311,7 +338,8 @@ namespace amFTPd.Core
                     CostDownload: 0,
                     EarnedUpload: 0,
                     VirtualPath: "/",
-                    PhysicalPath: ""
+                    PhysicalPath: "",
+                    Event: "LOGIN"
                 );
 
                 var rule = _userScript.EvaluateDownload(ctx);
@@ -391,13 +419,12 @@ namespace amFTPd.Core
         {
             var sb = new StringBuilder();
             sb.AppendLine("214-The following commands are recognized:");
-            sb.AppendLine(" USER PASS AUTH PBSZ PROT");
-            sb.AppendLine(" FEAT SYST OPTS NOOP QUIT HELP STAT ALLO MODE STRU ABOR");
-            sb.AppendLine(" PWD CWD CDUP TYPE");
-            sb.AppendLine(" PASV EPSV PORT EPRT");
-            sb.AppendLine(" LIST NLST RETR STOR APPE REST");
-            sb.AppendLine(" DELE MKD RMD RNFR RNTO");
-            sb.AppendLine(" SIZE MDTM SITE");
+            sb.AppendLine(" ABOR APPE ALLO AUTH");
+            sb.AppendLine(" CDUP CWD DELE EPRT EPSV FEAT HELP");
+            sb.AppendLine(" LIST MDTM MKD MODE NLST NOOP OPTS PASS");
+            sb.AppendLine(" PASV PBSZ PORT PROT PWD QUIT REST RETR");
+            sb.AppendLine(" RMD RNFR RNTO SITE SIZE STAT STOR STRU SYST");
+            sb.AppendLine(" TYPE USER");
             sb.AppendLine("214 Help OK.");
 
             await _s.WriteAsync(sb.ToString().Replace("\n", "\r\n"), ct);
@@ -525,7 +552,7 @@ namespace amFTPd.Core
             // FXP script hook (if any)
             if (_fxpScript is not null && _isFxp)
             {
-                var ctx = BuildSimpleContextForFxpAndActive();
+                var ctx = BuildSimpleContextForFxpAndActive("PASV");
                 var result = _fxpScript.EvaluateDownload(ctx);
                 if (result.Action == AMRuleAction.Deny)
                 {
@@ -562,7 +589,7 @@ namespace amFTPd.Core
 
             if (_fxpScript is not null && _isFxp)
             {
-                var ctx = BuildSimpleContextForFxpAndActive();
+                var ctx = BuildSimpleContextForFxpAndActive("EPSV");
                 var result = _fxpScript.EvaluateDownload(ctx);
                 if (result.Action == AMRuleAction.Deny)
                 {
@@ -609,7 +636,7 @@ namespace amFTPd.Core
             // Active-mode policy via script
             if (_activeScript is not null)
             {
-                var ctx = BuildSimpleContextForFxpAndActive();
+                var ctx = BuildSimpleContextForFxpAndActive("PORT");
                 var result = _activeScript.EvaluateDownload(ctx);
                 if (result.Action == AMRuleAction.Deny)
                 {
@@ -621,7 +648,7 @@ namespace amFTPd.Core
             // FXP via script
             if (_fxpScript is not null && _isFxp)
             {
-                var ctx = BuildSimpleContextForFxpAndActive();
+                var ctx = BuildSimpleContextForFxpAndActive("PORT");
                 var result = _fxpScript.EvaluateDownload(ctx);
                 if (result.Action == AMRuleAction.Deny)
                 {
@@ -670,7 +697,7 @@ namespace amFTPd.Core
             // Active-mode policy via script
             if (_activeScript is not null)
             {
-                var ctx = BuildSimpleContextForFxpAndActive();
+                var ctx = BuildSimpleContextForFxpAndActive("EPRT");
                 var result = _activeScript.EvaluateDownload(ctx);
                 if (result.Action == AMRuleAction.Deny)
                 {
@@ -682,7 +709,7 @@ namespace amFTPd.Core
             // FXP via script
             if (_fxpScript is not null && _isFxp)
             {
-                var ctx = BuildSimpleContextForFxpAndActive();
+                var ctx = BuildSimpleContextForFxpAndActive("EPRT");
                 var result = _fxpScript.EvaluateDownload(ctx);
                 if (result.Action == AMRuleAction.Deny)
                 {
@@ -739,11 +766,18 @@ namespace amFTPd.Core
 
             var node = vfsResult.Node;
 
+            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            if (!access.CanList)
+            {
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             await _s.WithDataAsync(async stream =>
             {
-                using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
 
                 switch (node.Type)
                 {
@@ -821,11 +855,18 @@ namespace amFTPd.Core
 
             var node = vfsResult.Node;
 
+            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            if (!access.CanList)
+            {
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             await _s.WithDataAsync(async stream =>
             {
-                using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
 
                 switch (node.Type)
                 {
@@ -890,11 +931,18 @@ namespace amFTPd.Core
 
             var node = vfsResult.Node;
 
+            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            if (!access.CanList)
+            {
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             await _s.WithDataAsync(async stream =>
             {
-                using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
 
                 switch (node.Type)
                 {
@@ -970,6 +1018,13 @@ namespace amFTPd.Core
             }
 
             var node = vfsResult.Node;
+
+            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            if (!access.CanList)
+            {
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
+            }
 
             string facts;
             switch (node.Type)
@@ -1059,6 +1114,13 @@ namespace amFTPd.Core
 
             var virtTarget = node.VirtualPath;
 
+            var access = _directoryAccess.Evaluate(virtTarget);
+            if (!access.CanDownload)
+            {
+                await _s.WriteAsync("550 Download not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             long length;
             Stream sourceStream;
             try
@@ -1117,6 +1179,7 @@ namespace amFTPd.Core
                     var maxKbps = _s.Account?.MaxDownloadKbps ?? 0;
                     var transferred = await CopyWithThrottleAsync(sourceStream, s, maxKbps, ct);
                     ApplyDownloadCredits(section, transferred);
+                    if (transferred > 0) FireSiteEvent("onDownload", virtTarget, section, _s.Account?.UserName);
                 }
             }, ct);
 
@@ -1166,6 +1229,13 @@ namespace amFTPd.Core
             var dirVirt = string.IsNullOrEmpty(dirVirtRaw) || dirVirtRaw == "\\" ? "/" : dirVirtRaw.Replace('\\', '/');
             var fileName = Path.GetFileName(virtTarget);
 
+            var access = _directoryAccess.Evaluate(dirVirt);
+            if (!access.CanUpload)
+            {
+                await _s.WriteAsync("550 Upload not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             string physDir;
             try
             {
@@ -1209,6 +1279,8 @@ namespace amFTPd.Core
                 var maxKbps = _s.Account?.MaxUploadKbps ?? 0;
                 var transferred = await CopyWithThrottleAsync(s, fs, maxKbps, ct);
                 ApplyUploadCredits(section, transferred);
+                if (transferred > 0) FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
+                if (_s.Account is { } acc && transferred > 0) _raceEngine.RegisterUpload(acc.UserName, dirVirt, section.Name, transferred);
             }, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
@@ -1250,6 +1322,14 @@ namespace amFTPd.Core
             }
 
             var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
+
+            var access = _directoryAccess.Evaluate(virtTarget /* or virtTarget, but dirVirt is cleaner here */);
+            if (!access.CanUpload)
+            {
+                await _s.WriteAsync("550 Upload not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             string phys;
             try
             {
@@ -1276,6 +1356,8 @@ namespace amFTPd.Core
                 var maxKbps = _s.Account?.MaxUploadKbps ?? 0;
                 var transferred = await CopyWithThrottleAsync(s, fs, maxKbps, ct);
                 ApplyUploadCredits(section, transferred);
+                if (transferred > 0) FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
+                if (_s.Account is { } acc && transferred > 0) _raceEngine.RegisterUpload(acc.UserName, virtTarget, section.Name, transferred);
             }, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
@@ -1334,6 +1416,7 @@ namespace amFTPd.Core
             }
 
             var target = FtpPath.Normalize(_s.Cwd, arg);
+            var section = GetSectionForVirtual(target);
             string phys;
             try
             {
@@ -1348,6 +1431,7 @@ namespace amFTPd.Core
             if (File.Exists(phys))
             {
                 File.Delete(phys);
+                FireSiteEvent("onDelete", target, section, _s.Account?.UserName);
                 await _s.WriteAsync(FtpResponses.ActionOk, ct);
             }
             else
@@ -1374,6 +1458,7 @@ namespace amFTPd.Core
             }
 
             var target = FtpPath.Normalize(_s.Cwd, arg);
+            var section = GetSectionForVirtual(target);
             string phys;
             try
             {
@@ -1386,6 +1471,7 @@ namespace amFTPd.Core
             }
 
             Directory.CreateDirectory(phys);
+            FireSiteEvent("onMkdir", target, section, _s.Account?.UserName);
             await _s.WriteAsync(FtpResponses.PathCreated, ct);
         }
 
@@ -1407,6 +1493,7 @@ namespace amFTPd.Core
             }
 
             var target = FtpPath.Normalize(_s.Cwd, arg);
+            var section = GetSectionForVirtual(target);
             string phys;
             try
             {
@@ -1421,6 +1508,7 @@ namespace amFTPd.Core
             if (Directory.Exists(phys))
             {
                 Directory.Delete(phys, true);
+                FireSiteEvent("onRmdir", target, section, _s.Account?.UserName);
                 await _s.WriteAsync(FtpResponses.ActionOk, ct);
             }
             else
@@ -1517,6 +1605,15 @@ namespace amFTPd.Core
             }
 
             var target = FtpPath.Normalize(_s.Cwd, arg);
+
+            // Directory flags: treat SIZE as download-related metadata
+            var access = _directoryAccess.Evaluate(target);
+            if (!access.CanDownload)
+            {
+                await _s.WriteAsync("550 SIZE not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             string phys;
             try
             {
@@ -1568,6 +1665,15 @@ namespace amFTPd.Core
             }
 
             var target = FtpPath.Normalize(_s.Cwd, arg);
+
+            // Directory flags: treat MDTM as download-related metadata
+            var access = _directoryAccess.Evaluate(target);
+            if (!access.CanDownload)
+            {
+                await _s.WriteAsync("550 MDTM not allowed in this directory.\r\n", ct);
+                return;
+            }
+
             string phys;
             try
             {
@@ -1645,25 +1751,34 @@ namespace amFTPd.Core
                     await _s.WriteAsync(
                         "214-SITE commands:\r\n" +
                         " SITE HELP\r\n" +
-                        " SITE WHO\r\n" +
-                        " SITE USERS\r\n" +
-                        " SITE GROUPS\r\n" +
-                        " SITE KILL <id>\r\n" +
-                        " SITE CHMOD <mode> <path>\r\n" +
-                        " SITE ADDUSER <user> <password> <homedir> [group]\r\n" +
-                        " SITE GADDUSER <group> <user>\r\n" +
-                        " SITE CHPASS <user> <newpassword>\r\n" +
-                        " SITE SETLIMITS <user> <upKbps> <downKbps>\r\n" +
-                        " SITE SETFLAGS <user> <flags>\r\n" +
                         " SITE ADDIP <user> <mask>\r\n" +
-                        " SITE DELIP <user>\r\n" +
-                        " SITE IDENT <user> <ident>\r\n" +
-                        " SITE REQIDENT <user> <on|off>\r\n" +
-                        " SITE SHOWUSER <user>\r\n" +
+                        " SITE ADDUSER <user> <password> <homedir> [group]\r\n" +
+                        " SITE CHMOD <mode> <path>\r\n" +
+                        " SITE CHGRP <user> <primary-group> [secondary-groups...]\r\n" +
+                        " SITE CHPASS <user> <newpassword>\r\n" +
                         " SITE CREDITS <user>\r\n" +
+                        " SITE DELIP <user>\r\n" +
+                        " SITE DIRFLAGS <path> [flags]\r\n" +
+                        " SITE GADDUSER <group> <user>\r\n" +
                         " SITE GIVECRED <user> <amount>\r\n" +
-                        " SITE TAKECRED <user> <amount>\r\n" +
+                        " SITE GROUPS\r\n" +
+                        " SITE IDENT <user> <ident>\r\n" +
+                        " SITE KILL <id>\r\n" +
+                        " SITE LASTRACES [max]\r\n" +
+                        " SITE MOVE <src> <dst>\r\n" +
+                        " SITE NUKE <path> <reason...>\r\n" +
+                        " SITE RACE <path>\r\n" +
+                        " SITE RACELOG [max]\r\n" +
+                        " SITE RACESTATS <path>\r\n" +      
+                        " SITE REQIDENT <user> <on|off>\r\n" +
                         " SITE SECTIONS\r\n" +
+                        " SITE SETFLAGS <user> <flags>\r\n" +
+                        " SITE SETLIMITS <user> <upKbps> <downKbps>\r\n" +
+                        " SITE SHOWUSER <user>\r\n" +
+                        " SITE TAKECRED <user> <amount>\r\n" +
+                        " SITE USERS\r\n" +
+                        " SITE WHO\r\n" +
+                        " SITE WIPE <path> [reason...]\r\n" +
                         "214 End\r\n"
                         , ct);
                     break;
@@ -1694,6 +1809,10 @@ namespace amFTPd.Core
 
                 case "GADDUSER":
                     await SITE_GADDUSER(rest, ct);
+                    break;
+
+                case "CHGRP":
+                    await SITE_CHGRP(rest, ct);
                     break;
 
                 case "CHPASS":
@@ -1742,6 +1861,38 @@ namespace amFTPd.Core
 
                 case "SECTIONS":
                     await SITE_SECTIONS(ct);
+                    break;
+
+                case "DIRFLAGS":
+                    await SITE_DIRFLAGS(rest, ct);
+                    break;
+
+                case "NUKE":
+                    await SITE_NUKE(rest, ct);
+                    break;
+
+                case "WIPE":
+                    await SITE_WIPE(rest, ct);
+                    break;
+
+                case "MOVE":
+                    await SITE_MOVE(rest, ct);
+                    break;
+
+                case "RACE":
+                    await SITE_RACE(rest, ct);
+                    break;
+
+                case "RACESTATS":
+                    await SITE_RACESTATS(rest, ct);
+                    break;
+
+                case "LASTRACES":
+                    await SITE_LASTRACES(rest, ct);
+                    break;
+
+                case "RACELOG":
+                    await SITE_RACELOG(rest, ct);
                     break;
 
                 default:
@@ -2017,6 +2168,7 @@ namespace amFTPd.Core
 
             await _s.WriteAsync($"200 CREDITS {who}: {target.CreditsKb} KB\r\n", ct);
         }
+
         private async Task SITE_GIVECRED(string arg, CancellationToken ct)
         {
             if (_s.Account is not { IsAdmin: true })
@@ -2100,6 +2252,7 @@ namespace amFTPd.Core
                 await _s.WriteAsync($"550 Failed to update credits: {error}\r\n", ct);
             }
         }
+
         private async Task SITE_SECTIONS(CancellationToken ct)
         {
             if (_s.Account is not { IsAdmin: true })
@@ -2124,7 +2277,6 @@ namespace amFTPd.Core
 
             await _s.WriteAsync(sb.ToString().Replace("\n", "\r\n"), ct);
         }
-
 
         private async Task SITE_USERS(CancellationToken ct)
         {
@@ -2408,11 +2560,13 @@ namespace amFTPd.Core
                 IdleTimeout: TimeSpan.FromMinutes(30),
                 MaxUploadKbps: 0,
                 MaxDownloadKbps: 0,
-                GroupName: group,
+                PrimaryGroup: string.IsNullOrWhiteSpace(group) ? "users" : group,
+                SecondaryGroups: ImmutableArray<string>.Empty,
                 CreditsKb: 0,             // start with 0 credits, admin can GIVECRED/SITE CREDITS
                 AllowedIpMask: null,
                 RequireIdentMatch: false,
-                RequiredIdent: null
+                RequiredIdent: null,
+                FlagsRaw: string.Empty
             );
 
             if (_s.Users.TryAddUser(user, out var error))
@@ -2452,7 +2606,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            var updated = existing with { GroupName = group };
+            var updated = existing with { PrimaryGroup = group };
 
             if (_s.Users.TryUpdateUser(updated, out var error))
             {
@@ -2611,6 +2765,802 @@ namespace amFTPd.Core
             catch
             {
                 await _s.WriteAsync("550 Failed to change mode.\r\n", ct);
+            }
+        }
+        
+        private async Task SITE_DIRFLAGS(string arg, CancellationToken ct)
+        {
+            if (_s.Account is not { IsAdmin: true })
+            {
+                await _s.WriteAsync("550 SITE DIRFLAGS requires admin privileges.\r\n", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE DIRFLAGS <path> [flags]\r\n" +
+                    "501 Flags syntax: +list/-list +upload/-upload +download/-download\r\n" +
+                    "501 LIST flag affects: LIST, NLST, MLSD, MLST\r\n" +
+                    "501 UPLOAD flag affects: STOR, APPE\r\n" +
+                    "501 DOWNLOAD flag affects: RETR, SIZE, MDTM\r\n",
+                    ct);
+                return;
+            }
+
+            var parts = arg.Split(' ', 2, StringSplitOptions.TrimEntries);
+            var pathArg = parts[0];
+            var flagsStr = parts.Length > 1 ? parts[1] : string.Empty;
+
+            // Normalize against current working dir, like other path-handling code
+            var virtPath = FtpPath.Normalize(_s.Cwd, pathArg);
+
+            if (!_directoryRules.TryGetValue(virtPath, out var rule)) rule = DirectoryRule.Empty;
+
+            var allowUpload = rule.AllowUpload;
+            var allowDownload = rule.AllowDownload;
+            var allowList = rule.AllowList;
+
+            // If no flags specified, just show current state
+            if (string.IsNullOrWhiteSpace(flagsStr))
+            {
+                await _s.WriteAsync(
+                    $"211-Directory flags for {virtPath}\r\n" +
+                    $" LIST:     {FormatDirFlag(allowList)} (affects LIST, NLST, MLSD, MLST)\r\n" +
+                    $" UPLOAD:   {FormatDirFlag(allowUpload)} (affects STOR, APPE)\r\n" +
+                    $" DOWNLOAD: {FormatDirFlag(allowDownload)} (affects RETR, SIZE, MDTM)\r\n" +
+                    "211 End\r\n",
+                    ct);
+                return;
+            }
+
+            var tokens = flagsStr.Split(new[] { ' ', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var raw in tokens)
+            {
+                var t = raw.Trim();
+                if (t.Length < 2)
+                    continue;
+
+                var op = t[0];
+                var name = t[1..].ToLowerInvariant();
+
+                var value = op == '+';
+
+                switch (name)
+                {
+                    case "list":
+                    case "l":
+                        allowList = value;
+                        break;
+
+                    case "upload":
+                    case "up":
+                    case "u":
+                        allowUpload = value;
+                        break;
+
+                    case "download":
+                    case "down":
+                    case "d":
+                        allowDownload = value;
+                        break;
+                }
+            }
+
+            var updated = new DirectoryRule(
+                AllowUpload: allowUpload,
+                AllowDownload: allowDownload,
+                IsFree: rule.IsFree,
+                MultiplyCost: rule.MultiplyCost,
+                UploadBonus: rule.UploadBonus,
+                Ratio: rule.Ratio,
+                AllowList: allowList
+            );
+
+            _directoryRules[virtPath] = updated;
+
+            _log.Log(
+                FtpLogLevel.Info,
+                $"SITE DIRFLAGS: {virtPath} LIST={FormatDirFlag(allowList)} UPLOAD={FormatDirFlag(allowUpload)} DOWNLOAD={FormatDirFlag(allowDownload)} set by {_s.Account?.UserName ?? "unknown"}");
+
+            await _s.WriteAsync(
+                $"200 Directory flags updated for {virtPath}: LIST={FormatDirFlag(allowList)} UPLOAD={FormatDirFlag(allowUpload)} DOWNLOAD={FormatDirFlag(allowDownload)}\r\n",
+                ct);
+        }
+
+        private async Task SITE_CHGRP(string arg, CancellationToken ct)
+        {
+            if (_s.Account is not { IsAdmin: true })
+            {
+                await _s.WriteAsync("550 SITE CHGRP requires admin privileges.\r\n", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE CHGRP <user> <primary-group> [secondary-groups...]\r\n",
+                    ct);
+                return;
+            }
+
+            var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE CHGRP <user> <primary-group> [secondary-groups...]\r\n",
+                    ct);
+                return;
+            }
+
+            var userName = parts[0];
+            var primaryGroup = parts[1];
+            var secondary = parts.Length > 2
+                ? parts.Skip(2)
+                       .Where(p => !string.IsNullOrWhiteSpace(p))
+                       .Distinct(StringComparer.OrdinalIgnoreCase)
+                       .ToArray()
+                : Array.Empty<string>();
+
+            var user = _s.Users.FindUser(userName);
+            if (user is null)
+            {
+                await _s.WriteAsync("550 User not found.\r\n", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(primaryGroup))
+            {
+                await _s.WriteAsync("550 Primary group cannot be empty.\r\n", ct);
+                return;
+            }
+
+            // Create updated user with new primary + secondary groups
+            var updated = user with
+            {
+                PrimaryGroup = primaryGroup,
+                SecondaryGroups = secondary.Length == 0
+                    ? ImmutableArray<string>.Empty
+                    : ImmutableArray.CreateRange(secondary)
+            };
+
+            if (_s.Users.TryUpdateUser(updated, out var error))
+            {
+                await _s.WriteAsync(
+                    $"200 Group(s) updated for {userName}. PRIMARY={primaryGroup} SECONDARY={string.Join(',', secondary)}\r\n",
+                    ct);
+            }
+            else
+            {
+                await _s.WriteAsync($"550 Failed to update user groups: {error}\r\n", ct);
+            }
+        }
+
+        private async Task SITE_NUKE(string arg, CancellationToken ct)
+        {
+            if (_s.Account is not { IsAdmin: true })
+            {
+                await _s.WriteAsync("550 SITE NUKE requires admin privileges.\r\n", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE NUKE <path> <reason...>\r\n",
+                    ct);
+                return;
+            }
+
+            var parts = arg.Split(' ', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length < 2)
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE NUKE <path> <reason...>\r\n",
+                    ct);
+                return;
+            }
+
+            var pathArg = parts[0];
+            var reason = parts[1];
+
+            var virt = FtpPath.Normalize(_s.Cwd, pathArg);
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(virt);
+            }
+            catch
+            {
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                return;
+            }
+
+            var isDir = Directory.Exists(phys);
+            var isFile = File.Exists(phys);
+
+            if (!isDir && !isFile)
+            {
+                await _s.WriteAsync("550 File or directory not found.\r\n", ct);
+                return;
+            }
+
+            // Determine release path key for race/nuke credit logic
+            string releaseVirt;
+            if (isDir)
+            {
+                releaseVirt = virt;
+            }
+            else
+            {
+                var dirVirtRaw = Path.GetDirectoryName(virt);
+                releaseVirt = string.IsNullOrEmpty(dirVirtRaw) || dirVirtRaw == "\\"
+                    ? "/"
+                    : dirVirtRaw.Replace('\\', '/');
+            }
+
+            // Try to resolve section for the release (used for ratio context)
+            FtpSection? section = null;
+            try
+            {
+                section = GetSectionForVirtual(releaseVirt);
+            }
+            catch
+            {
+                // best-effort; section can be null
+            }
+
+            var nuker = _s.Account?.UserName ?? "unknown";
+            var nukeMultiplier = 3.0; // classic 3x nuke penalty
+
+            if (section?.NukeMultiplier is { } sectionMult && sectionMult > 0)
+            {
+                nukeMultiplier = sectionMult;
+            }
+            else if (_cfg.DefaultNukeMultiplier > 0)
+            {
+                nukeMultiplier = _cfg.DefaultNukeMultiplier;
+            }
+
+            // credit penalties, based on race info if present
+            var penalties = new List<(string User, long Bytes, long PenaltyKb, long NewCredits)>();
+
+            if (_raceEngine.TryGetRace(releaseVirt, out var race))
+            {
+                foreach (var kv in race.UserBytes)
+                {
+                    var userName = kv.Key;
+                    var bytesUploaded = kv.Value;
+
+                    var user = _s.Users.FindUser(userName);
+                    if (user is null)
+                        continue;
+
+                    // resolve effective ratio rule for this path/user
+                    var rule = RatioEngine.ResolveRule(releaseVirt, user);
+                    var earnedKb = RatioEngine.ComputeUploadEarnedKb(bytesUploaded, rule, user);
+
+                    if (earnedKb <= 0)
+                        continue;
+
+                    var penaltyKb = (long)Math.Round(earnedKb * nukeMultiplier, MidpointRounding.AwayFromZero);
+                    var newCredits = Math.Max(0, user.CreditsKb - penaltyKb);
+
+                    var updated = user with { CreditsKb = newCredits };
+                    if (_s.Users.TryUpdateUser(updated, out _))
+                    {
+                        // update in-session account if we nuked ourselves
+                        if (_s.Account is { UserName: var un } && string.Equals(un, userName, StringComparison.OrdinalIgnoreCase))
+                            _s.SetAccount(updated);
+
+                        penalties.Add((userName, bytesUploaded, penaltyKb, newCredits));
+                    }
+                }
+            }
+
+            // Perform the actual physical NUKE (rename)
+            try
+            {
+                var parent = Path.GetDirectoryName(phys) ?? phys;
+                var name = Path.GetFileName(phys);
+                var baseNukedName = name + ".NUKED";
+                var target = Path.Combine(parent, baseNukedName);
+
+                if (Directory.Exists(target) || File.Exists(target))
+                {
+                    var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                    target = Path.Combine(parent, $"{name}.NUKED-{stamp}");
+                }
+
+                if (isDir)
+                {
+                    Directory.Move(phys, target);
+                }
+                else
+                {
+                    File.Move(phys, target);
+                }
+
+                // Log to main log
+                _log.Log(
+                    FtpLogLevel.Warn,
+                    $"SITE NUKE by {nuker}: {virt} => {target} (Reason: {reason}, Penalties: {penalties.Count})");
+
+                // Append to nukes.log (scene-style nuke log stub)
+                try
+                {
+                    Directory.CreateDirectory("logs");
+                    var sb = new StringBuilder();
+                    var now = DateTimeOffset.UtcNow;
+
+                    sb.Append(now.ToString("yyyy-MM-dd HH:mm:ss zzz"))
+                      .Append(" | NUKE | ")
+                      .Append($"path={virt} | nuker={nuker} | reason={reason} | mult={nukeMultiplier}");
+
+                    if (race is not null)
+                    {
+                        sb.Append($" | totalBytes={race.TotalBytes} | files={race.FileCount}");
+                    }
+
+                    if (penalties.Count > 0)
+                    {
+                        sb.Append(" | penalties=");
+                        sb.Append(string.Join(";", penalties.Select(p =>
+                            $"{p.User}:{p.Bytes}B:-{p.PenaltyKb}KB=>{p.NewCredits}KB")));
+                    }
+
+                    sb.AppendLine();
+
+                    File.AppendAllText("logs/nukes.log", sb.ToString());
+                }
+                catch
+                {
+                    // logging failure shouldn't break NUKE
+                }
+
+                // AMScript notification hooks:
+                FireSiteEvent("onNuke", releaseVirt, section, nuker);
+
+                if (race is not null) FireSiteEvent("onRaceComplete", releaseVirt, section, nuker);
+
+                await _s.WriteAsync(
+                    $"250 NUKE completed for {virt}. Reason: {reason}\r\n",
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(
+                    FtpLogLevel.Error,
+                    $"SITE NUKE failed for {virt}: {ex.Message}");
+
+                await _s.WriteAsync("550 NUKE failed.\r\n", ct);
+            }
+        }
+
+        private async Task SITE_WIPE(string arg, CancellationToken ct)
+        {
+            if (_s.Account is not { IsAdmin: true })
+            {
+                await _s.WriteAsync("550 SITE WIPE requires admin privileges.\r\n", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE WIPE <path> [reason...]\r\n",
+                    ct);
+                return;
+            }
+
+            var parts = arg.Split(' ', 2, StringSplitOptions.TrimEntries);
+            var pathArg = parts[0];
+            var reason = parts.Length > 1 ? parts[1] : string.Empty;
+
+            var virt = FtpPath.Normalize(_s.Cwd, pathArg);
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(virt);
+            }
+            catch
+            {
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                return;
+            }
+
+            var isDir = Directory.Exists(phys);
+            var isFile = File.Exists(phys);
+
+            if (!isDir && !isFile)
+            {
+                await _s.WriteAsync("550 File or directory not found.\r\n", ct);
+                return;
+            }
+
+            try
+            {
+                if (isDir)
+                {
+                    Directory.Delete(phys, recursive: true);
+                }
+                else
+                {
+                    File.Delete(phys);
+                }
+
+                _log.Log(
+                    FtpLogLevel.Info,
+                    $"SITE WIPE by {_s.Account?.UserName ?? "unknown"}: {virt} {(string.IsNullOrWhiteSpace(reason) ? "" : $"(Reason: {reason})")}");
+
+                await _s.WriteAsync(
+                    $"250 WIPE completed for {virt}\r\n",
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(
+                    FtpLogLevel.Error,
+                    $"SITE WIPE failed for {virt}: {ex.Message}");
+
+                await _s.WriteAsync("550 WIPE failed.\r\n", ct);
+            }
+        }
+
+        private async Task SITE_MOVE(string arg, CancellationToken ct)
+        {
+            if (_s.Account is not { IsAdmin: true })
+            {
+                await _s.WriteAsync("550 SITE MOVE requires admin privileges.\r\n", ct);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE MOVE <src> <dst>\r\n",
+                    ct);
+                return;
+            }
+
+            // NOTE: for now, paths cannot contain spaces.
+            var parts = arg.Split(' ', 3, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE MOVE <src> <dst>\r\n",
+                    ct);
+                return;
+            }
+
+            var srcArg = parts[0];
+            var dstArg = parts[1];
+
+            var srcVirt = FtpPath.Normalize(_s.Cwd, srcArg);
+            var dstVirt = FtpPath.Normalize(_s.Cwd, dstArg);
+
+            string srcPhys;
+            string dstPhys;
+            try
+            {
+                srcPhys = _fs.MapToPhysical(srcVirt);
+                dstPhys = _fs.MapToPhysical(dstVirt);
+            }
+            catch
+            {
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                return;
+            }
+
+            var isDir = Directory.Exists(srcPhys);
+            var isFile = File.Exists(srcPhys);
+
+            if (!isDir && !isFile)
+            {
+                await _s.WriteAsync("550 Source file or directory not found.\r\n", ct);
+                return;
+            }
+
+            // Basic safety: do not overwrite existing target.
+            if (Directory.Exists(dstPhys) || File.Exists(dstPhys))
+            {
+                await _s.WriteAsync("550 Destination already exists.\r\n", ct);
+                return;
+            }
+
+            try
+            {
+                var dstParent = Path.GetDirectoryName(dstPhys);
+                if (!string.IsNullOrEmpty(dstParent) && !Directory.Exists(dstParent))
+                {
+                    await _s.WriteAsync("550 Destination parent directory does not exist.\r\n", ct);
+                    return;
+                }
+
+                if (isDir)
+                {
+                    Directory.Move(srcPhys, dstPhys);
+                }
+                else
+                {
+                    File.Move(srcPhys, dstPhys);
+                }
+
+                _log.Log(
+                    FtpLogLevel.Info,
+                    $"SITE MOVE by {_s.Account?.UserName ?? "unknown"}: {srcVirt} -> {dstVirt}");
+
+                await _s.WriteAsync(
+                    $"250 MOVE completed: {srcVirt} -> {dstVirt}\r\n",
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(
+                    FtpLogLevel.Error,
+                    $"SITE MOVE failed {srcVirt} -> {dstVirt}: {ex.Message}");
+
+                await _s.WriteAsync("550 MOVE failed.\r\n", ct);
+            }
+        }
+
+        private async Task SITE_RACE(string arg, CancellationToken ct)
+        {
+            // RACE is read-only; usually visible to all logged-in users, no admin check.
+
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE RACE <path>\r\n",
+                    ct);
+                return;
+            }
+
+            var releaseVirt = FtpPath.Normalize(_s.Cwd, arg);
+
+            if (!_raceEngine.TryGetRace(releaseVirt, out var race))
+            {
+                await _s.WriteAsync("550 No race information for this path.\r\n", ct);
+                return;
+            }
+
+            var totalBytes = race.TotalBytes <= 0 ? 1 : race.TotalBytes; // avoid div-by-zero
+            var ordered = race.UserBytes
+                .OrderByDescending(kv => kv.Value)
+                .ToList();
+
+            await _s.WriteAsync(
+                $"211-RACE {race.ReleasePath} (section: {race.SectionName})\r\n",
+                ct);
+            await _s.WriteAsync("211-User             MB        %\r\n", ct);
+            await _s.WriteAsync("211-------------------------------\r\n", ct);
+
+            foreach (var kv in ordered)
+            {
+                var user = kv.Key;
+                var bytes = kv.Value;
+                var mb = bytes / (1024.0 * 1024.0);
+                var pct = (double)bytes * 100.0 / totalBytes;
+
+                await _s.WriteAsync(
+                    $"211- {user,-12} {mb,8:0.00} {pct,6:0.0}\r\n",
+                    ct);
+            }
+
+            await _s.WriteAsync("211 End\r\n", ct);
+        }
+
+        private async Task SITE_RACESTATS(string arg, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(
+                    "501 Usage: SITE RACESTATS <path>\r\n",
+                    ct);
+                return;
+            }
+
+            var releaseVirt = FtpPath.Normalize(_s.Cwd, arg);
+
+            if (!_raceEngine.TryGetRace(releaseVirt, out var race))
+            {
+                await _s.WriteAsync("550 No race information for this path.\r\n", ct);
+                return;
+            }
+
+            var totalBytes = race.TotalBytes;
+            var totalMb = totalBytes / (1024.0 * 1024.0);
+            var ordered = race.UserBytes
+                .OrderByDescending(kv => kv.Value)
+                .ToList();
+
+            await _s.WriteAsync(
+                $"211-RACESTATS {race.ReleasePath}\r\n",
+                ct);
+            await _s.WriteAsync($"211- Section:       {race.SectionName}\r\n", ct);
+            await _s.WriteAsync($"211- Started:       {race.StartedAt:yyyy-MM-dd HH:mm:ss zzz}\r\n", ct);
+            await _s.WriteAsync($"211- Last Update:   {race.LastUpdatedAt:yyyy-MM-dd HH:mm:ss zzz}\r\n", ct);
+            await _s.WriteAsync($"211- Files:         {race.FileCount}\r\n", ct);
+            await _s.WriteAsync($"211- Total Bytes:   {totalBytes}\r\n", ct);
+            await _s.WriteAsync($"211- Total MB:      {totalMb:0.00}\r\n", ct);
+            await _s.WriteAsync("211-\r\n", ct);
+            await _s.WriteAsync("211-User             MB        %\r\n", ct);
+            await _s.WriteAsync("211-------------------------------\r\n", ct);
+
+            var denom = totalBytes <= 0 ? 1 : totalBytes;
+
+            foreach (var kv in ordered)
+            {
+                var user = kv.Key;
+                var bytes = kv.Value;
+                var mb = bytes / (1024.0 * 1024.0);
+                var pct = (double)bytes * 100.0 / denom;
+
+                await _s.WriteAsync(
+                    $"211- {user,-12} {mb,8:0.00} {pct,6:0.0}\r\n",
+                    ct);
+            }
+
+            await _s.WriteAsync("211 End\r\n", ct);
+        }
+
+        private async Task SITE_LASTRACES(string arg, CancellationToken ct)
+        {
+            var max = 10;
+            if (!string.IsNullOrWhiteSpace(arg) &&
+                int.TryParse(arg.Trim(), out var parsed) &&
+                parsed > 0 && parsed <= 50)
+            {
+                max = parsed;
+            }
+
+            var races = _raceEngine.GetRecentRaces(max);
+            if (races.Count == 0)
+            {
+                await _s.WriteAsync("211 No races recorded yet.\r\n", ct);
+                return;
+            }
+
+            await _s.WriteAsync("211-Last races:\r\n", ct);
+            await _s.WriteAsync("211-#  Section  Files  MB      LastUpdate           Path\r\n", ct);
+            await _s.WriteAsync("211--------------------------------------------------------------\r\n", ct);
+
+            var idx = 1;
+            foreach (var race in races)
+            {
+                var mb = race.TotalBytes / (1024.0 * 1024.0);
+                await _s.WriteAsync(
+                    $"211- {idx,2} {race.SectionName,-8} {race.FileCount,5} {mb,7:0.00} {race.LastUpdatedAt:yyyy-MM-dd HH:mm} {race.ReleasePath}\r\n",
+                    ct);
+                idx++;
+            }
+
+            await _s.WriteAsync("211 End\r\n", ct);
+        }
+
+        private async Task SITE_RACELOG(string arg, CancellationToken ct)
+        {
+            var max = 10;
+            if (!string.IsNullOrWhiteSpace(arg) &&
+                int.TryParse(arg.Trim(), out var parsed) &&
+                parsed > 0 && parsed <= 50)
+            {
+                max = parsed;
+            }
+
+            var races = _raceEngine.GetRecentRaces(max);
+            if (races.Count == 0)
+            {
+                await _s.WriteAsync("211 No races recorded yet.\r\n", ct);
+                return;
+            }
+
+            await _s.WriteAsync("211-RACELOG (most recent first)\r\n", ct);
+
+            foreach (var race in races)
+            {
+                var mb = race.TotalBytes / (1024.0 * 1024.0);
+
+                await _s.WriteAsync(
+                    $"211- Path:    {race.ReleasePath}\r\n" +
+                    $"211- Section: {race.SectionName}\r\n" +
+                    $"211- Started: {race.StartedAt:yyyy-MM-dd HH:mm:ss zzz}\r\n" +
+                    $"211- Last:    {race.LastUpdatedAt:yyyy-MM-dd HH:mm:ss zzz}\r\n" +
+                    $"211- Files:   {race.FileCount}\r\n" +
+                    $"211- MB:      {mb:0.00}\r\n" +
+                    "211-\r\n",
+                    ct);
+            }
+
+            await _s.WriteAsync("211 End\r\n", ct);
+        }
+
+        private async Task VERSION(CancellationToken ct)
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            var ver = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+                      ?? asm.GetName().Version?.ToString()
+                      ?? "unknown";
+
+            // Same logo spirit as Program.cs, but sent as 211- lines
+            var logo = new[]
+            {
+                @".______  ._____.___ .____________._._______ .______  ",
+                @":      \ :         |:_ ____/\__ _:|: ____  |:_ _   \ ",
+                @"|   .   ||   \  /  ||   _/    |  :||    :  ||   |   |",
+                @"|   :   ||   |\/   ||   |     |   ||   |___|| . |   |",
+                @"|___|   ||___| |   ||_. |     |   ||___|    |. ____/ ",
+                @"    |___|      |___|  :/      |___|        :/       ",
+                @"                    :                     :         "
+            };
+
+            await _s.WriteAsync("211- amFTPd VERSION\r\n", ct);
+            foreach (var line in logo)
+            {
+                await _s.WriteAsync("211- " + line + "\r\n", ct);
+            }
+
+            await _s.WriteAsync($"211- amFTPd - a managed FTP daemon v{ver}\r\n", ct);
+            await _s.WriteAsync("211 End\r\n", ct);
+        }
+
+        private static string FormatDirFlag(bool? value) =>
+            value is true ? "ALLOW"
+            : value is false ? "DENY"
+            : "INHERIT";
+
+        /// <summary>
+        /// Fires a logical SITE event into the site AMScript engine (site.msl),
+        /// using the release/virtual path as context. This is used for things
+        /// like onNuke / onRaceComplete that are not direct SITE commands.
+        /// </summary>
+        private void FireSiteEvent(
+            string eventName,
+            string releaseVirtPath,
+            FtpSection? section,
+            string? userName)
+        {
+            if (_siteScript is null)
+                return;
+
+            // Resolve physical path if possible
+            string phys;
+            try
+            {
+                phys = _fs.MapToPhysical(releaseVirtPath);
+            }
+            catch
+            {
+                phys = string.Empty;
+            }
+
+            var acc = _s.Account;
+            var userGroup = acc?.GroupName ?? string.Empty;
+
+            var ctx = new AMScriptContext(
+                IsFxp: _isFxp,
+                Section: section?.Name ?? string.Empty,
+                FreeLeech: section?.FreeLeech ?? false,
+                UserName: userName ?? acc?.UserName ?? string.Empty,
+                UserGroup: userGroup,
+                Bytes: 0,
+                Kb: 0,
+                CostDownload: 0,
+                EarnedUpload: 0,
+                VirtualPath: releaseVirtPath,
+                PhysicalPath: phys,
+                Event: eventName
+            );
+
+            // We treat these as fire-and-forget notifications.
+            // Scripts can log / trigger external actions; we ignore returned action.
+            try
+            {
+                _siteScript.EvaluateUpload(ctx);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Error, $"AMScript site event '{eventName}' failed: {ex.Message}");
             }
         }
     }

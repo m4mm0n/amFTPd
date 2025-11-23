@@ -75,15 +75,15 @@ namespace amFTPd.Utils
                 return StyleMessageTokens(line);
             }
 
-            string ts = m.Groups["ts"].Value;
-            string level = m.Groups["level"].Value;
-            string msg = m.Groups["msg"].Value;
+            var ts = m.Groups["ts"].Value;
+            var level = m.Groups["level"].Value;
+            var msg = m.Groups["msg"].Value;
 
-            string levelColor = GetLevelColor(level);
+            var levelColor = GetLevelColor(level);
 
-            string tsStyled = $"{Dim}[{ts}]{Reset}";
-            string levelStyled = $"{Bold}{levelColor}{level}{Reset}";
-            string msgStyled = StyleMessageTokens(msg);
+            var tsStyled = $"{Dim}[{ts}]{Reset}";
+            var levelStyled = $"{Bold}{levelColor}{level}{Reset}";
+            var msgStyled = StyleMessageTokens(msg);
 
             return $"{tsStyled} {levelStyled}: {msgStyled}{Reset}";
         }
@@ -109,9 +109,9 @@ namespace amFTPd.Utils
                 return;
             }
 
-            string visible = AnsiRegex.Replace(text, "");
-            int width = SafeWindowWidth();
-            int leftPadding = Math.Max((width - visible.Length) / 2, 0);
+            var visible = AnsiRegex.Replace(text, "");
+            var width = SafeWindowWidth();
+            var leftPadding = Math.Max((width - visible.Length) / 2, 0);
 
             if (leftPadding > 0 && Console.CursorLeft != leftPadding)
             {
@@ -146,13 +146,13 @@ namespace amFTPd.Utils
         public static void WriteHellfireFrame(this IEnumerable<string> lines, int frame)
         {
             var arr = lines.ToArray();
-            int maxLen = arr.Max(l => AnsiRegex.Replace(l, "").Length);
+            var maxLen = arr.Max(l => AnsiRegex.Replace(l, "").Length);
 
-            int pad = 2;
-            int innerWidth = maxLen + pad * 2;
+            var pad = 2;
+            var innerWidth = maxLen + pad * 2;
 
-            int frameColorIndex = frame % DemoBorderColors.Length;
-            string borderColor = DemoBorderColors[frameColorIndex];
+            var frameColorIndex = frame % DemoBorderColors.Length;
+            var borderColor = DemoBorderColors[frameColorIndex];
 
             // Top border
             WriteCentered(borderColor + "╔" + new string('═', innerWidth) + "╗" + "\x1b[0m");
@@ -160,12 +160,12 @@ namespace amFTPd.Utils
             // Render each line with flickering fire
             foreach (var raw in arr)
             {
-                string visible = AnsiRegex.Replace(raw, "");
-                int extra = maxLen - visible.Length;
+                var visible = AnsiRegex.Replace(raw, "");
+                var extra = maxLen - visible.Length;
 
-                string fireLine = GenerateHellfireText(raw, frame);
+                var fireLine = GenerateHellfireText(raw, frame);
 
-                string full =
+                var full =
                     borderColor + "║" + "\x1b[0m" +
                     new string(' ', pad) +
                     fireLine +
@@ -186,8 +186,8 @@ namespace amFTPd.Utils
         public static void WriteHellfireBanner(this IEnumerable<string> lines, int fps = 16)
         {
             Console.CursorVisible = false;
-            int delay = 1000 / fps;
-            int frame = 0;
+            var delay = 1000 / fps;
+            var frame = 0;
 
             while (true)
             {
@@ -206,9 +206,9 @@ namespace amFTPd.Utils
             var rnd = new Random(seed * 7919 + line.Length * 131);
 
             var output = new StringBuilder();
-            foreach (char c in line)
+            foreach (var c in line)
             {
-                string col = HellfireColors[rnd.Next(HellfireColors.Length)];
+                var col = HellfireColors[rnd.Next(HellfireColors.Length)];
                 output.Append(col).Append(c);
             }
             output.Append("\x1b[0m");
@@ -221,8 +221,8 @@ namespace amFTPd.Utils
         /// </summary>
         private static void WriteCentered(string text)
         {
-            string clean = AnsiRegex.Replace(text, "");
-            int left = Math.Max((Console.WindowWidth - clean.Length) / 2, 0);
+            var clean = AnsiRegex.Replace(text, "");
+            var left = Math.Max((Console.WindowWidth - clean.Length) / 2, 0);
 
             try { Console.SetCursorPosition(left, Console.CursorTop); }
             catch { }
@@ -245,31 +245,31 @@ namespace amFTPd.Utils
             var arr = lines.ToArray();
             if (arr.Length == 0) return;
 
-            int maxVisibleLen = 0;
+            var maxVisibleLen = 0;
             foreach (var l in arr)
             {
-                string visible = AnsiRegex.Replace(l ?? string.Empty, "");
+                var visible = AnsiRegex.Replace(l ?? string.Empty, "");
                 if (visible.Length > maxVisibleLen)
                     maxVisibleLen = visible.Length;
             }
 
-            int padding = 2;
-            int innerWidth = maxVisibleLen + padding * 2;
+            var padding = 2;
+            var innerWidth = maxVisibleLen + padding * 2;
 
-            string top = "╔" + new string('═', innerWidth) + "╗";
-            string bottom = "╚" + new string('═', innerWidth) + "╝";
+            var top = "╔" + new string('═', innerWidth) + "╗";
+            var bottom = "╚" + new string('═', innerWidth) + "╝";
 
             top.WriteCenteredAnsi();
             foreach (var raw in arr)
             {
                 var line = raw ?? string.Empty;
-                string visible = AnsiRegex.Replace(line, "");
+                var visible = AnsiRegex.Replace(line, "");
 
-                int extraSpaces = maxVisibleLen - visible.Length;
-                int leftSpaces = padding;
-                int rightSpaces = padding + extraSpaces;
+                var extraSpaces = maxVisibleLen - visible.Length;
+                var leftSpaces = padding;
+                var rightSpaces = padding + extraSpaces;
 
-                string boxed =
+                var boxed =
                     "║" +
                     new string(' ', leftSpaces) +
                     line +

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -52,14 +52,7 @@ namespace amFTPd
 
             var runtime = await AmFtpdConfigLoader.LoadAsync(configFile, logger);
 
-            var server = new FtpServer(
-                runtime.FtpConfig,
-                runtime.UserStore,
-                runtime.TlsConfig,
-                logger,
-                runtime.Sections,
-                runtime.IdentConfig,
-                runtime.VfsConfig);
+            var server = new FtpServer(runtime, logger);
 
             logger.Log(FtpLogLevel.Info, $"[amFTPd] Root path : {runtime.FtpConfig.RootPath}");
             logger.Log(FtpLogLevel.Info, $"[amFTPd] Bind      : {runtime.FtpConfig.BindAddress}:{runtime.FtpConfig.Port}");

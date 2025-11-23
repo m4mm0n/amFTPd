@@ -16,8 +16,11 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Vfs;
+using amFTPd.Core.Race;
+using amFTPd.Core.Ratio;
 using amFTPd.Security;
 
 namespace amFTPd.Config.Daemon
@@ -55,5 +58,54 @@ namespace amFTPd.Config.Daemon
         /// Gets the configuration settings for the virtual file system (VFS).
         /// </summary>
         public required VfsConfig VfsConfig { get; init; }
+        /// <summary>
+        /// Gets the configured section-level ratio rules.
+        /// Key = section virtual root (e.g. "/movies")
+        /// </summary>
+        public required Dictionary<string, SectionRule> SectionRules { get; init; }
+
+        /// <summary>
+        /// Gets the configured directory-level rules.
+        /// Key = directory virtual path (e.g. "/incoming/group")
+        /// </summary>
+        public required Dictionary<string, DirectoryRule> DirectoryRules { get; init; }
+
+        /// <summary>
+        /// Gets the configured per-path ratio rules.
+        /// Key = virtual path or prefix (e.g. "/movies")
+        /// </summary>
+        public required Dictionary<string, RatioRule> RatioRules { get; init; }
+
+        /// <summary>
+        /// Gets group configuration data (per-group behavior),
+        /// including ratio multipliers, bonus behavior, etc.
+        /// </summary>
+        public required Dictionary<string, GroupConfig> Groups { get; init; }
+
+        /// <summary>
+        /// Gets the ratio engine used for calculating and enforcing upload/download ratios.
+        /// </summary>
+        public required RatioEngine RatioEngine { get; init; }
+
+        /// <summary>
+        /// Gets the ratio pipeline used to determine ratio adjustments.
+        /// </summary>
+        public required RatioResolutionPipeline RatioPipeline { get; init; }
+
+        /// <summary>
+        /// Gets the rule engine used to evaluate directory-based rules for this instance.
+        /// </summary>
+        public required DirectoryRuleEngine DirectoryRuleEngine { get; init; }
+
+        /// <summary>
+        /// Gets the section resolver used to map virtual paths to sections.
+        /// </summary>
+        public required SectionResolver SectionResolver { get; init; }
+
+        /// <summary>
+        /// Gets the race engine used to record per-directory upload contributions for race stats and nukes.
+        /// </summary>
+        public required RaceEngine RaceEngine { get; init; }
+
     }
 }

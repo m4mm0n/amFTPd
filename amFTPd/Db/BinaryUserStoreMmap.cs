@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -18,6 +18,7 @@
 using amFTPd.Config.Ftpd;
 using amFTPd.Security;
 using amFTPd.Utils;
+using System.Collections.Immutable;
 using System.IO.MemoryMappedFiles;
 using System.Security.Cryptography;
 using System.Text;
@@ -370,16 +371,19 @@ namespace amFTPd.Db
                 AllowUpload: (flags & 4) != 0,
                 AllowDownload: (flags & 8) != 0,
                 AllowActiveMode: (flags & 16) != 0,
-                GroupName: group,
+                MaxConcurrentLogins: maxLogins,
+                IdleTimeout: TimeSpan.FromSeconds(idleSec),
+                MaxUploadKbps: up,
+                MaxDownloadKbps: down,
+                PrimaryGroup: group,
+                SecondaryGroups: ImmutableArray<string>.Empty,
                 CreditsKb: credits,
                 AllowedIpMask: ip,
                 RequireIdentMatch: (flags & 32) != 0,
                 RequiredIdent: ident,
-                MaxConcurrentLogins: maxLogins,
-                IdleTimeout: TimeSpan.FromSeconds(idleSec),
-                MaxUploadKbps: up,
-                MaxDownloadKbps: down
+                FlagsRaw: string.Empty
             );
+
         }
 
         // ======================================================================
@@ -394,8 +398,8 @@ namespace amFTPd.Db
 
             var plain = new byte[cipher.Length];
 
-            using (var gcm = new AesGcm(_masterKey))
-                gcm.Decrypt(nonce, cipher, tag, plain);
+            using var gcm = new AesGcm(_masterKey);
+            gcm.Decrypt(nonce, cipher, tag, plain);
 
             return plain;
         }

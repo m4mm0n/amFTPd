@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -25,10 +25,23 @@ namespace amFTPd.Config.Vfs;
 /// restrictions. It also includes caching settings  for metadata to optimize performance.</remarks>
 public sealed record VfsConfig
 {
+    /// <summary>
+    /// Gets a value indicating whether string comparisons are performed using case-sensitive matching.
+    /// </summary>
+    /// <remarks>Set this property to <see langword="true"/> to enable case-sensitive operations. When <see
+    /// langword="false"/>, comparisons ignore character casing.</remarks>
     public bool CaseSensitive { get; init; } = false;
-
+    /// <summary>
+    /// Gets the collection of virtual file system mounts configured for this instance.
+    /// </summary>
     public List<VfsMount> Mounts { get; init; } = new();
+    /// <summary>
+    /// Gets the collection of user-defined virtual file system mounts associated with this instance.
+    /// </summary>
     public List<VfsUserMount> UserMounts { get; init; } = new();
+    /// <summary>
+    /// Gets the collection of virtual files associated with this instance.
+    /// </summary>
     public List<VfsVirtualFile> VirtualFiles { get; init; } = new();
 
     /// <summary>Maximum allowed file size in bytes (0 = unlimited).</summary>

@@ -42,11 +42,11 @@ namespace amFTPd.Utils
 
         public static void RunHellfireHeader(string[] lines)
         {
-            int height = lines.Length + 2; // box overhead
+            var height = lines.Length + 2; // box overhead
 
             while (true)
             {
-                int frame = (Environment.TickCount / 100) % 9999;
+                var frame = (Environment.TickCount / 100) % 9999;
 
                 DrawFrame(lines, frame);
 
@@ -56,25 +56,25 @@ namespace amFTPd.Utils
 
         private static void DrawFrame(string[] lines, int frame)
         {
-            int width = Console.WindowWidth - 2;
-            int borderColorIndex = frame % BorderCycle.Length;
-            string bc = BorderCycle[borderColorIndex];
+            var width = Console.WindowWidth - 2;
+            var borderColorIndex = frame % BorderCycle.Length;
+            var bc = BorderCycle[borderColorIndex];
 
-            int startY = 0;
+            var startY = 0;
 
             // Top border
             WriteAt(0, startY++, bc + "╔" + new string('═', width) + "╗" + "\x1b[0m");
 
             // Banner lines
-            for (int i = 0; i < lines.Length; i++)
+            for (var i = 0; i < lines.Length; i++)
             {
-                string raw = lines[i];
-                string fire = GenerateFire(raw, frame);
+                var raw = lines[i];
+                var fire = GenerateFire(raw, frame);
 
-                int padLeft = (width - raw.Length) / 2;
+                var padLeft = (width - raw.Length) / 2;
                 if (padLeft < 0) padLeft = 0;
 
-                string line =
+                var line =
                     bc + "║" + "\x1b[0m" +
                     new string(' ', padLeft) +
                     fire +
@@ -93,9 +93,9 @@ namespace amFTPd.Utils
             var rnd = new Random(seed * 1337 + text.Length);
             var sb = new StringBuilder();
 
-            foreach (char c in text)
+            foreach (var c in text)
             {
-                string col = Hellfire[rnd.Next(Hellfire.Length)];
+                var col = Hellfire[rnd.Next(Hellfire.Length)];
                 sb.Append(col).Append(c);
             }
             sb.Append("\x1b[0m");

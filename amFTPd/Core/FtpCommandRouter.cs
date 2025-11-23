@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-21
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -15,16 +15,19 @@
  * ====================================================================================================
  */
 
+using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd.RatioRules;
+using amFTPd.Core.Access;
+using amFTPd.Core.Race;
+using amFTPd.Core.Ratio;
 using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
+using System.Collections.Immutable;
 using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
-using System.Text;
 using FtpSection = amFTPd.Config.Ftpd.FtpSection;
 
 namespace amFTPd.Core;
@@ -45,11 +48,15 @@ internal sealed partial class FtpCommandRouter
     private readonly FtpFileSystem _fs;
     private readonly FtpConfig _cfg;
     private readonly TlsConfig _tls;
+
     private readonly SectionManager _sections;
+
     private readonly CreditEngine _credits;
     private readonly IUserStore _users;
     private readonly IGroupStore _groups;
+
     private bool _isFxp;
+
     private AMScriptEngine? _creditScript;
     private AMScriptEngine? _fxpScript;
     private AMScriptEngine? _activeScript;
@@ -58,23 +65,46 @@ internal sealed partial class FtpCommandRouter
     private AMScriptEngine? _userScript;
     private AMScriptEngine? _groupScript;
 
+    private readonly DirectoryAccessEvaluator _directoryAccess;
+    private readonly Dictionary<string, DirectoryRule> _directoryRules;
+
+    private readonly RaceEngine _raceEngine;
+
     /// <summary>
-    /// Initializes a new instance of the <see cref="FtpCommandRouter"/> class, which is responsible for routing and
-    /// handling FTP commands within a session.
+    /// Gets the ratio calculation engine used to perform ratio-based computations.
     /// </summary>
-    /// <param name="s">The current FTP session context, which manages the state and communication for the session.</param>
-    /// <param name="log">The logger instance used to record FTP activity and diagnostics.</param>
-    /// <param name="fs">The file system abstraction used to interact with files and directories on the server.</param>
-    /// <param name="cfg">The FTP server configuration settings that influence command behavior.</param>
-    /// <param name="tls">The TLS configuration used to manage secure communication for the session.</param>
-    /// <param name="sections">The section manager responsible for handling segmented or partitioned server resources.</param>
+    public RatioEngine RatioEngine { get; }
+    /// <summary>
+    /// Gets the ratio pipeline used to determine ratio adjustments.
+    /// </summary>
+    public RatioResolutionPipeline RatioPipeline { get; }
+    /// <summary>
+    /// Gets the rule engine used to evaluate directory-based rules.
+    /// </summary>
+    public DirectoryRuleEngine DirectoryRuleEngine { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the FtpCommandRouter class, configuring FTP session routing, logging, file system
+    /// access, and runtime behavior.
+    /// </summary>
+    /// <remarks>All dependencies must be fully initialized before calling this constructor. This class relies
+    /// on the provided runtime configuration to enable advanced features such as ratio enforcement and directory rule
+    /// evaluation.</remarks>
+    /// <param name="s">The FTP session context used to route and process FTP commands.</param>
+    /// <param name="log">The logger instance for recording FTP command activity and errors.</param>
+    /// <param name="fs">The file system interface for managing file and directory operations within the FTP session.</param>
+    /// <param name="cfg">The FTP server configuration settings that control command routing and behavior.</param>
+    /// <param name="tls">The TLS configuration used to manage secure connections and encryption for FTP commands.</param>
+    /// <param name="sections">The section manager responsible for handling configuration sections and related logic.</param>
+    /// <param name="runtime">The runtime configuration providing engines and pipelines for ratio and directory rule processing.</param>
     public FtpCommandRouter(
         FtpSession s,
         IFtpLogger log,
         FtpFileSystem fs,
         FtpConfig cfg,
         TlsConfig tls,
-        SectionManager sections)
+        SectionManager sections,
+        AmFtpdRuntimeConfig runtime)
     {
         _s = s;
         _log = log;
@@ -82,6 +112,15 @@ internal sealed partial class FtpCommandRouter
         _cfg = cfg;
         _tls = tls;
         _sections = sections;
+
+        RatioEngine = runtime.RatioEngine;
+        RatioPipeline = runtime.RatioPipeline;
+        DirectoryRuleEngine = runtime.DirectoryRuleEngine;
+
+        _directoryAccess = new DirectoryAccessEvaluator(runtime.DirectoryRules);
+        _directoryRules = runtime.DirectoryRules;
+
+        _raceEngine = runtime.RaceEngine;
     }
 
     /// <summary>
@@ -166,6 +205,7 @@ internal sealed partial class FtpCommandRouter
             case "NOOP": await _s.WriteAsync(FtpResponses.Ok, ct); break;
             case "QUIT": await _s.WriteAsync(FtpResponses.Bye, ct); _s.MarkQuit(); break;
             case "HELP": await HELP(arg, ct); break;
+            case "VERSION": await VERSION(ct); break;
             case "STAT": await STAT(arg, ct); break;
             case "ALLO": await _s.WriteAsync("202 ALLO command ignored.\r\n", ct); break;
             case "MODE": await _s.WriteAsync("200 Mode set to S.\r\n", ct); break;
@@ -193,6 +233,8 @@ internal sealed partial class FtpCommandRouter
             case "STOR": await STOR(arg, ct); break;
             case "APPE": await APPE(arg, ct); break;
             case "REST": await REST(arg, ct); break;
+            case "SIZE": await SIZE(arg, ct); break;
+            case "MDTM": await MDTM(arg, ct); break;
 
             // File system ops
             case "DELE": await DELE(arg, ct); break;
@@ -262,19 +304,7 @@ internal sealed partial class FtpCommandRouter
             physPath = "";
         }
 
-        var ctx = new AMScriptContext(
-            IsFxp: _isFxp,
-            Section: section.Name,
-            FreeLeech: section.FreeLeech,
-            UserName: _s.Account?.UserName ?? "",
-            UserGroup: _s.Account?.GroupName ?? "",
-            Bytes: 0,
-            Kb: 0,
-            CostDownload: 0,
-            EarnedUpload: 0,
-            VirtualPath: virtPath,
-            PhysicalPath: physPath
-        );
+        var ctx = BuildSectionRoutingContext(virtPath, physPath, section);
 
         var result = _sectionRoutingScript.EvaluateDownload(ctx);
 
@@ -472,82 +502,8 @@ internal sealed partial class FtpCommandRouter
             _s.SetAccount(updated);
     }
 
-    private static bool IsIpAllowed(IPAddress addr, string mask)
-    {
-        // CIDR: 1.2.3.0/24
-        if (mask.Contains('/'))
-            return IsIpInCidr(addr, mask);
-
-        // Wildcard v4: 1.2.3.* or 10.*.*.*
-        if (mask.Contains('*'))
-        {
-            if (addr.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
-                return false;
-
-            var addrParts = addr.ToString().Split('.');
-            var maskParts = mask.Split('.');
-
-            if (addrParts.Length != 4 || maskParts.Length != 4)
-                return false;
-
-            for (var i = 0; i < 4; i++)
-            {
-                if (maskParts[i] == "*")
-                    continue;
-                if (!string.Equals(maskParts[i], addrParts[i], StringComparison.Ordinal))
-                    return false;
-            }
-
-            return true;
-        }
-
-        // Exact match
-        return IPAddress.TryParse(mask, out var exact) && addr.Equals(exact);
-    }
-
-    private static bool IsIpInCidr(IPAddress addr, string cidr)
-    {
-        var parts = cidr.Split('/');
-        if (parts.Length != 2)
-            return false;
-
-        if (!IPAddress.TryParse(parts[0], out var network))
-            return false;
-
-        if (!int.TryParse(parts[1], out var prefixLength))
-            return false;
-
-        var addrBytes = addr.GetAddressBytes();
-        var netBytes = network.GetAddressBytes();
-
-        if (addrBytes.Length != netBytes.Length)
-            return false;
-
-        var bits = prefixLength;
-        for (var i = 0; i < addrBytes.Length && bits > 0; i++)
-        {
-            int mask;
-            if (bits >= 8)
-            {
-                mask = 0xFF;
-                bits -= 8;
-            }
-            else
-            {
-                mask = 0xFF << (8 - bits);
-                bits = 0;
-            }
-
-            if ((addrBytes[i] & mask) != (netBytes[i] & mask))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static FtpUser CreatePseudoUser()
-    {
-        return new FtpUser(
+    private static FtpUser CreatePseudoUser() =>
+        new(
             UserName: "UNKNOWN",
             PasswordHash: "",
             HomeDir: "/",
@@ -560,71 +516,12 @@ internal sealed partial class FtpCommandRouter
             IdleTimeout: TimeSpan.FromMinutes(5),
             MaxUploadKbps: 0,
             MaxDownloadKbps: 0,
-            GroupName: null,
+            PrimaryGroup: "unknown",
+            SecondaryGroups: ImmutableArray<string>.Empty,
             CreditsKb: 0,
             AllowedIpMask: null,
             RequireIdentMatch: false,
-            RequiredIdent: null
+            RequiredIdent: null,
+            FlagsRaw: string.Empty
         );
-    }
-
-    private static async Task<string?> QueryIdentAsync(
-        IPEndPoint localEp,
-        IPEndPoint remoteEp,
-        CancellationToken ct)
-    {
-        // RFC 1413: connect to remote port 113
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(3));
-
-        using var client = new TcpClient();
-
-        try
-        {
-            await client.ConnectAsync(remoteEp.Address, 113, cts.Token);
-        }
-        catch
-        {
-            // ident service not reachable
-            return null;
-        }
-
-        await using var stream = client.GetStream();
-        await using var writer = new StreamWriter(stream, Encoding.ASCII, leaveOpen: true);
-        using var reader = new StreamReader(stream, Encoding.ASCII, false, leaveOpen: true);
-
-        // Request: "server-port , client-port\r\n"
-        // server-port = our local port; client-port = their remote port
-        var query = $"{localEp.Port} , {remoteEp.Port}\r\n";
-        await writer.WriteAsync(query);
-        await writer.FlushAsync(cts.Token);
-
-        var line = await reader.ReadLineAsync(cts.Token);
-        if (string.IsNullOrEmpty(line))
-            return null;
-
-        // Expected: "<local> , <remote> : USERID : <OS> : <USER>"
-        var parts = line.Split(':');
-        if (parts.Length < 4)
-            return null;
-
-        var userPart = parts[3].Trim();
-        return string.IsNullOrWhiteSpace(userPart) ? null : userPart;
-    }
-    private string ResolveSectionFromPath(string fullPath)
-    {
-        // Normalize
-        fullPath = fullPath.Replace('\\', '/').TrimEnd('/');
-
-        foreach (var s in _sections.GetSections())
-        {
-            // Sections define virtual roots like "/mp3", "/x264", "/0day"
-            // If the path starts with that virtual root, we consider it in that section.
-            if (fullPath.StartsWith(s.VirtualRoot, StringComparison.OrdinalIgnoreCase))
-                return s.Name;
-        }
-
-        // fallback to default if unknown
-        return "default";
-    }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -47,5 +47,6 @@ public sealed record AMScriptContext(
 
     // Added for section-routing, SITE scripting, user rules
     string VirtualPath = "",
-    string PhysicalPath = ""
+    string PhysicalPath = "",
+    string Event = ""
 );

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-22
  *  
  *  License:
  *      MIT License
@@ -18,6 +18,7 @@
 using amFTPd.Config.Ftpd;
 using amFTPd.Security;
 using amFTPd.Utils;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -256,6 +257,13 @@ namespace amFTPd.Db
             }
         }
 
+        /// <summary>
+        /// Forces a rewrite of the current database snapshot, persisting all user data and clearing the write-ahead
+        /// log.
+        /// </summary>
+        /// <remarks>Use this method to manually trigger a full snapshot rewrite, ensuring that all
+        /// in-memory changes are saved and the write-ahead log is reset. This can be useful for maintenance operations
+        /// or to guarantee data durability after significant updates. The method is thread-safe.</remarks>
         public void ForceSnapshotRewrite()
         {
             lock (_sync)
@@ -274,10 +282,8 @@ namespace amFTPd.Db
             // Write count
             bw.Write((uint)dict.Count);
 
-            foreach (var u in dict.Values)
+            foreach (var rec in dict.Values.Select(u => BuildRecord(u)))
             {
-                var rec = BuildRecord(u);
-
                 // Include type marker (0 = user record)
                 using var rms = new MemoryStream();
                 using var rbw = new BinaryWriter(rms);
@@ -325,11 +331,13 @@ namespace amFTPd.Db
                 IdleTimeout: TimeSpan.FromMinutes(30),
                 MaxUploadKbps: 0,
                 MaxDownloadKbps: 0,
-                GroupName: "admins",
+                PrimaryGroup: "admins",
+                SecondaryGroups: ImmutableArray<string>.Empty,
                 CreditsKb: 1024 * 1024, // 1GB default credits
                 AllowedIpMask: null,
                 RequireIdentMatch: false,
-                RequiredIdent: null
+                RequiredIdent: null,
+                FlagsRaw: string.Empty
             );
 
             dict["admin"] = admin;
@@ -565,11 +573,13 @@ namespace amFTPd.Db
                 IdleTimeout: TimeSpan.FromSeconds(idleSec),
                 MaxUploadKbps: up,
                 MaxDownloadKbps: down,
-                GroupName: group,
+                PrimaryGroup: group,
+                SecondaryGroups: ImmutableArray<string>.Empty,
                 CreditsKb: credits,
                 AllowedIpMask: ipmask,
                 RequireIdentMatch: (flags & 32) != 0,
-                RequiredIdent: ident
+                RequiredIdent: ident,
+                FlagsRaw: string.Empty
             );
         }
 

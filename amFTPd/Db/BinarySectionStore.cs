@@ -196,12 +196,12 @@ public sealed class BinarySectionStore : ISectionStore
         using var ms = new MemoryStream(raw);
         using var br = new BinaryReader(ms);
 
-        uint count = br.ReadUInt32();
+        var count = br.ReadUInt32();
         var dict = new Dictionary<string, FtpSection>(StringComparer.OrdinalIgnoreCase);
 
         for (uint i = 0; i < count; i++)
         {
-            uint len = br.ReadUInt32();
+            var len = br.ReadUInt32();
             var rec = br.ReadBytes((int)len);
             var s = ParseRecord(rec);
 
@@ -297,12 +297,12 @@ public sealed class BinarySectionStore : ISectionStore
 
         string ReadStr(int len) => Encoding.UTF8.GetString(br.ReadBytes(len));
 
-        ushort nameLen = br.ReadUInt16();
-        ushort pathLen = br.ReadUInt16();
+        var nameLen = br.ReadUInt16();
+        var pathLen = br.ReadUInt16();
 
-        long up = br.ReadInt64();
-        long down = br.ReadInt64();
-        long credits = br.ReadInt64();
+        var up = br.ReadInt64();
+        var down = br.ReadInt64();
+        var credits = br.ReadInt64();
 
         var name = ReadStr(nameLen);
         var path = ReadStr(pathLen);
@@ -322,9 +322,9 @@ public sealed class BinarySectionStore : ISectionStore
 
     private byte[] Encrypt(byte[] buf)
     {
-        byte[] nonce = RandomNumberGenerator.GetBytes(12);
-        byte[] tag = new byte[16];
-        byte[] ciphertext = new byte[buf.Length];
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var tag = new byte[16];
+        var ciphertext = new byte[buf.Length];
 
         using (var gcm = new AesGcm(_aesKey))
             gcm.Encrypt(nonce, buf, ciphertext, tag);

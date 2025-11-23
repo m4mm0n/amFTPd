@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -94,7 +94,7 @@ public sealed class WalFile
                 yield break; // corrupted or partial write
 
             var encBuf = new byte[len];
-            fs.Read(encBuf, 0, len);
+            fs.ReadExactly(encBuf, 0, len);
 
             var e = DecryptEntry(encBuf);
             if (e != null)

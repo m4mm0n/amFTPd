@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -18,11 +18,11 @@
 namespace amFTPd.Config.Ftpd;
 
 /// <summary>
-/// Defines the contract for managing and authenticating FTP users.
+/// Defines the contract for a user store that manages user authentication and persistence operations for FTP users.
 /// </summary>
-/// <remarks>This interface provides methods for user authentication, retrieval, and management within an FTP
-/// system.  Implementations of this interface are responsible for handling user-related operations such as adding, 
-/// updating, and authenticating users, as well as managing user sessions.</remarks>
+/// <remarks>Implementations of this interface are responsible for loading, saving, and managing user accounts,
+/// including authentication and user lifecycle operations. Thread safety and persistence mechanisms depend on the
+/// specific implementation.</remarks>
 public interface IUserStore
 {
     /// <summary>

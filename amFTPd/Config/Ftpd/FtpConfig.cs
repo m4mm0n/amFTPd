@@ -37,6 +37,7 @@ namespace amFTPd.Config.Ftpd
     /// <param name="DataChannelProtectionDefault"></param>
     /// <param name="AllowActiveMode"></param>
     /// <param name="AllowFxp"></param>
+    /// <param name="DefaultNukeMultiplier"></param>
     public sealed record FtpConfig(
         IPAddress BindAddress,
         int Port,
@@ -49,6 +50,7 @@ namespace amFTPd.Config.Ftpd
         bool RequireTlsForAuth,
         string DataChannelProtectionDefault,   // "C" or "P"
         bool AllowActiveMode = true,          // default global policy
-        bool AllowFxp = false          // default global FXP policy
+        bool AllowFxp = false,          // default global FXP policy
+        double DefaultNukeMultiplier = 3.0
     );
 }

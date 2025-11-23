@@ -15,27 +15,43 @@
  * ====================================================================================================
  */
 
+using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Vfs;
 
 namespace amFTPd.Config.Daemon;
 
 /// <summary>
-/// Represents the root configuration for the AM FTP daemon, encompassing server, TLS, storage, identification, and
-/// virtual file system settings.
+/// Represents the root configuration for an AmFtpd server instance, including server, TLS, storage, identity, virtual
+/// file system, and rule/group settings.
 /// </summary>
-/// <remarks>This record serves as a centralized container for all configuration sections required to initialize
-/// and operate the AM FTP daemon. Each property corresponds to a specific aspect of the daemon's configuration,
-/// allowing for modular and organized configuration management.</remarks>
-/// <param name="Server">The configuration settings for the FTP server, including port and connection options.</param>
-/// <param name="Tls">The configuration settings for TLS, specifying certificates and encryption options.</param>
-/// <param name="Storage">The configuration settings for storage, defining file system paths and quotas.</param>
-/// <param name="Ident">The configuration settings for user identification and authentication.</param>
-/// <param name="Vfs">The configuration settings for the virtual file system, mapping logical paths to physical storage.</param>
+/// <param name="Server">The server configuration settings, including network endpoints and general server options.</param>
+/// <param name="Tls">The TLS configuration settings used to secure FTP connections.</param>
+/// <param name="Storage">The storage configuration specifying data directories and file handling options.</param>
+/// <param name="Ident">The identity configuration for user identification and authentication.</param>
+/// <param name="Vfs">The virtual file system configuration defining accessible paths and permissions.</param>
+/// <param name="Sections">A collection of section rules, keyed by section name, that control configuration behavior for specific sections.</param>
+/// <param name="DirectoryRules">A collection of directory-level rules, keyed by directory path, that define access and operational policies for
+/// directories.</param>
+/// <param name="RatioRules">A collection of ratio rules, keyed by path or pattern, that specify upload/download ratio requirements.</param>
+/// <param name="Groups">A collection of group configurations, keyed by group name, that define user group settings and permissions.</param>
 public sealed record AmFtpdConfigRoot(
     AmFtpdServerConfig Server,
     AmFtpdTlsConfig Tls,
     AmFtpdStorageConfig Storage,
     IdentConfig Ident,
-    VfsConfig Vfs
+    VfsConfig Vfs,
+
+    // NEW — Section rules
+    Dictionary<string, SectionRule> Sections,
+
+    // NEW — Directory-level rules
+    Dictionary<string, DirectoryRule> DirectoryRules,
+
+    // NEW — Ratio rules (per-path or per-pattern)
+    Dictionary<string, RatioRule> RatioRules,
+
+    // NEW — Group configurations
+    Dictionary<string, GroupConfig> Groups
 );

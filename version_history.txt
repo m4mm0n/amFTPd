@@ -5,6 +5,170 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.2.1.0 - 23.11.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* This update will break any existing configurations from previous versions,
+  as it introduces a new configuration structure for most of the new and old
+  features. Please make sure to read the updated documentation on how to use
+  the new configuration structure.
+  Also, the DatabaseManager has not yet been fully integrated!
+
+Config:
++ added Config/Ident/IdentConfig.cs...
++ added Config/Ident/IdentGroupMapping.cs...
++ added Config/Ident/IdentMode.cs...
++ added Config/Vfs/VfsConfig.cs...
++ added Config/Vfs/VfsMount.cs...
++ added Config/Vfs/VfsUserMount.cs...
++ added Config/Vfs/VfsVirtualFile.cs...
+
+Core:
++ added Core/Ident/IdentCache.cs...
++ added Core/Ident/IdentClient.cs...
++ added Core/Ident/IdentManager.cs...
++ added Core/Ident/IdentPolicyException.cs...
++ added Core/Ident/IdentResult.cs...
++ added Core/Vfs/VfsCache.cs...
++ added Core/Vfs/VfsManager.cs...
++ added Core/Vfs/VfsNode.cs...
++ added Core/Vfs/VfsNodeType.cs...
++ added Core/Vfs/VfsResolveResult.cs...
+
+Config/Daemon/AmFtpdConfigLoader.cs:
+* changed to load IdentConfig and VfsConfig...
+
+Config/Daemon/AmFtpdConfigRoot.cs:
+* changed to include IdentConfig and VfsConfig...
+
+Config/Daemon/AmFtpdRuntimeConfig.cs:
+* changed to include IdentConfig and VfsConfig...
+
+Config/Daemon/AmFtpdConfigLoader.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdConfigRoot.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdRuntimeConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdServerConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdStorageConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdTlsConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Ftpd:
+* changed FtpConfig.cs
+* changed FtpSection.cs
+* changed FtpSectionConfig.cs
+* changed FtpUser.cs
+* changed FtpUserConfig.cs
+* changed FtpUserConfigUser.cs
+* changed IUserStore.cs
+* changed InMemoryUserStore.cs
+* changed SectionManager.cs
+
+Config/Scripting:
+* changed ScriptConfig.cs
+
+Core:
+* changed FtpCommandRouter.Commands.cs
+* changed FtpCommandRouter.cs
+* changed FtpDataConnection.cs
+* changed FtpFileSystem.cs
+* changed FtpPath.cs
+* changed FtpResponses.cs
+* changed FtpServer.cs
+* changed FtpSession.cs
+* changed FtpTransferMode.cs
+
+Ident:
+* changed Config/Ident/IdentConfig.cs
+* changed Config/Ident/IdentGroupMapping.cs
+* changed Config/Ident/IdentMode.cs
+* changed Core/Ident/IdentCache.cs
+* changed Core/Ident/IdentClient.cs
+* changed Core/Ident/IdentManager.cs
+* changed Core/Ident/IdentPolicyException.cs
+* changed Core/Ident/IdentResult.cs
+
+VFS:
+* changed Config/Vfs/VfsConfig.cs
+* changed Config/Vfs/VfsMount.cs
+* changed Config/Vfs/VfsUserMount.cs
+* changed Config/Vfs/VfsVirtualFile.cs
+* changed Core/Vfs/VfsCache.cs
+* changed Core/Vfs/VfsManager.cs
+* changed Core/Vfs/VfsNode.cs
+* changed Core/Vfs/VfsNodeType.cs
+* changed Core/Vfs/VfsResolveResult.cs
+
+Scripting:
+* changed Scripting/AMRule.cs
+* changed Scripting/AMRuleAction.cs
+* changed Scripting/AMScriptContext.cs
+* changed Scripting/AMScriptDefaults.cs
+* changed Scripting/AMScriptEngine.cs
+* changed Scripting/AMScriptResult.cs
+
+Credits:
+* changed Credits/CreditEngine.cs
+
+Race:
+* changed Core/Race/RaceEngine.cs
+* changed Core/Race/RaceSnapshot.cs
+
+Ratio:
++ added Core/Ratio/DirectoryRuleEngine.cs
++ added Core/Ratio/RatioEngine.cs
++ added Core/Ratio/RatioResolutionPipeline.cs
++ added Core/Ratio/SectionResolver.cs
+
+Access control:
++ added Core/Access/DirectoryAccess.cs
++ added Core/Access/DirectoryAccessEvaluator.cs
+
+Database:
+* changed AtomicSnapshot.cs
+* changed BackupManager.cs
+* changed BinaryGroupStore.cs
+* changed BinarySectionStore.cs
+* changed BinaryUserStore.cs
+* changed BinaryUserStoreMmap.cs
+* changed DatabaseManager.cs (still not fully implemented)
+* changed DbFsck.cs
+* changed DbFsckDeep.cs
+* changed DbRepair.cs
+* changed FsckResult.cs
+* changed GroupStoreSnapshot.cs
+* changed MmapFileUtils.cs
+* changed SectionStoreSnapshot.cs
+* changed SnapshotManager.cs
+* changed SnapshotOptions.cs
+* changed SnapshotResolver.cs
+* changed UserStoreSnapshot.cs
+
+Security:
+* changed CertificateHelper.cs
+* changed FtpAuthorization.cs
+* changed PasswordHasher.cs
+* changed TlsConfig.cs
++ added UserGroupResolver.cs
+
+Utils:
+* changed ConsoleBanner.cs
+* changed ConsoleExt.cs
+* changed ConsoleStyleExtensions.cs
+* changed Lz4Codec.cs
+
+
+<------------------------------------------------------------------------------------------------------------------->
+
 [ v0.2.0.0 - 22.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
@@ -42,7 +206,7 @@ Config/Daemon/AmFtpdRuntimeConfig.cs:
 * changed to include IdentConfig and VfsConfig...
 
 Core/FtpCommandRouter.Commands.cs:
-* fixed PASS command to properly used IdentManager when needed...
+* fixed PASS command to properly use IdentManager when needed...
 * fixed LIST command to properly use VfsManager when needed...
 * fixed NLST command to properly use VfsManager when needed...
 * fixed MLSD command to properly use VfsManager when needed...

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -25,6 +25,12 @@ namespace amFTPd.Config.Ident;
 /// customization of group mappings and timeout settings for IDENT operations.</remarks>
 public sealed record IdentConfig
 {
+    /// <summary>
+    /// Gets the identification modes that are enabled for this instance.
+    /// </summary>
+    /// <remarks>The value is a combination of one or more <see cref="IdentMode"/> flags. Use bitwise
+    /// operations to check for specific modes. This property is set during object initialization and cannot be modified
+    /// afterwards.</remarks>
     public IdentMode Modes { get; init; } = IdentMode.Standard | IdentMode.LoggingOnly | IdentMode.Caching;
 
     /// <summary>IDENT query timeout in milliseconds.</summary>

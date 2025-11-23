@@ -117,14 +117,14 @@ namespace amFTPd.Db
             DbFsck.CheckDatabase(Path.Combine(BaseDirectory, "amftpd-sections.db"), MasterPassword);
 
         public DeepFsckResult FsckDeep()
-            => DbFsckDeep.CheckAll(Users, Groups, Sections);
+            => CheckAll(Users, Groups, Sections);
 
         // ============================================================
         // AUTO-REPAIR
         // ============================================================
 
         public RepairReport Repair()
-            => DbRepair.RepairAll(
+            => RepairAll(
                 Users, Groups, Sections,
                 BaseDirectory,
                 MasterPassword

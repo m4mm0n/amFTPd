@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -36,6 +36,7 @@ public sealed class AMScriptEngine
     /// <remarks>Use this property to provide a custom logging mechanism for debug messages.  Assign a
     /// delegate that processes or outputs the debug messages as needed.</remarks>
     public Action<string>? DebugLog { get; set; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="AMScriptEngine"/> class with the specified script file path.
     /// </summary>
@@ -49,9 +50,6 @@ public sealed class AMScriptEngine
         Watch();
     }
 
-    // ---------------------------------------------------------
-    // Load + Watch
-    // ---------------------------------------------------------
     /// <summary>
     /// Loads rules from the specified file and populates the internal rule collection.
     /// </summary>
@@ -96,30 +94,6 @@ public sealed class AMScriptEngine
         DebugLog?.Invoke($"[AMScript] Loaded {_rules.Count} rules from {_filePath}");
     }
 
-    private void Watch()
-    {
-        var dir = Path.GetDirectoryName(_filePath);
-        var file = Path.GetFileName(_filePath);
-        if (dir is null || file is null) return;
-
-        _watcher = new FileSystemWatcher(dir, file)
-        {
-            NotifyFilter = NotifyFilters.LastWrite
-        };
-
-        _watcher.Changed += (_, _) =>
-        {
-            // Debounce a bit to avoid partial writes
-            Task.Delay(100).Wait();
-            try { Load(); } catch { /* ignore */ }
-        };
-
-        _watcher.EnableRaisingEvents = true;
-    }
-
-    // ---------------------------------------------------------
-    // Public evaluation entrypoints
-    // ---------------------------------------------------------
     /// <summary>
     /// Evaluates the download operation within the specified context.
     /// </summary>
@@ -127,6 +101,7 @@ public sealed class AMScriptEngine
     /// <returns>An <see cref="AMScriptResult"/> representing the result of the evaluation.</returns>
     public AMScriptResult EvaluateDownload(AMScriptContext ctx)
         => EvaluateInternal(ctx);
+
     /// <summary>
     /// Evaluates the provided upload context and returns the result of the evaluation.
     /// </summary>
@@ -134,6 +109,7 @@ public sealed class AMScriptEngine
     /// <returns>An <see cref="AMScriptResult"/> representing the outcome of the evaluation.</returns>
     public AMScriptResult EvaluateUpload(AMScriptContext ctx)
         => EvaluateInternal(ctx);
+
     /// <summary>
     /// Evaluates the user within the specified AMScript context and returns the result of the evaluation.
     /// </summary>
@@ -142,11 +118,12 @@ public sealed class AMScriptEngine
     /// <returns>An <see cref="AMScriptResult"/> representing the outcome of the evaluation.</returns>
     public AMScriptResult EvaluateUser(AMScriptContext ctx) 
         => EvaluateInternal(ctx);
+
     /// <summary>
-    /// 
+    /// Evaluates the specified AMScript context as a group and returns the result.
     /// </summary>
-    /// <param name="ctx"></param>
-    /// <returns></returns>
+    /// <param name="ctx">The AMScript context to evaluate. Cannot be null.</param>
+    /// <returns>An AMScriptResult representing the outcome of the group evaluation.</returns>
     public AMScriptResult EvaluateGroup(AMScriptContext ctx)
         => EvaluateInternal(ctx);
 
@@ -251,6 +228,9 @@ public sealed class AMScriptEngine
             "$kb" => ctx.Kb.ToString(),
             "$cost_download" => ctx.CostDownload.ToString(),
             "$earned_upload" => ctx.EarnedUpload.ToString(),
+            "$virtual_path" => ctx.VirtualPath,
+            "$physical_path" => ctx.PhysicalPath,
+            "$event" => ctx.Event,
             _ => token // unknown tokens: return as-is
         };
     }
@@ -385,5 +365,26 @@ public sealed class AMScriptEngine
             if (long.TryParse(parts[1].Trim(), out var set))
                 value = set;
         }
+    }
+
+    private void Watch()
+    {
+        var dir = Path.GetDirectoryName(_filePath);
+        var file = Path.GetFileName(_filePath);
+        if (dir is null || file is null) return;
+
+        _watcher = new FileSystemWatcher(dir, file)
+        {
+            NotifyFilter = NotifyFilters.LastWrite
+        };
+
+        _watcher.Changed += (_, _) =>
+        {
+            // Debounce a bit to avoid partial writes
+            Task.Delay(100).Wait();
+            try { Load(); } catch { /* ignore */ }
+        };
+
+        _watcher.EnableRaisingEvents = true;
     }
 }

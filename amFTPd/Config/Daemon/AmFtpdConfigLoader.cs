@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -16,8 +16,11 @@
  */
 
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Vfs;
+using amFTPd.Core.Race;
+using amFTPd.Core.Ratio;
 using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Security;
@@ -53,8 +56,8 @@ public static class AmFtpdConfigLoader
     /// user store) are not set.</exception>
     /// <exception cref="NotSupportedException">Thrown if the user store backend specified in the configuration is not supported.</exception>
     public static async Task<AmFtpdRuntimeConfig> LoadAsync(
-        string configPath,
-        IFtpLogger logger)
+     string configPath,
+     IFtpLogger logger)
     {
         if (!File.Exists(configPath))
         {
@@ -85,8 +88,12 @@ public static class AmFtpdConfigLoader
                     UserStoreBackend: "binary",
                     MasterPassword: "CHANGE_ME"
                 ),
-                Ident: new IdentConfig(),   // <<<<<<<<<<<<<<<<<<<< IMPORTANT
-                Vfs: new VfsConfig()        // <<<<<<<<<<<<<<<<<<<< IMPORTANT
+                Ident: new IdentConfig(),
+                Vfs: new VfsConfig(),
+                Sections: new Dictionary<string, SectionRule>(),
+                DirectoryRules: new Dictionary<string, DirectoryRule>(),
+                RatioRules: new Dictionary<string, RatioRule>(),
+                Groups: new Dictionary<string, GroupConfig>()
             );
 
             var jsonDefault = JsonSerializer.Serialize(
@@ -101,6 +108,13 @@ public static class AmFtpdConfigLoader
         var json = await File.ReadAllTextAsync(configPath);
         var root = JsonSerializer.Deserialize<AmFtpdConfigRoot>(json)
                    ?? throw new InvalidOperationException("Invalid amftpd config file.");
+
+        var dirEngine = new DirectoryRuleEngine(root.DirectoryRules);
+        var sectionResolver = new SectionResolver(root.Sections);
+        var ratioPipeline = new RatioResolutionPipeline(dirEngine, sectionResolver, root.RatioRules);
+        var ratioEngine = new RatioEngine(root.Sections, root.DirectoryRules, root.RatioRules, root.Groups);
+
+        var raceEngine = new RaceEngine();
 
         // --- Build FtpConfig ---
         var bindIp = IPAddress.Parse(root.Server.BindAddress);
@@ -119,7 +133,7 @@ public static class AmFtpdConfigLoader
             RootPath: rootPath,
             WelcomeMessage: root.Server.WelcomeMessage,
             AllowAnonymous: root.Server.AllowAnonymous,
-            HomeDirs: new System.Collections.Generic.Dictionary<string, string>(),
+            HomeDirs: new Dictionary<string, string>(),
             EnableExplicitTls: true,
             RequireTlsForAuth: root.Server.RequireTlsForAuth,
             DataChannelProtectionDefault: root.Server.DataChannelProtectionDefault,
@@ -127,14 +141,12 @@ public static class AmFtpdConfigLoader
             AllowFxp: root.Server.AllowFxp
         );
 
-        // --- User store backend selection (NO switch-expression) ---
+        // --- User store backend selection ---
         var backend = (root.Storage.UserStoreBackend ?? "json").ToLowerInvariant();
         IUserStore userStore;
 
         if (backend == "json")
-        {
             userStore = InMemoryUserStore.LoadFromFile(root.Storage.UsersDbPath);
-        }
         else if (backend == "binary")
         {
             if (string.IsNullOrWhiteSpace(root.Storage.MasterPassword))
@@ -143,9 +155,7 @@ public static class AmFtpdConfigLoader
             userStore = new BinaryUserStore(root.Storage.UsersDbPath, root.Storage.MasterPassword);
         }
         else
-        {
             throw new NotSupportedException($"Unknown user store backend '{backend}'.");
-        }
 
         // --- Sections ---
         var sections = SectionManager.LoadFromFile(root.Storage.SectionsPath);
@@ -157,15 +167,26 @@ public static class AmFtpdConfigLoader
             subjectName: root.Tls.SubjectName,
             logger: logger);
 
+        // --- Runtime config ---
         return new AmFtpdRuntimeConfig
         {
             FtpConfig = ftpCfg,
             UserStore = userStore,
             Sections = sections,
             TlsConfig = tlsCfg,
-            IdentConfig = root.Ident ?? new IdentConfig(), // if your IdentConfig has a parameterless ctor
-            VfsConfig = root.Vfs ?? new VfsConfig()
-        };
+            IdentConfig = root.Ident,
+            VfsConfig = root.Vfs,
 
+            SectionRules = root.Sections,
+            DirectoryRules = root.DirectoryRules,
+            RatioRules = root.RatioRules,
+            Groups = root.Groups,
+
+            DirectoryRuleEngine = dirEngine,
+            SectionResolver = sectionResolver,
+            RatioPipeline = ratioPipeline,
+            RatioEngine = ratioEngine,
+            RaceEngine = raceEngine
+        };
     }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -136,11 +136,11 @@ internal sealed class FtpSession : IAsyncDisposable
     /// <summary>
     /// Gets the instance of the <see cref="IdentManager"/> used to manage identity-related operations.
     /// </summary>
-    public IdentManager IdentManager { get; }
+    public IdentManager? IdentManager { get; }
     /// <summary>
     /// Gets the virtual file system manager responsible for managing file system operations.
     /// </summary>
-    public VfsManager VfsManager { get; }
+    public VfsManager? VfsManager { get; }
     #endregion
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpSession"/> class, representing an FTP session with the specified
@@ -490,9 +490,7 @@ internal sealed class FtpSession : IAsyncDisposable
         _sessions.TryRemove(SessionId, out _);
 
         if (Account is not null)
-        {
             try { Users.OnLogout(Account); } catch { /* ignore */ }
-        }
 
         if (_data is not null)
             await _data.DisposeAsync();

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-23
  *  
  *  License:
  *      MIT License
@@ -100,7 +100,7 @@ public static class DbRepair
                 !groupNames.Contains(u.GroupName))
             {
                 rep.AddAction($"User '{u.UserName}' references missing group '{u.GroupName}', removing group assignment.");
-                var repaired = u with { GroupName = null };
+                var repaired = u with { PrimaryGroup = null };
 
                 users.TryUpdateUser(repaired, out _);
             }
