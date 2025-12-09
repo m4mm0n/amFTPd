@@ -133,12 +133,17 @@ public sealed partial class FtpCommandRouter
         SectionManager sections,
         AmFtpdRuntimeConfig runtime)
     {
-        _s = s;
-        _log = log;
-        _fs = fs;
-        _cfg = cfg;
-        _tls = tls;
-        _sections = sections;
+        _s = s ?? throw new ArgumentNullException(nameof(s));
+        _log = log ?? throw new ArgumentNullException(nameof(log));
+        _fs = fs ?? throw new ArgumentNullException(nameof(fs));
+        _cfg = cfg ?? throw new ArgumentNullException(nameof(cfg));
+        _tls = tls ?? throw new ArgumentNullException(nameof(tls));
+        _sections = sections ?? throw new ArgumentNullException(nameof(sections));
+
+        // ---- Runtime wiring (this was missing) ----
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        Runtime = _runtime;
+        // -------------------------------------------
 
         _runtime = runtime;
         _ratioEngine = _runtime.RatioEngine;
