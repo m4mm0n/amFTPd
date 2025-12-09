@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           FtpEventType.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-03
- *  Last Modified:  2025-12-03
+ *  Created:        2025-12-03 03:48:28
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x4CB90FE5
  *  
+ *  Description:
+ *      Represents the types of events that can occur during FTP operations.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 namespace amFTPd.Core.Events;
 

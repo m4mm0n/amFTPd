@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           BlowfishECB.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-03
- *  Last Modified:  2025-12-03
+ *  Created:        2025-12-01 05:20:57
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x838261C5
  *  
+ *  Description:
+ *      Provides an implementation of the Blowfish encryption algorithm in Electronic Codebook (ECB) mode.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Text;
 using amFTPd.Logging;

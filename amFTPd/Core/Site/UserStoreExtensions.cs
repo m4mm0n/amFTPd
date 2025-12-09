@@ -1,4 +1,29 @@
-﻿using amFTPd.Config.Ftpd;
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           UserStoreExtensions.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-12-07 09:35:51
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xC8D4120A
+ *  
+ *  Description:
+ *      Best-effort enumeration of all users from an <see cref="IUserStore"/>. Works with InMemoryUserStore / BinaryUserStore...
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
+
+
+
+using amFTPd.Config.Ftpd;
 using System.Reflection;
 
 namespace amFTPd.Core.Site

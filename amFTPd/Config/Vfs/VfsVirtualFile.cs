@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           VfsVirtualFile.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-22
- *  Last Modified:  2025-11-22
+ *  Created:        2025-11-23 20:41:52
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x0CC5F4FA
  *  
+ *  Description:
+ *      Describes a single virtual file exposed by the FTP server. This is typically used for things like MOTD, rules.txt, etc.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Text;
 

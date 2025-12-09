@@ -1,17 +1,25 @@
-﻿/*
-* ====================================================================================================
-*  Project:        amFTPd - a managed FTP daemon
-*  Author:         Geir Gustavsen, ZeroLinez Softworx
-*  Created:        2025-12-02
-*  Last Modified:  2025-12-02
-*  
-*  License:
-*      MIT License
-*      https://opensource.org/licenses/MIT
-*
-*  Notes:
-* ====================================================================================================
-*/
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           SiteDupeCommand.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-12-02 03:56:36
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x4C6895C6
+ *  
+ *  Description:
+ *      TODO: Describe this file.
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 namespace amFTPd.Core.Site.Commands
 {

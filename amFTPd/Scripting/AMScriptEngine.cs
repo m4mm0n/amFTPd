@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           AMScriptEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Created:        2025-11-16 06:46:16
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xB5934043
  *  
+ *  Description:
+ *      Represents a script engine for processing and evaluating rules defined in a custom AMScript file.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 namespace amFTPd.Scripting;
 

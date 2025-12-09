@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           DbFsckDeep.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Created:        2025-11-15 20:22:05
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xF3734F7C
  *  
+ *  Description:
+ *      Provides functionality to perform a comprehensive integrity check across users, groups, and sections in a database-li...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using amFTPd.Config.Ftpd;
 

@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           PasswordHasher.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Created:        2025-11-15 16:36:40
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xD56260B9
  *  
+ *  Description:
+ *      Provides methods for hashing and verifying passwords using the PBKDF2-SHA256 algorithm.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Security.Cryptography;
 

@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           Crc32.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-25
- *  Last Modified:  2025-12-02
+ *  Created:        2025-11-25 02:28:20
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x4CB8A162
  *  
+ *  Description:
+ *      Provides methods for computing CRC32 checksums for data, streams, and files.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Buffers;
 using System.Runtime.CompilerServices;

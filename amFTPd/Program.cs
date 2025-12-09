@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           Program.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-12-02
+ *  Created:        2025-11-15 16:36:40
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xCAC83CCE
  *  
+ *  Description:
+ *      Represents the entry point of the amFTPd application, a managed FTP daemon.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 
 using amFTPd.Config.Daemon;

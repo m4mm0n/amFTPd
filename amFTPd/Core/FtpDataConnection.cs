@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           FtpDataConnection.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Created:        2025-11-15 16:36:40
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xDF07B6A8
  *  
+ *  Description:
+ *      Represents a data connection for FTP transfers, supporting both active and passive modes, with optional TLS encryptio...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Net;
 using System.Net.Security;

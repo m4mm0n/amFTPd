@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           FtpFileSystem.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Created:        2025-11-15 16:36:40
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xB99CBE47
  *  
+ *  Description:
+ *      Represents a virtual file system backed by a physical directory, providing methods to map virtual paths to physical p...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Globalization;
 using System.Text;

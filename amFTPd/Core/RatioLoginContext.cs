@@ -1,4 +1,29 @@
-﻿using amFTPd.Config.Ftpd;
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           RatioLoginContext.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-12-05 22:23:14
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xD42DEF23
+ *  
+ *  Description:
+ *      Context passed to ratio/login rule resolution when a user logs in. Extend this as needed with more info (groups, flag...
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
+
+
+
+using amFTPd.Config.Ftpd;
 
 namespace amFTPd.Core
 {

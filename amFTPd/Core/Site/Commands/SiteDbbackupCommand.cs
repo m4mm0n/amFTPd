@@ -1,4 +1,29 @@
-﻿using amFTPd.Db;
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           SiteDbbackupCommand.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-11-25 03:28:48
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xA8978A4C
+ *  
+ *  Description:
+ *      TODO: Describe this file.
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
+
+
+
+using amFTPd.Db;
 
 namespace amFTPd.Core.Site.Commands;
 

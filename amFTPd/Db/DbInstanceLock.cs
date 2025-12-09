@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           DbInstanceLock.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-01
- *  Last Modified:  2025-12-01
+ *  Created:        2025-12-01 05:02:20
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x590F727C
  *  
+ *  Description:
+ *      Simple process-level lock for a database directory. Ensures that only one amFTPd process is using the binary DB in a...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Text;
 

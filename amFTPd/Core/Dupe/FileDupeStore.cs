@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           FileDupeStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-01
- *  Last Modified:  2025-12-02
+ *  Created:        2025-12-02 04:35:27
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x35390D07
  *  
+ *  Description:
+ *      File-backed dupe store. Keeps everything in memory and saves to a JSON file on each change. Good enough for typical s...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Text.Json;
 using System.Text.RegularExpressions;

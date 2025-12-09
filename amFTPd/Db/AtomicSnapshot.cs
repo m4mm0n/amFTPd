@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           AtomicSnapshot.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Created:        2025-11-15 19:57:08
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x4B7745D4
  *  
+ *  Description:
+ *      Writes the specified byte array to a file in an atomic manner, ensuring that the file is either fully written or not...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 namespace amFTPd.Db;
 

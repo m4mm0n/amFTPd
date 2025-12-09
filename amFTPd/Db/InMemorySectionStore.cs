@@ -1,20 +1,25 @@
-﻿/*
-* ====================================================================================================
-*  Project:        amFTPd - a managed FTP daemon
-*  Author:         Geir Gustavsen, ZeroLinez Softworx
-*  Created:        2025-11-25
-*  Last Modified:  2025-11-28
-*  
-*  License:
-*      MIT License
-*      https://opensource.org/licenses/MIT
-*
-*  Notes:
-*      Simple in-memory implementation of ISectionStore. This is used when the
-*      binary DB backend is not active, or as a lightweight wrapper over the
-*      configuration-based SectionManager.
-* ====================================================================================================
-*/
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           InMemorySectionStore.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-11-24 23:15:52
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x08FCDEE8
+ *  
+ *  Description:
+ *      In-memory implementation of <see cref="ISectionStore"/>.
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using amFTPd.Config.Ftpd;
 //using DbSection = amFTPd.Db.FtpSection;

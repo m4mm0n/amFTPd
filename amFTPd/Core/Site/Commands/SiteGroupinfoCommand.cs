@@ -1,4 +1,29 @@
-﻿using System.Text;
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           SiteGroupinfoCommand.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-12-07 08:48:23
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x4A47EB4F
+ *  
+ *  Description:
+ *      TODO: Describe this file.
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
+
+
+
+using System.Text;
 
 namespace amFTPd.Core.Site.Commands;
 

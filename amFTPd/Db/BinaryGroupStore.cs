@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           BinaryGroupStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-27
+ *  Created:        2025-11-15 20:08:55
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xA8059F68
  *  
+ *  Description:
+ *      Provides a secure, binary-based storage mechanism for managing FTP groups,  with support for write-ahead logging (WAL...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Security.Cryptography;
 using System.Text;

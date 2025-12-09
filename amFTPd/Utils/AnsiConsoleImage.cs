@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           AnsiConsoleImage.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-02
- *  Last Modified:  2025-12-02
+ *  Created:        2025-12-02 05:07:13
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x04944936
  *  
+ *  Description:
+ *      Enables ANSI/VT on Windows; no-op on other OSes. Safe to call multiple times.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;

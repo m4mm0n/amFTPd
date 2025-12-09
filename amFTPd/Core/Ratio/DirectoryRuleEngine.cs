@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           DirectoryRuleEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-22
- *  Last Modified:  2025-11-28
+ *  Created:        2025-11-28 21:43:55
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x4E3B5DCA
  *  
+ *  Description:
+ *      Provides functionality to resolve a directory rule based on a given path.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using amFTPd.Config.Ftpd.RatioRules;
 

@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           FtpSection.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Created:        2025-11-15 20:09:43
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xE0DD856F
  *  
+ *  Description:
+ *      Represents a configuration section for FTP operations, including settings for upload and download multipliers, defaul...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 namespace amFTPd.Db
 {

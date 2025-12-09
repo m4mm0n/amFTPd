@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           SectionManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-28
+ *  Created:        2025-11-15 16:36:40
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xC5AB776C
  *  
+ *  Description:
+ *      Holds the runtime collection of <see cref="FtpSection"/> objects and provides helpers for loading them from JSON / DB.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using amFTPd.Db;
 using System.Text.Json;
@@ -167,12 +173,26 @@ public sealed class SectionManager
     {
         if (store is null)
             throw new ArgumentNullException(nameof(store));
+        if (string.IsNullOrWhiteSpace(sourceDescription))
+            throw new ArgumentException("Source description must be provided.", nameof(sourceDescription));
 
-        // TODO: integrate with real ISectionStore implementation, e.g.:
-        // var sections = store.GetAllSections().Select( MapToFtpSection );
-        // return new SectionManager(sections);
+        // Pull all sections from the store.
+        // BinarySectionStore / InMemorySectionStore already store actual Config.Ftpd.FtpSection
+        // instances, so we don’t need to map – we can pass them straight into SectionManager.
+        var allSections = store
+            .GetAllSections()
+            .Where(s => s is not null)
+            .ToList();
 
-        // For now, keep it compiling and predictable.
-        return new SectionManager(Array.Empty<FtpSection>());
+        if (allSections.Count == 0)
+        {
+            // No sections in DB – this is *probably* a configuration problem,
+            // so fail loudly rather than silently running with no sections.
+            throw new InvalidOperationException(
+                $"Section store '{sourceDescription}' returned no sections. " +
+                "Check your sections DB / configuration.");
+        }
+
+        return new SectionManager(allSections);
     }
 }

@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           WalFile.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Created:        2025-11-15 19:57:08
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x1E157829
  *  
+ *  Description:
+ *      Represents a Write-Ahead Log (WAL) file that supports appending, reading, and managing log entries with encryption an...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using System.Security.Cryptography;
 using amFTPd.Utils;

@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           ZipscriptFileState.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-02
- *  Last Modified:  2025-12-02
+ *  Created:        2025-12-02 04:38:40
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0xD72B97DF
  *  
+ *  Description:
+ *      Represents the state of a file in relation to its SFV (Simple File Verification) entry.
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 namespace amFTPd.Core.Zipscript;
 

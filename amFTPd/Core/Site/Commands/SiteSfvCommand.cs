@@ -1,4 +1,29 @@
-﻿using amFTPd.Core.Events;
+﻿/* ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  File:           SiteSfvCommand.cs
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-12-02 04:52:13
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x6229F162
+ *  
+ *  Description:
+ *      TODO: Describe this file.
+ * 
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
+
+
+
+using amFTPd.Core.Events;
 
 namespace amFTPd.Core.Site.Commands
 {

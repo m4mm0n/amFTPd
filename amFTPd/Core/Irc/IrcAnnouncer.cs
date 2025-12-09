@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           IrcAnnouncer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-03
- *  Last Modified:  2025-12-03
+ *  Created:        2025-12-03 03:51:58
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x720C7FC8
  *  
+ *  Description:
+ *      IRC announcer that subscribes to the EventBus and formats scene-style lines. For now, it only logs what it *would* se...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using amFTPd.Config.Irc;
 using amFTPd.Core.Events;

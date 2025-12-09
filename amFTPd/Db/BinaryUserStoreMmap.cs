@@ -1,19 +1,25 @@
-﻿/*
- * ====================================================================================================
+﻿/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
+ *  File:           BinaryUserStoreMmap.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-11-15
- *  Last Modified:  2025-11-26
+ *  Created:        2025-11-15 20:12:17
+ *  Last Modified:  2025-12-09 19:20:10
+ *  CRC32:          0x8C55CB12
  *  
+ *  Description:
+ *      Represents a memory-mapped binary user store that provides secure and efficient storage and retrieval of FTP user dat...
+ * 
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
  *
  *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original
- *      author.
- * ====================================================================================================
- */
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
+ * ==================================================================================================== */
+
+
+
+
 
 using amFTPd.Config.Ftpd;
 using amFTPd.Security;
