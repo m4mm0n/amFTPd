@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-12-05
+ *  Last Modified:  2025-12-09
  *  
  *  License:
  *      MIT License
