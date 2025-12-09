@@ -1,0 +1,8 @@
+{
+  "ProjectName": "amFTPd - a managed FTP daemon",
+  "Author": "Geir Gustavsen, ZeroLinez Softworx",
+  "LicenseName": "MIT License",
+  "LicenseUrl": "https://opensource.org/licenses/MIT",
+  "DefaultNotes": "Please do not use for illegal purposes, and if you do use the project please refer to the original author.",
+  "TimeZoneId": "UTC"
+}

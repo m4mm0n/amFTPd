@@ -18,6 +18,7 @@
 using amFTPd.Logging;
 using System.Net.Security;
 using System.Security.Authentication;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 namespace amFTPd.Security
@@ -60,19 +61,56 @@ namespace amFTPd.Security
         /// <param name="logger">An instance of <see cref="IFtpLogger"/> used to log informational messages during the operation.</param>
         /// <returns>A <see cref="TlsConfig"/> instance containing the loaded or newly generated certificate.</returns>
         public static async Task<TlsConfig> CreateOrLoadAsync(
-            string pfxPath, string pfxPassword, string subjectName, IFtpLogger logger)
+            string pfxPath,
+            string pfxPassword,
+            string subjectName,
+            IFtpLogger logger)
         {
+            const X509KeyStorageFlags Flags =
+                X509KeyStorageFlags.MachineKeySet |
+                X509KeyStorageFlags.Exportable;
+
+            // 1) Try load existing PFX
             if (File.Exists(pfxPath))
             {
-                logger.Log(FtpLogLevel.Info, $"Loading certificate: {pfxPath}");
-                return new TlsConfig(new X509Certificate2(pfxPath, pfxPassword));
+                try
+                {
+                    logger.Log(FtpLogLevel.Info, $"Loading certificate: {pfxPath}");
+                    var cert = new X509Certificate2(pfxPath, pfxPassword, Flags);
+                    return new TlsConfig(cert);
+                }
+                catch (CryptographicException ex)
+                {
+                    logger.Log(
+                        FtpLogLevel.Error,
+                        $"Failed to load existing certificate '{pfxPath}': {ex.Message}. " +
+                        "Deleting and regenerating a new self-signed certificate..."
+                    );
+
+                    try { File.Delete(pfxPath); } catch { /* ignore */ }
+                }
             }
 
-            logger.Log(FtpLogLevel.Info, "Generating self-signed certificate...");
-            var cert = await CertificateHelper.CreateSelfSignedAsync(subjectName, pfxPassword);
-            await File.WriteAllBytesAsync(pfxPath, cert.Export(X509ContentType.Pfx, pfxPassword));
-            logger.Log(FtpLogLevel.Info, $"Saved new certificate: {pfxPath}");
-            return new TlsConfig(cert);
+            // 2) Generate new self-signed RSA cert
+            logger.Log(FtpLogLevel.Info, "Generating self-signed certificate (RSA)...");
+            var certNew = CreateSelfSignedRsaCertificate(subjectName, pfxPassword);
+
+            // 3) Try to persist it for next runs
+            try
+            {
+                var pfxBytes = certNew.Export(X509ContentType.Pfx, pfxPassword);
+                await File.WriteAllBytesAsync(pfxPath, pfxBytes);
+                logger.Log(FtpLogLevel.Info, $"Saved new certificate: {pfxPath}");
+            }
+            catch (Exception ex)
+            {
+                logger.Log(
+                    FtpLogLevel.Warn,
+                    $"Failed to save TLS certificate to '{pfxPath}': {ex.Message}"
+                );
+            }
+
+            return new TlsConfig(certNew);
         }
         /// <summary>
         /// Creates and configures an instance of <see cref="SslServerAuthenticationOptions"/>  with predefined server
@@ -92,5 +130,53 @@ namespace amFTPd.Security
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 AllowRenegotiation = false
             };
+
+        private static X509Certificate2 CreateSelfSignedRsaCertificate(
+            string subjectName,
+            string pfxPassword)
+        {
+            using var rsa = RSA.Create(2048);
+
+            var dn = new X500DistinguishedName($"CN={subjectName}");
+
+            var req = new CertificateRequest(
+                dn,
+                rsa,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1);
+
+            // Not a CA
+            req.CertificateExtensions.Add(
+                new X509BasicConstraintsExtension(false, false, 0, false));
+
+            // Typical server key usage
+            req.CertificateExtensions.Add(
+                new X509KeyUsageExtension(
+                    X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+                    false));
+
+            // EKU: ServerAuth (+ ClientAuth optional)
+            var eku = new OidCollection
+            {
+                new Oid("1.3.6.1.5.5.7.3.1"), // Server Authentication
+                new Oid("1.3.6.1.5.5.7.3.2")  // Client Authentication
+            };
+            req.CertificateExtensions.Add(
+                new X509EnhancedKeyUsageExtension(eku, false));
+
+            var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
+            var notAfter = notBefore.AddYears(5);
+
+            using var generated = req.CreateSelfSigned(notBefore, notAfter);
+
+            // Export as PFX and re-import with *user* key store, persisted
+            var pfxBytes = generated.Export(X509ContentType.Pfx, pfxPassword);
+
+            return new X509Certificate2(
+                pfxBytes,
+                pfxPassword,
+                X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable
+            );
+        }
     }
 }

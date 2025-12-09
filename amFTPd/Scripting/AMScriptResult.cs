@@ -36,7 +36,7 @@ namespace amFTPd.Scripting
     /// <param name="NewUploadLimit">An optional new upload limit, in bytes, to be applied as part of the result.</param>
     /// <param name="NewDownloadLimit">An optional new download limit, in bytes, to be applied as part of the result.</param>
     /// <param name="CreditDelta">An optional credit adjustment, in bytes, to be applied to the user's account.</param>
-    public sealed record AMScriptResult(
+    public sealed partial record AMScriptResult(
         AMRuleAction Action,
         long CostDownload,
         long EarnedUpload,
@@ -130,5 +130,17 @@ namespace amFTPd.Scripting
                 0,
                 Message: "SITE_OVERRIDE"
             );
+
+        /// <summary>
+        /// Convenience alias for <see cref="NewUploadLimit"/> when interpreted as kilobits per second.
+        /// This keeps compatibility with callers using the *Kbps* naming.
+        /// </summary>
+        public int? NewUploadLimitKbps => NewUploadLimit;
+
+        /// <summary>
+        /// Convenience alias for <see cref="NewDownloadLimit"/> when interpreted as kilobits per second.
+        /// This keeps compatibility with callers using the *Kbps* naming.
+        /// </summary>
+        public int? NewDownloadLimitKbps => NewDownloadLimit;
     }
 }

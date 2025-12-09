@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-26
  *  
  *  License:
  *      MIT License
@@ -36,32 +36,34 @@ namespace amFTPd.Db
     {
         private readonly string _dbPath;
         private readonly string _walPath;
+
+        private readonly byte[] _masterKey;
         private readonly byte[] _masterPasswordBytes;
 
-        private readonly Dictionary<string, FtpUser> _users;
-        private readonly Dictionary<string, int> _loginCounter = new();
+        private readonly Dictionary<string, FtpUser> _users
+            = new(StringComparer.OrdinalIgnoreCase);
+
+        private readonly Dictionary<string, int> _loginCounter
+            = new(StringComparer.OrdinalIgnoreCase);
+
         private readonly Lock _sync = new();
 
         private readonly WalFile _wal;
         private FileSystemWatcher? _watcher;
 
+        public Action<string>? DebugLog;
+
         /// <summary>
-        /// Represents a hookable debug logger that can be used to log debug messages.
+        /// Initializes a new instance of the <see cref="BinaryUserStore"/> class, which provides secure storage for
+        /// user data using a binary file format with write-ahead logging (WAL).
         /// </summary>
-        /// <remarks>Assign a method to this delegate to handle debug log messages. The assigned method
-        /// should accept a single string parameter representing the debug message to log. If no method is assigned,
-        /// debug messages will not be logged.</remarks>
-        public Action<string>? DebugLog; // hookable debug logger
-        /// <summary>
-        /// Initializes a new instance of the <see cref="BinaryUserStore"/> class, which provides a secure, binary-based
-        /// user storage system with write-ahead logging (WAL) for durability.
-        /// </summary>
-        /// <remarks>This constructor initializes the database by either loading an existing snapshot or
-        /// creating a new empty database. It also replays the write-ahead log (WAL) to ensure the database is in a
-        /// consistent state. The master password is used to derive a cryptographic key, which is combined with a
-        /// per-file salt for enhanced security.  The WAL file is automatically managed and has a default maximum size
-        /// of 5 MB. A file watcher is started to monitor changes to the database file.</remarks>
-        /// <param name="dbPath">The file path to the database file. If the file does not exist, a new database will be created.</param>
+        /// <remarks>This constructor initializes the database by ensuring the existence of a salt file,
+        /// deriving the encryption key from the provided master password, and setting up the write-ahead log. If the
+        /// database file does not exist, a new one is created. The constructor also replays any existing WAL entries to
+        /// ensure the database is up-to-date and starts a file watcher to monitor changes. <para> The write-ahead log
+        /// file size is limited to 5 MB by default. </para></remarks>
+        /// <param name="dbPath">The file path to the database file. This path is used to store the main database, the write-ahead log file,
+        /// and the salt file for key derivation.</param>
         /// <param name="masterPassword">The master password used to derive the encryption key for securing the database.</param>
         public BinaryUserStore(string dbPath, string masterPassword)
         {
@@ -69,44 +71,175 @@ namespace amFTPd.Db
             _walPath = dbPath + ".wal";
             _masterPasswordBytes = Encoding.UTF8.GetBytes(masterPassword);
 
-            // Master key derived from password and per-file salt
-            var keySalt = EnsureSaltFile(dbPath + ".salt");
-            _masterKey = DeriveKey(keySalt);
+            // Derive master key from password + salt file
+            var salt = EnsureSalt(dbPath + ".salt");
+            _masterKey = DeriveKey(salt);
 
             _wal = new WalFile(_walPath, _masterKey)
             {
-                MaxWalSizeBytes = 5 * 1024 * 1024 // 5 MB default
+                MaxWalSizeBytes = 5 * 1024 * 1024
             };
 
-            // load DB snapshot
-            if (File.Exists(dbPath))
-                _users = LoadDb();
-            else
-                _users = CreateEmptyDb();
-
-            // Replay WAL after snapshot
+            LoadOrCreateSnapshot();
             ReplayWal();
 
             StartWatcher();
         }
 
-        // Derived AES-GCM key (32 bytes)
-        private readonly byte[] _masterKey;
+        // ========================================================
+        // INITIAL LOAD / FIRST RUN HANDLING
+        // ========================================================
+        private void LoadOrCreateSnapshot()
+        {
+            const int MinSnapshotSize = 12 + 16 + 1;
 
-        // ========================================================================
-        // PUBLIC INTERFACE
-        // ========================================================================
-        /// <summary>
-        /// Attempts to authenticate a user with the provided credentials.
-        /// </summary>
-        /// <remarks>This method verifies the provided username and password against the stored user data.
-        /// If the user is authenticated, it also ensures that the number of concurrent logins does not exceed the
-        /// maximum allowed for the user.</remarks>
-        /// <param name="user">The username to authenticate.</param>
-        /// <param name="password">The password associated with the specified username.</param>
-        /// <param name="account">When this method returns, contains the authenticated <see cref="FtpUser"/> object if authentication
-        /// succeeds; otherwise, <see langword="null"/>. This parameter is passed uninitialized.</param>
-        /// <returns><see langword="true"/> if the authentication is successful; otherwise, <see langword="false"/>.</returns>
+            var fi = new FileInfo(_dbPath);
+
+            if (!fi.Exists || fi.Length < MinSnapshotSize)
+            {
+                DebugLog?.Invoke("[USER DB] Creating new snapshot (first run)");
+                CreateBootstrapAdmin();
+                WriteSnapshot();
+                return;
+            }
+
+            try
+            {
+                var encrypted = File.ReadAllBytes(_dbPath);
+                var decrypted = DecryptSnapshot(encrypted);
+                var raw = Lz4Codec.Decompress(decrypted);
+                ParseUserSnapshot(raw);
+            }
+            catch (Exception ex) when (
+                ex is CryptographicException ||
+                ex is AuthenticationTagMismatchException ||
+                ex is InvalidDataException)
+            {
+                DebugLog?.Invoke($"[USER DB] Snapshot corrupt, recreating: {ex.Message}");
+                _users.Clear();
+                CreateBootstrapAdmin();
+                WriteSnapshot();
+            }
+        }
+
+        private void CreateBootstrapAdmin()
+        {
+            _users.Clear();
+
+            var admin = new FtpUser(
+                UserName: "admin",
+                PasswordHash: PasswordHasher.HashPassword("admin"),
+                HomeDir: "/",
+                IsAdmin: true,
+                AllowFxp: true,
+                AllowUpload: true,
+                AllowDownload: true,
+                AllowActiveMode: true,
+                MaxConcurrentLogins: 0,
+                IdleTimeout: TimeSpan.FromHours(24),
+                MaxUploadKbps: 0,
+                MaxDownloadKbps: 0,
+                PrimaryGroup: "admins",
+                SecondaryGroups: ImmutableArray<string>.Empty,
+                CreditsKb: long.MaxValue,
+                AllowedIpMask: null,
+                RequireIdentMatch: false,
+                RequiredIdent: null,
+                FlagsRaw: "MS1ZR"
+            );
+
+            _users[admin.UserName] = admin;
+        }
+
+        // ========================================================
+        // SNAPSHOT WRITE
+        // ========================================================
+        private void WriteSnapshot()
+        {
+            using var ms = new MemoryStream();
+            using var bw = new BinaryWriter(ms);
+
+            bw.Write((uint)_users.Count);
+
+            foreach (var u in _users.Values)
+            {
+                var rec = BuildRecordIncludingType(u);
+                bw.Write((uint)rec.Length);
+                bw.Write(rec);
+            }
+
+            var raw = ms.ToArray();
+            var compressed = Lz4Codec.Compress(raw);
+            var encrypted = EncryptSnapshot(compressed);
+
+            AtomicSnapshot.WriteAtomic(_dbPath, encrypted);
+        }
+
+        // ========================================================
+        // SNAPSHOT READ
+        // ========================================================
+        private void ParseUserSnapshot(byte[] raw)
+        {
+            using var ms = new MemoryStream(raw);
+            using var br = new BinaryReader(ms);
+
+            _users.Clear();
+
+            var count = br.ReadUInt32();
+
+            for (uint i = 0; i < count; i++)
+            {
+                var len = br.ReadUInt32();
+                var recBytes = br.ReadBytes((int)len);
+
+                using var rms = new MemoryStream(recBytes);
+                using var rbr = new BinaryReader(rms);
+
+                var type = rbr.ReadByte();
+                if (type != 0)
+                    continue;
+
+                var user = ParseRecordFromReader(rbr);
+                _users[user.UserName] = user;
+            }
+        }
+
+        // ========================================================
+        // WAL REPLAY
+        // ========================================================
+        private void ReplayWal()
+        {
+            foreach (var e in _wal.ReadAll())
+            {
+                switch (e.Type)
+                {
+                    case WalEntryType.AddUser:
+                    case WalEntryType.UpdateUser:
+                        {
+                            var u = ParseRecord(e.Payload);
+                            _users[u.UserName] = u;
+                            break;
+                        }
+
+                    case WalEntryType.DeleteUser:
+                        {
+                            var name = Encoding.UTF8.GetString(e.Payload);
+                            _users.Remove(name);
+                            break;
+                        }
+                }
+            }
+        }
+
+        // ========================================================
+        // PUBLIC API
+        // ========================================================
+        public FtpUser? FindUser(string userName)
+            => _users.TryGetValue(userName, out var u) ? u : null;
+
+        public IEnumerable<FtpUser> GetAllUsers()
+            => _users.Values;
+
         public bool TryAuthenticate(string user, string password, out FtpUser? account)
         {
             account = null;
@@ -119,22 +252,18 @@ namespace amFTPd.Db
 
             lock (_sync)
             {
-                var active = _loginCounter.TryGetValue(user, out var c) ? c : 0;
-                if (u.MaxConcurrentLogins > 0 && active >= u.MaxConcurrentLogins)
+                var c = _loginCounter.TryGetValue(user, out var cur) ? cur : 0;
+
+                if (u.MaxConcurrentLogins > 0 && c >= u.MaxConcurrentLogins)
                     return false;
 
-                _loginCounter[user] = active + 1;
+                _loginCounter[user] = c + 1;
             }
 
             account = u;
             return true;
         }
-        /// <summary>
-        /// Handles the logout process for the specified FTP user, decrementing their active login count.
-        /// </summary>
-        /// <remarks>This method ensures that the active login count for the user is decremented in a
-        /// thread-safe manner. If the user does not have an active login count, no changes are made.</remarks>
-        /// <param name="user">The FTP user who is logging out. The <see cref="FtpUser.UserName"/> property must not be null.</param>
+
         public void OnLogout(FtpUser user)
         {
             lock (_sync)
@@ -143,45 +272,19 @@ namespace amFTPd.Db
                     _loginCounter[user.UserName] = c - 1;
             }
         }
-        /// <summary>
-        /// Finds and returns the user associated with the specified username.
-        /// </summary>
-        /// <param name="userName">The username of the user to find. Cannot be <see langword="null"/> or empty.</param>
-        /// <returns>The <see cref="FtpUser"/> object associated with the specified username, or <see langword="null"/> if no
-        /// user is found.</returns>
-        public FtpUser? FindUser(string userName)
-            => _users.TryGetValue(userName, out var u) ? u : null;
-        /// <summary>
-        /// Retrieves all users currently stored in the system.
-        /// </summary>
-        /// <returns>An <see cref="IEnumerable{T}"/> of <see cref="FtpUser"/> objects representing all users.  The collection
-        /// will be empty if no users are available.</returns>
-        public IEnumerable<FtpUser> GetAllUsers()
-            => _users.Values;
-        /// <summary>
-        /// Attempts to add a new FTP user to the system.
-        /// </summary>
-        /// <remarks>This method ensures thread safety by locking during the operation. If a user with the
-        /// same username already exists, the method returns <see langword="false"/> and sets the <paramref
-        /// name="error"/> parameter to an appropriate error message. If the operation succeeds, the user is added, and
-        /// the write-ahead log (WAL) is updated. The method may trigger a snapshot rewrite if the WAL requires
-        /// compaction.</remarks>
-        /// <param name="user">The <see cref="FtpUser"/> object representing the user to be added.</param>
-        /// <param name="error">When this method returns, contains an error message if the operation fails; otherwise, <see
-        /// langword="null"/>.</param>
-        /// <returns><see langword="true"/> if the user was successfully added; otherwise, <see langword="false"/>.</returns>
+
         public bool TryAddUser(FtpUser user, out string? error)
         {
             lock (_sync)
             {
                 if (_users.ContainsKey(user.UserName))
                 {
-                    error = "User exists.";
+                    error = "User exists";
                     return false;
                 }
 
-                var recordBytes = BuildRecord(user);
-                _wal.Append(new WalEntry(WalEntryType.AddUser, recordBytes));
+                var rec = BuildRecord(user);
+                _wal.Append(new WalEntry(WalEntryType.AddUser, rec));
                 _users[user.UserName] = user;
 
                 if (_wal.NeedsCompaction())
@@ -191,24 +294,14 @@ namespace amFTPd.Db
                 return true;
             }
         }
-        /// <summary>
-        /// Attempts to update the specified user in the system.
-        /// </summary>
-        /// <remarks>This method is thread-safe. If the specified user does not exist in the system, the
-        /// method returns <see langword="false"/> and sets the <paramref name="error"/> parameter to an appropriate
-        /// error message.</remarks>
-        /// <param name="user">The <see cref="FtpUser"/> object containing the updated user information. The user's username must already
-        /// exist in the system.</param>
-        /// <param name="error">When this method returns, contains an error message if the update operation fails; otherwise, <see
-        /// langword="null"/>. This parameter is passed uninitialized.</param>
-        /// <returns><see langword="true"/> if the user was successfully updated; otherwise, <see langword="false"/>.</returns>
+
         public bool TryUpdateUser(FtpUser user, out string? error)
         {
             lock (_sync)
             {
                 if (!_users.ContainsKey(user.UserName))
                 {
-                    error = "Not found.";
+                    error = "User not found";
                     return false;
                 }
 
@@ -223,29 +316,19 @@ namespace amFTPd.Db
                 return true;
             }
         }
-        /// <summary>
-        /// Attempts to delete a user by their username.
-        /// </summary>
-        /// <remarks>This method is thread-safe. If the specified user does not exist, the method returns
-        /// <see langword="false"/> and sets the <paramref name="error"/> parameter to an appropriate error
-        /// message.</remarks>
-        /// <param name="userName">The name of the user to delete. This value cannot be <see langword="null"/> or empty.</param>
-        /// <param name="error">When this method returns, contains an error message if the operation fails; otherwise, <see
-        /// langword="null"/>. This parameter is passed uninitialized.</param>
-        /// <returns><see langword="true"/> if the user was successfully deleted; otherwise, <see langword="false"/>.</returns>
+
         public bool TryDeleteUser(string userName, out string? error)
         {
             lock (_sync)
             {
                 if (!_users.ContainsKey(userName))
                 {
-                    error = "Not found.";
-                    error = null;
+                    error = "User not found";
                     return false;
                 }
 
-                var rec = Encoding.UTF8.GetBytes(userName);
-                _wal.Append(new WalEntry(WalEntryType.DeleteUser, rec));
+                _wal.Append(new WalEntry(WalEntryType.DeleteUser,
+                    Encoding.UTF8.GetBytes(userName)));
 
                 _users.Remove(userName);
 
@@ -257,215 +340,52 @@ namespace amFTPd.Db
             }
         }
 
-        /// <summary>
-        /// Forces a rewrite of the current database snapshot, persisting all user data and clearing the write-ahead
-        /// log.
-        /// </summary>
-        /// <remarks>Use this method to manually trigger a full snapshot rewrite, ensuring that all
-        /// in-memory changes are saved and the write-ahead log is reset. This can be useful for maintenance operations
-        /// or to guarantee data durability after significant updates. The method is thread-safe.</remarks>
         public void ForceSnapshotRewrite()
         {
             lock (_sync)
             {
-                WriteSnapshot(_users); // Users or Groups or Sections
+                WriteSnapshot();
                 _wal.Clear();
-                DebugLog?.Invoke("[DB] Forced snapshot rewrite completed.");
             }
         }
 
-        private void WriteSnapshot(Dictionary<string, FtpUser> dict)
-        {
-            using var ms = new MemoryStream();
-            using var bw = new BinaryWriter(ms);
-
-            // Write count
-            bw.Write((uint)dict.Count);
-
-            foreach (var rec in dict.Values.Select(u => BuildRecord(u)))
-            {
-                // Include type marker (0 = user record)
-                using var rms = new MemoryStream();
-                using var rbw = new BinaryWriter(rms);
-
-                rbw.Write((byte)0);     // record type
-                rbw.Write(rec);         // record data
-
-                var final = rms.ToArray();
-                bw.Write((uint)final.Length);
-                bw.Write(final);
-            }
-
-            // Compress
-            var raw = ms.ToArray();
-            var compressed = Lz4Codec.Compress(raw);
-
-            // Encrypt
-            var encrypted = EncryptSnapshot(compressed);
-
-            // Atomic 2-phase commit
-            AtomicSnapshot.WriteAtomic(_dbPath, encrypted);
-        }
-
-
-        // ========================================================================
-        // CREATE EMPTY DB (with default admin user)
-        // ========================================================================
-        private Dictionary<string, FtpUser> CreateEmptyDb()
-        {
-            DebugLog?.Invoke("[DB] Creating new empty database with default admin user...");
-
-            var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
-
-            // Default admin user (matches classic FTP daemon behavior)
-            var admin = new FtpUser(
-                UserName: "admin",
-                PasswordHash: PasswordHasher.HashPassword("admin"),
-                HomeDir: "/",
-                IsAdmin: true,
-                AllowFxp: false,
-                AllowUpload: true,
-                AllowDownload: true,
-                AllowActiveMode: true,
-                MaxConcurrentLogins: 5,
-                IdleTimeout: TimeSpan.FromMinutes(30),
-                MaxUploadKbps: 0,
-                MaxDownloadKbps: 0,
-                PrimaryGroup: "admins",
-                SecondaryGroups: ImmutableArray<string>.Empty,
-                CreditsKb: 1024 * 1024, // 1GB default credits
-                AllowedIpMask: null,
-                RequireIdentMatch: false,
-                RequiredIdent: null,
-                FlagsRaw: string.Empty
-            );
-
-            dict["admin"] = admin;
-
-            // Write the initial snapshot to disk
-            var snapshot = BuildSnapshotBytes(dict);
-            AtomicSnapshot.WriteAtomic(_dbPath, snapshot);
-
-            // Clear any old WAL (shouldn't exist, but just in case)
-            _wal.Clear();
-
-            DebugLog?.Invoke("[DB] Empty DB created and snapshot written.");
-
-            return dict;
-        }
-
-        // ========================================================================
-        // WAL REPLAY (DEBUG ENABLED)
-        // ========================================================================
-        private void ReplayWal()
-        {
-            foreach (var entry in _wal.ReadAll())
-            {
-                switch (entry.Type)
-                {
-                    case WalEntryType.AddUser:
-                        {
-                            var user = ParseRecord(entry.Payload);
-                            DebugLog?.Invoke($"[WAL] Replay AddUser: {user.UserName}");
-                            _users[user.UserName] = user;
-                            break;
-                        }
-
-                    case WalEntryType.UpdateUser:
-                        {
-                            var user = ParseRecord(entry.Payload);
-                            DebugLog?.Invoke($"[WAL] Replay UpdateUser: {user.UserName}");
-                            _users[user.UserName] = user;
-                            break;
-                        }
-
-                    case WalEntryType.DeleteUser:
-                        {
-                            var user = Encoding.UTF8.GetString(entry.Payload);
-                            DebugLog?.Invoke($"[WAL] Replay DeleteUser: {user}");
-                            _users.Remove(user);
-                            break;
-                        }
-                }
-            }
-        }
-
-        // ========================================================================
-        // SNAPSHOT / COMPACTION
-        // ========================================================================
+        // ========================================================
+        // SNAPSHOT + WAL
+        // ========================================================
         private void RewriteSnapshotAndClearWal()
         {
-            DebugLog?.Invoke("[DB] Writing new snapshot and clearing WAL...");
-
-            var snapshot = BuildSnapshotBytes(_users);
-            AtomicSnapshot.WriteAtomic(_dbPath, snapshot);
-
+            WriteSnapshot();
             _wal.Clear();
-        }
-
-        // ========================================================================
-        // SNAPSHOT READ
-        // ========================================================================
-
-        private Dictionary<string, FtpUser> LoadDb()
-        {
-            var raw = File.ReadAllBytes(_dbPath);
-            var decrypted = DecryptSnapshot(raw);
-            var decompressed = Lz4Codec.Decompress(decrypted);
-
-            using var ms = new MemoryStream(decompressed);
-            using var br = new BinaryReader(ms);
-
-            return ParseSnapshotData(br);
         }
 
         private Dictionary<string, FtpUser> ParseSnapshotData(BinaryReader br)
         {
             var count = br.ReadUInt32();
-            var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
+            var dict = new Dictionary<string, FtpUser>();
 
-            for (var i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
                 var len = br.ReadUInt32();
-                var recBytes = br.ReadBytes((int)len);
+                var rec = br.ReadBytes((int)len);
 
-                using var recMs = new MemoryStream(recBytes);
-                using var recBr = new BinaryReader(recMs);
+                using var rms = new MemoryStream(rec);
+                using var rbr = new BinaryReader(rms);
 
-                var type = recBr.ReadByte();
+                var type = rbr.ReadByte();
                 if (type != 0)
-                    continue; // unknown record
+                    continue;
 
-                var user = ParseRecordFromReader(recBr);
+                var user = ParseRecordFromReader(rbr);
                 dict[user.UserName] = user;
             }
+
             return dict;
         }
 
-        // ========================================================================
-        // SNAPSHOT WRITE
-        // ========================================================================
-        private byte[] BuildSnapshotBytes(Dictionary<string, FtpUser> users)
-        {
-            using var ms = new MemoryStream();
-            using var bw = new BinaryWriter(ms);
 
-            bw.Write((uint)users.Count);
-
-            foreach (var record in users.Values.Select(u => BuildRecordIncludingType(u)))
-            {
-                bw.Write((uint)record.Length);
-                bw.Write(record);
-            }
-
-            var raw = ms.ToArray();
-            var compressed = Lz4Codec.Compress(raw);
-            return EncryptSnapshot(compressed);
-        }
-
-        // ========================================================================
-        // RECORD SERIALIZATION (v1 format, unchanged)
-        // ========================================================================
+        // ========================================================
+        // RECORD FORMAT (same as Mmap version)
+        // ========================================================
         private byte[] BuildRecord(FtpUser u)
         {
             using var ms = new MemoryStream();
@@ -474,10 +394,10 @@ namespace amFTPd.Db
             var nameLen = (ushort)Encoding.UTF8.GetByteCount(u.UserName);
             var passLen = (ushort)Encoding.UTF8.GetByteCount(u.PasswordHash);
             var homeLen = (ushort)Encoding.UTF8.GetByteCount(u.HomeDir);
-            var groupLen = (ushort)(u.GroupName is null ? 0 : Encoding.UTF8.GetByteCount(u.GroupName));
+            var groupLen = (ushort)(u.GroupName == null ? 0 : Encoding.UTF8.GetByteCount(u.GroupName));
 
-            var ipMaskBytes = u.AllowedIpMask == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.AllowedIpMask);
-            var identBytes = u.RequiredIdent == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.RequiredIdent);
+            var ip = u.AllowedIpMask == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.AllowedIpMask);
+            var ident = u.RequiredIdent == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.RequiredIdent);
 
             bw.Write(nameLen);
             bw.Write(passLen);
@@ -494,45 +414,45 @@ namespace amFTPd.Db
 
             bw.Write(flags);
             bw.Write(u.MaxConcurrentLogins);
-            bw.Write((int)u.IdleTimeout.TotalSeconds);
+            bw.Write((int)(u.IdleTimeout ?? TimeSpan.Zero).TotalSeconds);
             bw.Write(u.MaxUploadKbps);
             bw.Write(u.MaxDownloadKbps);
             bw.Write(u.CreditsKb);
 
-            bw.Write((ushort)ipMaskBytes.Length);
-            bw.Write((ushort)identBytes.Length);
+            bw.Write((ushort)ip.Length);
+            bw.Write((ushort)ident.Length);
 
             bw.Write(Encoding.UTF8.GetBytes(u.UserName));
             bw.Write(Encoding.UTF8.GetBytes(u.PasswordHash));
             bw.Write(Encoding.UTF8.GetBytes(u.HomeDir));
+
             if (groupLen > 0) bw.Write(Encoding.UTF8.GetBytes(u.GroupName!));
-            if (ipMaskBytes.Length > 0) bw.Write(ipMaskBytes);
-            if (identBytes.Length > 0) bw.Write(identBytes);
+            if (ip.Length > 0) bw.Write(ip);
+            if (ident.Length > 0) bw.Write(ident);
 
             return ms.ToArray();
         }
 
         private byte[] BuildRecordIncludingType(FtpUser u)
         {
-            var raw = BuildRecord(u);
+            var rec = BuildRecord(u);
+
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
 
             bw.Write((byte)0); // record type
-            bw.Write(raw);
+            bw.Write(rec);
 
             return ms.ToArray();
         }
 
-        // ========================================================================
-        // RECORD PARSING
-        // ========================================================================
         private FtpUser ParseRecord(byte[] buf)
         {
             using var ms = new MemoryStream(buf);
             using var br = new BinaryReader(ms);
             return ParseRecordFromReader(br);
         }
+
 
         private FtpUser ParseRecordFromReader(BinaryReader br)
         {
@@ -549,7 +469,7 @@ namespace amFTPd.Db
             var down = br.ReadInt32();
             var credits = br.ReadInt64();
 
-            var ipMaskLen = br.ReadUInt16();
+            var ipLen = br.ReadUInt16();
             var identLen = br.ReadUInt16();
 
             var user = Encoding.UTF8.GetString(br.ReadBytes(nameLen));
@@ -557,7 +477,7 @@ namespace amFTPd.Db
             var home = Encoding.UTF8.GetString(br.ReadBytes(homeLen));
 
             var group = groupLen > 0 ? Encoding.UTF8.GetString(br.ReadBytes(groupLen)) : null;
-            var ipmask = ipMaskLen > 0 ? Encoding.UTF8.GetString(br.ReadBytes(ipMaskLen)) : null;
+            var ip = ipLen > 0 ? Encoding.UTF8.GetString(br.ReadBytes(ipLen)) : null;
             var ident = identLen > 0 ? Encoding.UTF8.GetString(br.ReadBytes(identLen)) : null;
 
             return new FtpUser(
@@ -576,53 +496,59 @@ namespace amFTPd.Db
                 PrimaryGroup: group,
                 SecondaryGroups: ImmutableArray<string>.Empty,
                 CreditsKb: credits,
-                AllowedIpMask: ipmask,
+                AllowedIpMask: ip,
                 RequireIdentMatch: (flags & 32) != 0,
                 RequiredIdent: ident,
-                FlagsRaw: string.Empty
+                FlagsRaw: ""
             );
         }
 
-        // ========================================================================
+        // ========================================================
         // ENCRYPTION HELPERS
-        // ========================================================================
-        private byte[] EncryptSnapshot(byte[] buf)
+        // ========================================================
+        private byte[] EncryptSnapshot(byte[] plain)
         {
             var nonce = RandomNumberGenerator.GetBytes(12);
+            var cipher = new byte[plain.Length];
             var tag = new byte[16];
-            var ciphertext = new byte[buf.Length];
 
-            using (var gcm = new AesGcm(_masterKey))
-                gcm.Encrypt(nonce, buf, ciphertext, tag);
+            using var gcm = new AesGcm(_masterKey);
+            gcm.Encrypt(nonce, plain, cipher, tag);
 
-            using var ms = new MemoryStream();
-            ms.Write(nonce);
-            ms.Write(ciphertext);
-            ms.Write(tag);
-            return ms.ToArray();
+            var result = new byte[nonce.Length + cipher.Length + tag.Length];
+            Buffer.BlockCopy(nonce, 0, result, 0, nonce.Length);
+            Buffer.BlockCopy(cipher, 0, result, nonce.Length, cipher.Length);
+            Buffer.BlockCopy(tag, 0, result, nonce.Length + cipher.Length, tag.Length);
+
+            return result;
         }
 
         private byte[] DecryptSnapshot(byte[] buf)
         {
             ReadOnlySpan<byte> nonce = buf[..12];
             ReadOnlySpan<byte> tag = buf[^16..];
-            ReadOnlySpan<byte> ciphertext = buf[12..^16];
+            ReadOnlySpan<byte> cipher = buf[12..^16];
 
-            var plaintext = new byte[ciphertext.Length];
+            var plain = new byte[cipher.Length];
 
             using var gcm = new AesGcm(_masterKey);
-            gcm.Decrypt(nonce, ciphertext, tag, plaintext);
+            gcm.Decrypt(nonce, cipher, tag, plain);
 
-            return plaintext;
+            return plain;
         }
 
         private byte[] DeriveKey(byte[] salt)
         {
-            using var pbkdf2 = new Rfc2898DeriveBytes(_masterPasswordBytes, salt, 200_000, HashAlgorithmName.SHA256);
+            using var pbkdf2 = new Rfc2898DeriveBytes(
+                _masterPasswordBytes,
+                salt,
+                200_000,
+                HashAlgorithmName.SHA256);
+
             return pbkdf2.GetBytes(32);
         }
 
-        private byte[] EnsureSaltFile(string saltPath)
+        private static byte[] EnsureSalt(string saltPath)
         {
             if (File.Exists(saltPath))
                 return File.ReadAllBytes(saltPath);
@@ -632,33 +558,38 @@ namespace amFTPd.Db
             return salt;
         }
 
-        // ========================================================================
-        // HOT RELOAD
-        // ========================================================================
+        // ========================================================
+        // HOT RELOAD SUPPORT
+        // ========================================================
         private void StartWatcher()
         {
             var dir = Path.GetDirectoryName(_dbPath)!;
             var file = Path.GetFileName(_dbPath);
 
-            _watcher = new FileSystemWatcher(dir, file)
-            {
-                NotifyFilter = NotifyFilters.LastWrite
-            };
+            _watcher = new FileSystemWatcher(dir, file);
 
+            _watcher.NotifyFilter = NotifyFilters.LastWrite;
             _watcher.Changed += (_, __) =>
             {
                 lock (_sync)
                 {
                     try
                     {
-                        DebugLog?.Invoke("[DB] Hot reload triggered.");
-                        var updated = LoadDb();
-                        foreach (var kv in updated)
+                        DebugLog?.Invoke("[USER DB] Hot reload triggered...");
+                        var encrypted = File.ReadAllBytes(_dbPath);
+                        var dec = DecryptSnapshot(encrypted);
+                        var raw = Lz4Codec.Decompress(dec);
+
+                        using var ms = new MemoryStream(raw);
+                        using var br = new BinaryReader(ms);
+
+                        var loaded = ParseSnapshotData(br);
+                        foreach (var kv in loaded)
                             _users[kv.Key] = kv.Value;
                     }
                     catch
                     {
-                        DebugLog?.Invoke("[DB] Hot reload failed (corrupted write?)");
+                        DebugLog?.Invoke("[USER DB] Hot reload failed (corruption?)");
                     }
                 }
             };
@@ -666,5 +597,4 @@ namespace amFTPd.Db
             _watcher.EnableRaisingEvents = true;
         }
     }
-
 }

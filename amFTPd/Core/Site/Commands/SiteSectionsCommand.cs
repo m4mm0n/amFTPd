@@ -1,0 +1,46 @@
+﻿using System.Text;
+
+namespace amFTPd.Core.Site.Commands;
+
+public sealed class SiteSectionsCommand : SiteCommandBase
+{
+    public override string Name => "SECTIONS";
+    public override bool RequiresAdmin => true;
+    public override string HelpText => "SECTIONS - list configured sections";
+
+    public override async Task ExecuteAsync(
+        SiteCommandContext context,
+        string argument,
+        CancellationToken cancellationToken)
+    {
+        var acc = context.Session.Account;
+        if (acc is not { IsAdmin: true })
+        {
+            await context.Session.WriteAsync(
+                "550 SITE SECTIONS requires admin privileges.\r\n",
+                cancellationToken);
+            return;
+        }
+
+        var secs = context.Sections.GetSections()
+            .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine("211-Configured sections:");
+
+        foreach (var s in secs)
+        {
+            sb.Append(" NAME=").Append(s.Name);
+            sb.Append(" ROOT=").Append(s.VirtualRoot);
+            sb.Append(" FREE=").Append(s.FreeLeech ? "Y" : "N");
+            sb.Append(" RATIO=").Append(s.RatioUploadUnit).Append(':').Append(s.RatioDownloadUnit);
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("211 End");
+
+        var text = sb.ToString().Replace("\n", "\r\n");
+        await context.Session.WriteAsync(text, cancellationToken);
+    }
+}

@@ -29,16 +29,69 @@ namespace amFTPd.Config.Ftpd
     /// <param name="UploadBonus">The multiplier applied to upload bonuses for the group. Used to calculate earned credits; must be a non-negative
     /// value.</param>
     /// <param name="Flags">An optional set of group flags represented as characters. Reserved for future use; can be null or empty.</param>
-    public sealed record GroupConfig(
-        string Description,
+    public sealed record GroupConfig
+    {
+        // Original properties
+        public string Description { get; init; } = string.Empty;
 
-        // Ratio multiplier applied to downloads (cost *= N)
-        double RatioMultiply,
+        /// <summary>
+        /// Ratio multiplier applied to downloads (cost *= N).
+        /// </summary>
+        public double RatioMultiply { get; init; } = 1.0;
 
-        // Upload bonus multiplier (earned credits *= N)
-        double UploadBonus,
+        /// <summary>
+        /// Upload bonus multiplier (earned credits *= N).
+        /// </summary>
+        public double UploadBonus { get; init; } = 1.0;
 
-        // Optional group flags (future use)
-        ImmutableHashSet<char> Flags
-    );
+        /// <summary>
+        /// Optional group flags (future use).
+        /// </summary>
+        public ImmutableHashSet<char> Flags { get; init; } = ImmutableHashSet<char>.Empty;
+
+        // ------------------------------------------------------------------
+        // New properties used by SITE GROUPINFO / admin surface
+        // ------------------------------------------------------------------
+
+        /// <summary>
+        /// Optional comment/description for the group. Alias for Description.
+        /// </summary>
+        public string Comment
+        {
+            get => Description;
+            init => Description = value;
+        }
+
+        /// <summary>
+        /// Whether this group should be treated as a siteop/admin group.
+        /// </summary>
+        public bool IsSiteOp { get; init; }
+
+        /// <summary>
+        /// Optional recommended maximum number of users in this group.
+        /// (Not enforced unless you add logic elsewhere.)
+        /// </summary>
+        public int MaxUsers { get; init; }
+
+        // ------------------------------------------------------------------
+        // Constructors
+        // ------------------------------------------------------------------
+
+        public GroupConfig()
+        {
+        }
+
+        // Backwards-compatible positional constructor
+        public GroupConfig(
+            string Description,
+            double RatioMultiply,
+            double UploadBonus,
+            ImmutableHashSet<char> Flags)
+        {
+            this.Description = Description;
+            this.RatioMultiply = RatioMultiply;
+            this.UploadBonus = UploadBonus;
+            this.Flags = Flags;
+        }
+    }
 }

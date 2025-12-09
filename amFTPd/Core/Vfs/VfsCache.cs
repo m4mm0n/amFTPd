@@ -15,8 +15,22 @@ internal sealed class VfsCache
     private readonly ConcurrentDictionary<string, Entry> _map = new();
     private readonly TimeSpan _ttl;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VfsCache"/> class with a specified time-to-live (TTL) duration.
+    /// </summary>
+    /// <param name="ttl">The time-to-live duration for cached items. Cached items will remain valid for the specified duration before
+    /// being considered expired.</param>
     public VfsCache(TimeSpan ttl) => _ttl = ttl;
-
+    /// <summary>
+    /// Attempts to retrieve the <see cref="FileSystemInfo"/> associated with the specified key.
+    /// </summary>
+    /// <remarks>If the key exists but the associated entry has expired, the entry is removed from the
+    /// internal map, and the method returns <see langword="false"/>.</remarks>
+    /// <param name="key">The key used to locate the associated <see cref="FileSystemInfo"/>.</param>
+    /// <param name="info">When this method returns, contains the <see cref="FileSystemInfo"/> associated with the specified key, if the
+    /// key exists and has not expired; otherwise, <see langword="null"/>. This parameter is passed uninitialized.</param>
+    /// <returns><see langword="true"/> if the key exists and the associated <see cref="FileSystemInfo"/> has not expired;
+    /// otherwise, <see langword="false"/>.</returns>
     public bool TryGet(string key, out FileSystemInfo? info)
     {
         info = null;
@@ -32,7 +46,14 @@ internal sealed class VfsCache
         info = entry.Info;
         return true;
     }
-
+    /// <summary>
+    /// Adds or updates an entry in the collection with the specified key and associated file system information.
+    /// </summary>
+    /// <remarks>If an entry with the specified key already exists, it will be updated with the new file
+    /// system information and expiration time. The expiration time is calculated based on the current time and the
+    /// configured time-to-live (TTL) value.</remarks>
+    /// <param name="key">The unique identifier for the entry. Cannot be <see langword="null"/> or empty.</param>
+    /// <param name="info">The file system information to associate with the key. Cannot be <see langword="null"/>.</param>
     public void Set(string key, FileSystemInfo info)
     {
         var expires = DateTimeOffset.UtcNow.Add(_ttl);

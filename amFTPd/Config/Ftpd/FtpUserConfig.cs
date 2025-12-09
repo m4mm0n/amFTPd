@@ -18,20 +18,68 @@
 namespace amFTPd.Config.Ftpd;
 
 /// <summary>
-/// Represents the configuration for FTP users, containing a collection of user-specific settings.
+/// Container for configured users + helper to build runtime FtpUser objects.
 /// </summary>
-/// <param name="Users">A list of user configurations, each defining individual user settings and permissions.</param>
-public sealed record FtpUserConfig(
-    List<FtpUserConfigUser> Users
-)
+public sealed record FtpUserConfig
 {
+    public static FtpUserConfig Empty { get; } = new();
+
+    public IReadOnlyList<FtpUserConfigUser> Users { get; init; }
+        = Array.Empty<FtpUserConfigUser>();
+
+    public FtpUserConfig()
+    {
+    }
+
+    public FtpUserConfig(IReadOnlyList<FtpUserConfigUser> users)
+    {
+        Users = users ?? Array.Empty<FtpUserConfigUser>();
+    }
+
+    public FtpUserConfigUser? FindConfigUser(string username)
+        => Users.FirstOrDefault(u =>
+            string.Equals(u.UserName, username, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
-    /// Gets an empty instance of <see cref="FtpUserConfig"/> with no user configurations.
+    /// Build a runtime <see cref="FtpUser"/> from a config entry.
     /// </summary>
-    /// <remarks>
-    /// This property provides a default, immutable instance of <see cref="FtpUserConfig"/> 
-    /// with an empty list of user configurations. It can be used as a placeholder or 
-    /// default value when no specific configuration is required.
-    /// </remarks>
-    public static FtpUserConfig Empty => new(new List<FtpUserConfigUser>());
+    public static FtpUser ToRuntimeUser(
+        FtpUserConfigUser cfg,
+        IReadOnlyList<FtpSection> sections,
+        string defaultHomeDir)
+    {
+        if (cfg is null) throw new ArgumentNullException(nameof(cfg));
+
+        var idleTimeout =
+            cfg.IdleTimeoutSeconds > 0
+                ? TimeSpan.FromSeconds(cfg.IdleTimeoutSeconds)
+                : (TimeSpan?)null;
+
+        var homeDir =
+            !string.IsNullOrWhiteSpace(cfg.HomeDir)
+                ? cfg.HomeDir
+                : defaultHomeDir;
+
+        return new FtpUser(
+            UserName: cfg.UserName,
+            PasswordHash: cfg.PasswordHash,
+            Disabled: cfg.Disabled,
+            HomeDir: homeDir,
+            PrimaryGroup: cfg.GroupName,
+            SecondaryGroups: cfg.SecondaryGroups ?? Array.Empty<string>(),
+            IsAdmin: cfg.IsAdmin || cfg.IsAdministrator,
+            AllowFxp: cfg.AllowFxp,
+            AllowUpload: cfg.AllowUpload,
+            AllowDownload: cfg.AllowDownload,
+            AllowActiveMode: cfg.AllowActiveMode,
+            RequireIdentMatch: cfg.RequireIdentMatch,
+            AllowedIpMask: cfg.AllowedIpMask,
+            RequiredIdent: cfg.RequiredIdent,
+            IdleTimeout: idleTimeout,
+            MaxUploadKbps: cfg.MaxUploadKbps,
+            MaxDownloadKbps: cfg.MaxDownloadKbps,
+            CreditsKb: cfg.CreditsKb,
+            Sections: sections,
+            MaxConcurrentLogins: cfg.MaxConcurrentLogins);
+    }
 }

@@ -18,16 +18,56 @@
 namespace amFTPd.Config.Ftpd;
 
 /// <summary>
-/// Represents the configuration for a collection of FTP sections.
+/// Aggregates all configured sections and provides helpers for lookups.
 /// </summary>
-/// <remarks>This record encapsulates a list of <see cref="FtpSection"/> objects, which define individual FTP
-/// section configurations. It provides a static <see cref="Empty"/> property for scenarios where no sections are
-/// required.</remarks>
-/// <param name="Sections">The list of <see cref="FtpSection"/> objects that define the FTP sections. Cannot be null.</param>
-public sealed record FtpSectionConfig(List<FtpSection> Sections)
+public sealed record FtpSectionConfig
 {
-    /// <summary>
-    /// Gets an empty <see cref="FtpSectionConfig"/> instance with no configured sections.
-    /// </summary>
-    public static FtpSectionConfig Empty => new(new List<FtpSection>());
+    public static FtpSectionConfig Empty { get; } = new();
+
+    public List<FtpSection> Sections { get; init; } = new();
+
+    // (Optional) convenience view
+    public IReadOnlyList<FtpSection> SectionsReadonly => Sections;
+
+    public string? DefaultSectionName { get; init; }
+
+    public FtpSectionConfig()
+    {
+    }
+
+    public FtpSectionConfig(IReadOnlyList<FtpSection> sections)
+    {
+        Sections = sections.ToList();
+    }
+
+    public FtpSection? GetSection(string name)
+        => Sections.FirstOrDefault(s =>
+            string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
+
+    public FtpSection? ResolveByPath(string virtualPath)
+    {
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            virtualPath = "/";
+
+        if (!virtualPath.StartsWith('/'))
+            virtualPath = "/" + virtualPath;
+
+        var winner = Sections
+            .OrderByDescending(s => s.VirtualRoot.Length)
+            .FirstOrDefault(s =>
+            {
+                var root = s.VirtualRoot;
+                if (!root.StartsWith('/'))
+                    root = "/" + root;
+                return virtualPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+            });
+
+        if (winner is not null)
+            return winner;
+
+        if (!string.IsNullOrWhiteSpace(DefaultSectionName))
+            return GetSection(DefaultSectionName);
+
+        return null;
+    }
 }

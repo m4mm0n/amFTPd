@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-12-01
  *  
  *  License:
  *      MIT License
@@ -20,6 +20,11 @@ using amFTPd.Db;
 
 namespace amFTPd.Credits
 {
+    public sealed record DownloadDecision(
+        bool Allowed,
+        long RequiredCredits,
+        long NewBalance);
+
     /// <summary>
     /// Provides functionality for calculating and managing user credits based on file uploads and downloads.
     /// </summary>
@@ -39,17 +44,11 @@ namespace amFTPd.Credits
         /// Initializes a new instance of the <see cref="CreditEngine"/> class with the specified user, group, and
         /// section stores.
         /// </summary>
-        /// <remarks>This constructor sets up the <see cref="CreditEngine"/> with the necessary
-        /// dependencies for handling user, group, and section operations. Ensure that all provided stores are properly
-        /// initialized before passing them to this constructor.</remarks>
-        /// <param name="users">The user store used to manage and retrieve user-related data.</param>
-        /// <param name="groups">The group store used to manage and retrieve group-related data.</param>
-        /// <param name="sections">The section store used to manage and retrieve section-related data.</param>
         public CreditEngine(IUserStore users, IGroupStore groups, ISectionStore sections)
         {
-            _users = users;
-            _groups = groups;
-            _sections = sections;
+            _users = users ?? throw new ArgumentNullException(nameof(users));
+            _groups = groups ?? throw new ArgumentNullException(nameof(groups));
+            _sections = sections ?? throw new ArgumentNullException(nameof(sections));
         }
 
         // ====================================================================
@@ -65,21 +64,22 @@ namespace amFTPd.Credits
             if (sec is null)
                 return 0;
 
-            // Convert bytes → kilobytes (traditional credit model)
-            var sizeKb = Math.Max(1, sizeBytes / 1024);
+            // bytes → kilobytes (traditional credit model)
+            var sizeKb = Math.Max(1L, sizeBytes / 1024L);
 
             // 1) Section multiplier
-            var credits = sizeKb * sec.UploadMultiplier;
+            double multiplier = sec.UploadMultiplier;
 
             // 2) Group override multiplier?
             if (grp != null && grp.SectionCredits.TryGetValue(sectionName, out var gmul))
             {
-                DebugLog?.Invoke($"[CREDITS] Group multiplier for '{sectionName}' = {gmul}");
-                credits = sizeKb * gmul;
+                DebugLog?.Invoke($"[CREDITS] Group UL multiplier for '{sectionName}' = {gmul}");
+                multiplier = gmul;
             }
 
-            // 3) User-level overrides in future (custom ratios)
-            // TODO user specific rules if needed
+            // Explicit double -> long conversion (floor credits)
+            var credits = (long)Math.Floor(sizeKb * multiplier);
+            if (credits < 0) credits = 0;
 
             return credits;
         }
@@ -93,17 +93,20 @@ namespace amFTPd.Credits
             if (sec is null)
                 return 0;
 
-            var sizeKb = Math.Max(1, sizeBytes / 1024);
+            var sizeKb = Math.Max(1L, sizeBytes / 1024L);
 
             // Base section multiplier (cost)
-            var cost = sizeKb * sec.DownloadMultiplier;
+            double multiplier = sec.DownloadMultiplier;
 
             // Group override cost
             if (grp != null && grp.SectionCredits.TryGetValue(sectionName, out var gmul))
             {
                 DebugLog?.Invoke($"[CREDITS] Group DL multiplier for '{sectionName}' = {gmul}");
-                cost = sizeKb * gmul;
+                multiplier = gmul;
             }
+
+            var cost = (long)Math.Floor(sizeKb * multiplier);
+            if (cost < 0) cost = 0;
 
             return cost;
         }
@@ -139,14 +142,19 @@ namespace amFTPd.Credits
         public long AwardCredits(FtpUser user, string sectionName, long sizeBytes)
         {
             var earned = ComputeUploadCredits(user, sectionName, sizeBytes);
-            return user.CreditsKb + earned;
+            var total = user.CreditsKb + earned;
+
+            // simple overflow guard (very defensive)
+            if (total < 0) total = long.MaxValue;
+
+            return total;
         }
 
         // ====================================================================
         // INTERNALLY USED
         // ====================================================================
 
-        private (Db.FtpSection? Section, FtpGroup? Group) ResolveSection(FtpUser user, string sectionName)
+        private (Config.Ftpd.FtpSection? Section, FtpGroup? Group) ResolveSection(FtpUser user, string sectionName)
         {
             var section = _sections.FindSection(sectionName);
             if (section == null)

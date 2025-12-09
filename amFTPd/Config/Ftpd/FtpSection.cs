@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-12-03
  *  
  *  License:
  *      MIT License
@@ -18,29 +18,92 @@
 namespace amFTPd.Config.Ftpd
 {
     /// <summary>
-    /// Represents the configuration details for an FTP section, including its name, virtual root path, leeching policy,
-    /// ratio requirements, and optional nuke multiplier.
+    /// Logical FTP section (like "0DAY").
     /// </summary>
-    /// <remarks>This record is typically used to define access and credit policies for different content
-    /// areas on an FTP server. Ratio values determine upload/download requirements, and the nuke multiplier affects how
-    /// penalties are calculated for problematic releases.</remarks>
-    /// <param name="Name">The unique name of the FTP section. Used to identify the section within the system.</param>
-    /// <param name="VirtualRoot">The virtual root directory path for the section, such as "/0day" or "/mp3". Specifies where the section is
-    /// located within the FTP hierarchy.</param>
-    /// <param name="FreeLeech">Indicates whether downloads in this section are free leech. If <see langword="true"/>, downloads do not consume
-    /// user credits.</param>
-    /// <param name="RatioUploadUnit">The unit value representing the required amount of data to upload for ratio enforcement. For example, in a 1:3
-    /// ratio, this would be 1.</param>
-    /// <param name="RatioDownloadUnit">The unit value representing the allowed amount of data to download for ratio enforcement. For example, in a 1:3
-    /// ratio, this would be 3.</param>
-    /// <param name="NukeMultiplier">An optional multiplier applied to penalties or credit adjustments when a release in this section is nuked. If
-    /// <see langword="null"/>, no nuke multiplier is applied.</param>
-    public sealed record FtpSection(
-        string Name,
-        string VirtualRoot,      // e.g. "/0day", "/mp3"
-        bool FreeLeech,          // if true: downloads do not cost credits
-        int RatioUploadUnit,     // e.g. 1 in 1:3
-        int RatioDownloadUnit,    // e.g. 3 in 1:3
-        double? NukeMultiplier = null
-    );
+    public sealed record FtpSection
+    {
+        /// <summary>Internal name of the section.</summary>
+        public string Name { get; init; } = string.Empty;
+
+        /// <summary>Compatibility alias (SectionName) used in other parts.</summary>
+        public string SectionName
+        {
+            get => Name;
+            init => Name = value;
+        }
+
+        public string Description { get; init; } = string.Empty;
+
+        /// <summary>Virtual root path (e.g. "/0DAY").</summary>
+        public string VirtualRoot { get; init; } = "/";
+
+        /// <summary>Compatibility alias for virtual root.</summary>
+        public string RelativePath
+        {
+            get => VirtualRoot;
+            init => VirtualRoot = value;
+        }
+
+        /// <summary>Ratio section name (links to ratio rules).</summary>
+        public string? RatioSection { get; init; }
+
+        /// <summary>Allow uploads in this section.</summary>
+        public bool AllowUpload { get; init; } = true;
+
+        /// <summary>Allow downloads in this section.</summary>
+        public bool AllowDownload { get; init; } = true;
+
+        /// <summary>If true, this is free-leech (no ratio cost).</summary>
+        public bool FreeLeech { get; init; }
+
+        /// <summary>Upload unit (bytes or KiB) for ratio accounting.</summary>
+        public long RatioUploadUnit { get; init; }
+
+        /// <summary>Download unit (bytes or KiB) for ratio accounting.</summary>
+        public long RatioDownloadUnit { get; init; }
+
+        /// <summary>Upload multiplier for credits (e.g. 2x).</summary>
+        public double UploadMultiplier { get; init; } = 1.0;
+
+        /// <summary>Download multiplier for credit cost.</summary>
+        public double DownloadMultiplier { get; init; } = 1.0;
+
+        /// <summary>Nuke multiplier for nuking releases.</summary>
+        public double? NukeMultiplier { get; init; } = 1.0;
+
+        public FtpSection()
+        {
+        }
+
+        /// <summary>
+        /// Compatibility ctor – supports named arg "Name" (and others).
+        /// </summary>
+        public FtpSection(
+            string Name,
+            string VirtualRoot,
+            string? RatioSection = null,
+            bool AllowUpload = true,
+            bool AllowDownload = true,
+            bool FreeLeech = false,
+            long RatioUploadUnit = 0,
+            long RatioDownloadUnit = 0,
+            double UploadMultiplier = 1.0,
+            double DownloadMultiplier = 1.0,
+            double NukeMultiplier = 1.0,
+            string Description = "")
+        {
+            this.Name = Name;
+            this.VirtualRoot = VirtualRoot;
+            this.RatioSection = RatioSection;
+            this.AllowUpload = AllowUpload;
+            this.AllowDownload = AllowDownload;
+            this.FreeLeech = FreeLeech;
+            this.RatioUploadUnit = RatioUploadUnit;
+            this.RatioDownloadUnit = RatioDownloadUnit;
+            this.UploadMultiplier = UploadMultiplier;
+            this.DownloadMultiplier = DownloadMultiplier;
+            this.NukeMultiplier = NukeMultiplier;
+            this.Description = Description;
+        }
+    }
 }

@@ -206,8 +206,8 @@ public static class DbRepair
                 rep.AddWarning($"Fixing negative multipliers for section '{s.SectionName}'.");
                 var repaired = s with
                 {
-                    UploadMultiplier = Math.Max(0, s.UploadMultiplier),
-                    DownloadMultiplier = Math.Max(0, s.DownloadMultiplier)
+                    RatioUploadUnit = Math.Max(0, s.RatioUploadUnit),
+                    RatioDownloadUnit = Math.Max(0, s.RatioDownloadUnit)
                 };
                 sections.TryUpdateSection(repaired, out _);
             }
@@ -271,8 +271,8 @@ public static class DbRepair
             var repaired = Sanitize(s.SectionName);
             if (repaired != s.SectionName)
             {
-                rep.AddWarning($"Sanitizing section '{s.SectionName}' → '{repaired}'.");
-                var ns = s with { SectionName = repaired };
+                rep.AddWarning($"Sanitizing section '{s.Name}' → '{repaired}'.");
+                var ns = s with { Name = repaired };
                 sections.TryUpdateSection(ns, out _);
             }
         }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Last Modified:  2025-12-02
  *  
  *  License:
  *      MIT License
@@ -20,9 +20,11 @@ using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Scripting;
 using amFTPd.Config.Vfs;
+using amFTPd.Core.Sections;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 
@@ -50,6 +52,7 @@ public sealed class FtpServer
 
     private readonly IdentConfig _identCfg;
     private readonly VfsConfig _vfsCfg;
+    private readonly SectionResolver _sectionResolver;
 
     private readonly AmFtpdRuntimeConfig _runtime;
     #endregion
@@ -76,6 +79,7 @@ public sealed class FtpServer
         _sections = runtime.Sections;
         _identCfg = runtime.IdentConfig;
         _vfsCfg = runtime.VfsConfig;
+        _sectionResolver = new SectionResolver(_sections.GetSections());
     }
     /// <summary>
     /// Starts the FTP(S) server and begins listening for incoming client connections.
@@ -90,7 +94,12 @@ public sealed class FtpServer
     public async Task StartAsync()
     {
         _cts = new CancellationTokenSource();
-        _listener = new TcpListener(new IPEndPoint(_cfg.BindAddress, _cfg.Port));
+
+        var ip = string.IsNullOrWhiteSpace(_cfg.BindAddress)
+            ? IPAddress.Any
+            : IPAddress.Parse(_cfg.BindAddress);
+
+        _listener = new TcpListener(new IPEndPoint(ip, (int)_cfg.Port));
         _listener.Start();
         _log.Log(FtpLogLevel.Info, $"Server listening on {_cfg.BindAddress}:{_cfg.Port}");
 
@@ -103,6 +112,7 @@ public sealed class FtpServer
         var baseDir = AppContext.BaseDirectory;
         var scriptCfgPath = Path.Combine(baseDir, "config", "scripts.json");
         var scriptConfig = ScriptConfig.Load(scriptCfgPath);
+        _log.Log(FtpLogLevel.Debug, "AMScript initiated and loaded...");
 
         // Resolve rules base path: absolute stays absolute, relative is based on app dir
         var rulesBase = scriptConfig.RulesPath;
@@ -110,6 +120,7 @@ public sealed class FtpServer
             rulesBase = Path.GetFullPath(Path.Combine(baseDir, rulesBase));
 
         AMScriptDefaults.EnsureAll(rulesBase);
+        _log.Log(FtpLogLevel.Debug, "AMScript rules set and initiated...");
 
         var creditScript = new AMScriptEngine(Path.Combine(rulesBase, "credits.msl"));
         var fxpScript = new AMScriptEngine(Path.Combine(rulesBase, "fxp.msl"));
@@ -118,6 +129,7 @@ public sealed class FtpServer
         var siteScript = new AMScriptEngine(Path.Combine(rulesBase, "site.msl"));
         var userScript = new AMScriptEngine(Path.Combine(rulesBase, "user-rules.msl"));
         var groupScript = new AMScriptEngine(Path.Combine(rulesBase, "group-rules.msl"));
+        _log.Log(FtpLogLevel.Debug, "All required scripts loaded and initiated...");
 
         // Optional: pipe AMScript debug into your logger
         creditScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
@@ -160,10 +172,12 @@ public sealed class FtpServer
                     _cfg,
                     _users,
                     fs,
-                    _cfg.DataChannelProtectionDefault,
+                    _cfg.DataChannelProtectionDefault.ToString(),
                     _tls,
                     _identCfg,
-                    _vfsCfg);
+                    _vfsCfg,
+                    _sectionResolver
+                    );
 
                 var router = new FtpCommandRouter(session, _log, fs, _cfg, _tls, _sections, _runtime);
 

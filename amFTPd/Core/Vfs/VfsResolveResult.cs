@@ -1,30 +1,66 @@
-﻿namespace amFTPd.Core.Vfs;
+﻿/*
+ * ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-11-22
+ *  Last Modified:  2025-11-28
+ *  
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original
+ *      author.
+ * ====================================================================================================
+ */
+
+using amFTPd.Config.Ftpd;
+
+namespace amFTPd.Core.Vfs;
 
 /// <summary>
-/// Represents the result of a Virtual File System (VFS) resolution operation, indicating whether the operation was
-/// successful and providing additional details if necessary.
+/// Represents the result of resolving a virtual file system (VFS) path.
 /// </summary>
-/// <remarks>This type encapsulates the outcome of resolving a VFS node, including whether the resolution
-/// succeeded, an optional error message in case of failure, and the resolved node if applicable. Use the provided
-/// factory methods <see cref="NotFound(string?)"/>, <see cref="Denied(string?)"/>, and <see cref="Ok(VfsNode)"/> to
-/// create instances representing common resolution outcomes.</remarks>
-/// <param name="Success">A value indicating whether the resolution operation was successful. <see langword="true"/> if the operation
-/// succeeded; otherwise, <see langword="false"/>.</param>
-/// <param name="ErrorMessage">An optional error message describing the reason for failure, if <paramref name="Success"/> is <see
-/// langword="false"/>. This value is <see langword="null"/> if the operation succeeded.</param>
-/// <param name="Node">The resolved <see cref="VfsNode"/> if the operation was successful; otherwise, <see langword="null"/>.</param>
+/// <remarks>This type encapsulates the outcome of a VFS path resolution operation, including whether the
+/// resolution was successful, an optional error message, and the resolved node if applicable. It also provides factory
+/// methods for common resolution outcomes, such as "Not Found," "Denied," and "Ok."</remarks>
+/// <param name="Success">Indicates whether the resolution operation was successful.  <see langword="true"/> if the resolution succeeded;
+/// otherwise, <see langword="false"/>.</param>
+/// <param name="ErrorMessage">An optional error message describing the reason for a failed resolution. This value is <see langword="null"/> if the
+/// resolution was successful.</param>
+/// <param name="Node">The resolved <see cref="VfsNode"/> if the resolution was successful; otherwise, <see langword="null"/>.</param>
 public sealed record VfsResolveResult(
     bool Success,
     string? ErrorMessage,
     VfsNode? Node
 )
 {
-    public static VfsResolveResult NotFound(string? message = null)
-        => new(false, message ?? "Not found.", null);
-
-    public static VfsResolveResult Denied(string? message = null)
-        => new(false, message ?? "Permission denied.", null);
-
+    /// <summary>
+    /// Section resolved from the virtual path (FtpSection-based).
+    /// </summary>
+    public FtpSection? Section { get; init; }
+    /// <summary>
+    /// Creates a result indicating that the requested item was not found.
+    /// </summary>
+    /// <param name="msg">An optional message providing additional context about the result. If null, a default message "Not found." is
+    /// used.</param>
+    /// <returns>A <see cref="VfsResolveResult"/> instance representing a "not found" result.</returns>
+    public static VfsResolveResult NotFound(string? msg = null)
+        => new(false, msg ?? "Not found.", null);
+    /// <summary>
+    /// Creates a result indicating that access is denied.
+    /// </summary>
+    /// <param name="msg">An optional message describing the reason for the denial. If not provided, defaults to "Permission denied."</param>
+    /// <returns>A <see cref="VfsResolveResult"/> instance representing a denied access result.</returns>
+    public static VfsResolveResult Denied(string? msg = null)
+        => new(false, msg ?? "Permission denied.", null);
+    /// <summary>
+    /// Creates a successful result for a virtual file system operation.
+    /// </summary>
+    /// <param name="node">The <see cref="VfsNode"/> associated with the successful operation.</param>
+    /// <returns>A <see cref="VfsResolveResult"/> indicating a successful operation, containing the specified <paramref
+    /// name="node"/>.</returns>
     public static VfsResolveResult Ok(VfsNode node)
         => new(true, null, node);
 }

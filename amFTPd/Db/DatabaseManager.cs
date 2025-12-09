@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-12-01
  *  
  *  License:
  *      MIT License
@@ -15,7 +15,9 @@
  * ====================================================================================================
  */
 
+using System.Collections.Immutable;
 using amFTPd.Config.Ftpd;
+using amFTPd.Security;
 using static amFTPd.Db.DbFsckDeep;
 using static amFTPd.Db.DbRepair;
 
@@ -32,11 +34,13 @@ namespace amFTPd.Db
     /// concurrently.  Use the <see cref="Load"/> method to initialize an instance of <see cref="DatabaseManager"/> with
     /// the required base directory and master password. The class also supports optional debugging via the <see
     /// cref="DebugLog"/> action.</remarks>
-    public sealed class DatabaseManager
+    public sealed class DatabaseManager : IDisposable
     {
         // ============================================================
         // PROPERTIES
         // ============================================================
+
+        private readonly DbInstanceLock? _instanceLock;
 
         public IUserStore Users { get; private set; }
         public IGroupStore Groups { get; private set; }
@@ -53,7 +57,8 @@ namespace amFTPd.Db
             string masterPassword,
             IUserStore users,
             IGroupStore groups,
-            ISectionStore sections)
+            ISectionStore sections,
+            DbInstanceLock? instanceLock)
         {
             BaseDirectory = baseDir;
             MasterPassword = masterPassword;
@@ -61,6 +66,7 @@ namespace amFTPd.Db
             Users = users;
             Groups = groups;
             Sections = sections;
+            _instanceLock = instanceLock;
         }
 
         // ============================================================
@@ -75,26 +81,196 @@ namespace amFTPd.Db
         {
             Directory.CreateDirectory(baseDir);
 
+            DbInstanceLock? instanceLock = null;
+            try
+            {
+                instanceLock = DbInstanceLock.Acquire(baseDir, debugLog);
+            }
+            catch
+            {
+                // Re-throw so the caller knows binary DB cannot be used.
+                // The config loader will decide if it should fall back to JSON.
+                throw;
+            }
+
             debugLog?.Invoke("[DB-MANAGER] Loading stores…");
 
-            // Paths
+            // DB file paths
             var usersDb = Path.Combine(baseDir, "amftpd-users.db");
             var groupsDb = Path.Combine(baseDir, "amftpd-groups.db");
             var sectionsDb = Path.Combine(baseDir, "amftpd-sections.db");
 
-            // USER STORE (can use MMAP or normal)
-            IUserStore users =
-                useMmapForUsers
+            //
+            // USER STORE
+            //
+            IUserStore users;
+            try
+            {
+                users = useMmapForUsers
                     ? new BinaryUserStoreMmap(usersDb, masterPassword)
                     : new BinaryUserStore(usersDb, masterPassword);
+            }
+            catch (Exception ex)
+            {
+                debugLog?.Invoke($"[DB-MANAGER] User store failed. Falling back to memory: {ex.Message}");
 
+                // bootstrap admin user
+                var admin = new FtpUser(
+                    UserName: "admin",
+                    PasswordHash: PasswordHasher.HashPassword("admin"),
+                    HomeDir: "/",
+                    IsAdmin: true,
+                    AllowFxp: true,
+                    AllowUpload: true,
+                    AllowDownload: true,
+                    AllowActiveMode: true,
+                    MaxConcurrentLogins: 0,
+                    IdleTimeout: TimeSpan.FromHours(24),
+                    MaxUploadKbps: 0,
+                    MaxDownloadKbps: 0,
+                    PrimaryGroup: "admins",
+                    SecondaryGroups: ImmutableArray<string>.Empty,
+                    CreditsKb: long.MaxValue,
+                    AllowedIpMask: null,
+                    RequireIdentMatch: false,
+                    RequiredIdent: null,
+                    FlagsRaw: string.Empty
+                );
+
+                var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase)
+                {
+                    [admin.UserName] = admin
+                };
+
+                users = new InMemoryUserStore(dict, "in-memory");
+            }
+
+            //
             // GROUP STORE
-            IGroupStore groups = new BinaryGroupStore(groupsDb, masterPassword);
+            //
+            IGroupStore groups;
+            try
+            {
+                groups = new BinaryGroupStore(groupsDb, masterPassword);
+            }
+            catch (Exception ex)
+            {
+                debugLog?.Invoke($"[DB-MANAGER] Group store failed. Falling back to memory: {ex.Message}");
 
+                groups = new InMemoryGroupStore();
+
+                // bootstrap admins group
+                groups.TryAddGroup(
+                    new FtpGroup(
+                        GroupName: "admins",
+                        Description: "Administrators",
+                        Users: new List<string> { "admin" },
+                        SectionCredits: new Dictionary<string, long>()
+                    ),
+                    out _
+                );
+            }
+
+            //
             // SECTION STORE
-            ISectionStore sections = new BinarySectionStore(sectionsDb, masterPassword);
+            //
+            ISectionStore sections;
+            try
+            {
+                sections = new BinarySectionStore(sectionsDb, masterPassword);
+            }
+            catch (Exception ex)
+            {
+                debugLog?.Invoke($"[DB-MANAGER] Section store failed. Falling back to memory: {ex.Message}");
 
-            var mgr = new DatabaseManager(baseDir, masterPassword, users, groups, sections)
+                var emptyManager = new SectionManager(
+                    new List<Config.Ftpd.FtpSection>(),
+                    "in-memory"
+                );
+
+                sections = new InMemorySectionStore(emptyManager);
+
+                // bootstrap default section
+                sections.TryAddSection(
+                    new Config.Ftpd.FtpSection(
+                        Name: "default",
+                        VirtualRoot: "/",
+                        FreeLeech: false,
+                        RatioUploadUnit: 1,
+                        RatioDownloadUnit: 3
+                    ),
+                    out _
+                );
+            }
+
+            //
+            // ENSURE BOOTSTRAP STATE
+            //
+
+            // Ensure admin user exists
+            if (users.FindUser("admin") is null)
+            {
+                debugLog?.Invoke("[DB-MANAGER] Creating default admin user...");
+                var admin = new FtpUser(
+                    UserName: "admin",
+                    PasswordHash: PasswordHasher.HashPassword("admin"),
+                    HomeDir: "/",
+                    IsAdmin: true,
+                    AllowFxp: true,
+                    AllowUpload: true,
+                    AllowDownload: true,
+                    AllowActiveMode: true,
+                    MaxConcurrentLogins: 0,
+                    IdleTimeout: TimeSpan.FromHours(24),
+                    MaxUploadKbps: 0,
+                    MaxDownloadKbps: 0,
+                    PrimaryGroup: "admins",
+                    SecondaryGroups: ImmutableArray<string>.Empty,
+                    CreditsKb: long.MaxValue,
+                    AllowedIpMask: null,
+                    RequireIdentMatch: false,
+                    RequiredIdent: null,
+                    FlagsRaw: string.Empty
+                );
+
+                users.TryAddUser(admin, out _);
+            }
+
+            // Ensure admins group exists
+            if (groups.FindGroup("admins") is null)
+            {
+                debugLog?.Invoke("[DB-MANAGER] Creating default admins group...");
+                groups.TryAddGroup(
+                    new FtpGroup(
+                        GroupName: "admins",
+                        Description: "Administrators",
+                        Users: new List<string> { "admin" },
+                        SectionCredits: new Dictionary<string, long>()
+                    ),
+                    out _
+                );
+            }
+
+            // Ensure default section exists
+            if (sections.FindSection("default") is null)
+            {
+                debugLog?.Invoke("[DB-MANAGER] Creating default section...");
+                sections.TryAddSection(
+                    new Config.Ftpd.FtpSection(
+                        Name: "default",
+                        VirtualRoot: "/",
+                        FreeLeech: false,
+                        RatioUploadUnit: 1,
+                        RatioDownloadUnit: 3
+                    ),
+                    out _
+                );
+            }
+
+            //
+            // CONSTRUCT MANAGER
+            //
+            var mgr = new DatabaseManager(baseDir, masterPassword, users, groups, sections, instanceLock)
             {
                 DebugLog = debugLog
             };
@@ -102,6 +278,7 @@ namespace amFTPd.Db
             debugLog?.Invoke("[DB-MANAGER] Stores loaded successfully.");
             return mgr;
         }
+
 
         // ============================================================
         // FSCK
@@ -212,7 +389,7 @@ namespace amFTPd.Db
 
             Users = forceMmap
                 ? new BinaryUserStoreMmap(usersDb, MasterPassword)
-                : new BinaryUserStoreMmap(usersDb, MasterPassword);
+                : new BinaryUserStore(usersDb, MasterPassword);
 
             DebugLog?.Invoke("[DB-MANAGER] User store reloaded.");
         }
@@ -228,6 +405,16 @@ namespace amFTPd.Db
             DebugLog?.Invoke($" Groups:  {Groups.GetAllGroups().Count()}");
             DebugLog?.Invoke($" Sections:{Sections.GetAllSections().Count()}");
             DebugLog?.Invoke(" Done.");
+        }
+
+        /// <summary>
+        /// Releases the resources used by the current instance of the class.
+        /// </summary>
+        /// <remarks>This method disposes of the internal lock object to free unmanaged resources.  After
+        /// calling this method, the instance should not be used.</remarks>
+        public void Dispose()
+        {
+            _instanceLock?.Dispose();
         }
     }
 }

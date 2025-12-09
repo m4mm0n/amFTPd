@@ -18,13 +18,52 @@
 namespace amFTPd.Config.Vfs;
 
 /// <summary>
-/// Represents a user-specific virtual file system (VFS) mount, mapping a virtual path to a physical path.
+/// User-specific VFS mount.
 /// </summary>
-/// <param name="UserName">The name of the user associated with this mount. This value cannot be null or empty.</param>
-/// <param name="VirtualPath">The virtual path exposed to the user. This value cannot be null or empty.</param>
-/// <param name="PhysicalPath">The physical path on the file system that corresponds to the virtual path. This value cannot be null or empty.</param>
-public sealed record VfsUserMount(
-    string UserName,
-    string VirtualPath,
-    string PhysicalPath
-);
+public sealed record VfsUserMount
+{
+    public string UserName { get; init; } = string.Empty;
+
+    /// <summary>Compatibility alias if any code uses "Username".</summary>
+    public string Username
+    {
+        get => UserName;
+        init => UserName = value;
+    }
+
+    public string VirtualPath { get; init; } = "/";
+    public string PhysicalPath { get; init; } = "/";
+    public bool IsReadOnly { get; init; }
+
+    /// <summary>
+    /// Name of the global mount this user mount refers to (from config).
+    /// </summary>
+    public string? MountName { get; init; }
+
+    /// <summary>
+    /// Resolved global mount; this is what VfsConfig uses (VirtualRoot, etc).
+    /// </summary>
+    public VfsMount? Mount { get; init; }
+
+    public VfsUserMount()
+    {
+    }
+
+    public VfsUserMount(
+        string userName,
+        string virtualPath,
+        string physicalPath,
+        bool isReadOnly = false,
+        string? mount = null)      // 'mount' is the mount name from config
+    {
+        UserName = userName;
+        VirtualPath = virtualPath;
+        PhysicalPath = physicalPath;
+        IsReadOnly = isReadOnly;
+        MountName = mount;
+        // Mount stays null here; it should be wired later by VfsConfig / loader.
+    }
+
+    public override string ToString()
+        => $"{UserName}@{VirtualPath} -> {PhysicalPath}";
+}

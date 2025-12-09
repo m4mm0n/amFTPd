@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-28
  *  
  *  License:
  *      MIT License
@@ -42,5 +42,7 @@ public enum WalEntryType : byte
     // SECTION operations (reserved for next module)
     AddSection = 20,
     UpdateSection = 21,
-    DeleteSection = 22
+    DeleteSection = 22,
+
+    RenameGroup = 99,
 }

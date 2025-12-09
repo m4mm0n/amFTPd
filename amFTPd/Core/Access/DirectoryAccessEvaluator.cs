@@ -71,9 +71,9 @@ public sealed class DirectoryAccessEvaluator
 
         var effective = bestRule ?? DirectoryRule.Empty;
 
-        var canList = effective.AllowList ?? true;
-        var canUpload = effective.AllowUpload ?? true;
-        var canDownload = effective.AllowDownload ?? true;
+        var canList = effective.AllowList;
+        var canUpload = effective.AllowUpload;
+        var canDownload = effective.AllowDownload;
 
         return new DirectoryAccess(
             CanList: canList,

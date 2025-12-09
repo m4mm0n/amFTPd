@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Last Modified:  2025-12-02
  *  
  *  License:
  *      MIT License
@@ -18,9 +18,11 @@
 
 using amFTPd.Config.Daemon;
 using amFTPd.Core;
+using amFTPd.Core.Irc;
 using amFTPd.Logging;
-using System.Reflection;
+using amFTPd.Properties;
 using amFTPd.Utils;
+using System.Reflection;
 
 namespace amFTPd
 {
@@ -54,17 +56,39 @@ namespace amFTPd
 
             var server = new FtpServer(runtime, logger);
 
-            logger.Log(FtpLogLevel.Info, $"[amFTPd] Root path : {runtime.FtpConfig.RootPath}");
-            logger.Log(FtpLogLevel.Info, $"[amFTPd] Bind      : {runtime.FtpConfig.BindAddress}:{runtime.FtpConfig.Port}");
-            logger.Log(FtpLogLevel.Info, $"[amFTPd] Users DB  : {Path.GetFullPath(configFile)}");
+            // Optional IRC announcer wired to EventBus
+            IrcAnnouncer? irc = null;
+            if (runtime.IrcConfig is { Enabled: true } ircCfg)
+            {
+                irc = new IrcAnnouncer(
+                    ircCfg,
+                    logger,
+                    runtime.EventBus,
+                    fish: null,
+                    scriptHook: null);
+                irc.Start();
+            }
 
             var serverTask = server.StartAsync();
 
-            Console.CancelKeyPress += (_, e) =>
+
+            Console.CancelKeyPress += async (_, e) =>
             {
                 e.Cancel = true;
                 logger.Log(FtpLogLevel.Info, "[amFTPd] Shutdown requested, stopping server...");
                 server.Stop();
+
+                if (irc is not null)
+                {
+                    try
+                    {
+                        await irc.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Log(FtpLogLevel.Warn, "[amFTPd] Failed to dispose IRC announcer cleanly.", ex);
+                    }
+                }
             };
 
             try
@@ -82,17 +106,18 @@ namespace amFTPd
 
         static void PrintBanner()
         {
-            var line2 = "A Managed FTP daemon";
-            new[]
-            {
-                @".______  ._____.___ .____________._._______ .______  ",
-                @":      \ :         |:_ ____/\__ _:|: ____  |:_ _   \ ",
-                @"|   .   ||   \  /  ||   _/    |  :||    :  ||   |   |",
-                @"|   :   ||   |\/   ||   |     |   ||   |___|| . |   |",
-                @"|___|   ||___| |   ||_. |     |   ||___|    |. ____/ ",
-                @"    |___|      |___|  :/      |___|          :/      ",
-                @"                      :                      :       "
-            }.WriteBoxedBanner();
+            //var line2 = "A Managed FTP daemon";
+            //new[]
+            //{
+            //    @".______  ._____.___ .____________._._______ .______  ",
+            //    @":      \ :         |:_ ____/\__ _:|: ____  |:_ _   \ ",
+            //    @"|   .   ||   \  /  ||   _/    |  :||    :  ||   |   |",
+            //    @"|   :   ||   |\/   ||   |     |   ||   |___|| . |   |",
+            //    @"|___|   ||___| |   ||_. |     |   ||___|    |. ____/ ",
+            //    @"    |___|      |___|  :/      |___|          :/      ",
+            //    @"                      :                      :       "
+            //}.WriteBoxedBanner();
+            AnsiConsoleImage.WriteImage(Resources.amftpd_logo);
             var ver = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion;
             $"amFTPd - a managed FTP daemon v{ver}".WriteBoxedBanner();

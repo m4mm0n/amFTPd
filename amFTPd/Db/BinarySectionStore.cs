@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-27
  *  
  *  License:
  *      MIT License
@@ -33,14 +33,12 @@ public sealed class BinarySectionStore : ISectionStore
 {
     private readonly string _dbPath;
     private readonly string _walPath;
-    private readonly byte[] _aesKey;
+    private readonly byte[] _masterKey;
 
-    private readonly Dictionary<string, FtpSection> _sections =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Config.Ftpd.FtpSection> _sections
+        = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly object _sync = new();
     private readonly WalFile _wal;
-    private FileSystemWatcher? _watcher;
 
     public Action<string>? DebugLog;
 
@@ -50,205 +48,76 @@ public sealed class BinarySectionStore : ISectionStore
         _walPath = dbPath + ".wal";
 
         var salt = EnsureSalt(dbPath + ".salt");
-        _aesKey = DeriveKey(masterPassword, salt);
+        _masterKey = DeriveKey(masterPassword, salt);
 
-        _wal = new WalFile(_walPath, _aesKey);
+        _wal = new WalFile(_walPath, _masterKey);
 
-        if (File.Exists(dbPath))
-            _sections = LoadDb();
-        else
-            _sections = CreateEmptyDb();
-
+        LoadOrCreateSnapshot();
         ReplayWal();
-        StartWatcher();
     }
 
-    // =======================================================================
-    // PUBLIC API
-    // =======================================================================
-
-    public FtpSection? FindSection(string s)
-        => _sections.TryGetValue(s, out var v) ? v : null;
-
-    public IEnumerable<FtpSection> GetAllSections()
-        => _sections.Values;
-
-    public bool TryAddSection(FtpSection s, out string? err)
+    // ==========================================================
+    // INITIAL LOAD
+    // ==========================================================
+    private void LoadOrCreateSnapshot()
     {
-        lock (_sync)
+        const int MinSnapshot = 12 + 16 + 1;
+        var fi = new FileInfo(_dbPath);
+
+        if (!fi.Exists || fi.Length < MinSnapshot)
         {
-            if (_sections.ContainsKey(s.SectionName))
-            {
-                err = "Section exists.";
-                return false;
-            }
+            DebugLog?.Invoke("[SECTION DB] Creating fresh snapshot...");
+            CreateDefaultSections();
+            WriteSnapshot();
+            return;
+        }
 
-            _wal.Append(new WalEntry(WalEntryType.AddSection, BuildRecord(s)));
-            _sections[s.SectionName] = s;
+        try
+        {
+            var enc = File.ReadAllBytes(_dbPath);
+            var dec = DecryptSnapshot(enc);
+            var raw = Lz4Codec.Decompress(dec);
 
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            err = null;
-            return true;
+            ParseSnapshot(raw);
+        }
+        catch (Exception ex) when (
+            ex is CryptographicException ||
+            ex is AuthenticationTagMismatchException ||
+            ex is InvalidDataException)
+        {
+            DebugLog?.Invoke($"[SECTION DB] Snapshot corrupt ({ex.Message}) — recreating...");
+            _sections.Clear();
+            CreateDefaultSections();
+            WriteSnapshot();
         }
     }
 
-    public bool TryUpdateSection(FtpSection s, out string? err)
+    private void CreateDefaultSections()
     {
-        lock (_sync)
-        {
-            if (!_sections.ContainsKey(s.SectionName))
-            {
-                err = "Not found.";
-                return false;
-            }
+        _sections.Clear();
 
-            _wal.Append(new WalEntry(WalEntryType.UpdateSection, BuildRecord(s)));
-            _sections[s.SectionName] = s;
-
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            err = null;
-            return true;
-        }
-    }
-
-    public bool TryDeleteSection(string name, out string? err)
-    {
-        lock (_sync)
-        {
-            if (!_sections.ContainsKey(name))
-            {
-                err = "Not found.";
-                return false;
-            }
-
-            _wal.Append(new WalEntry(WalEntryType.DeleteSection, Encoding.UTF8.GetBytes(name)));
-            _sections.Remove(name);
-
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            err = null;
-            return true;
-        }
-    }
-
-    public void ForceSnapshotRewrite()
-    {
-        lock (_sync)
-        {
-            WriteSnapshot(_sections); // Users or Groups or Sections
-            _wal.Clear();
-            DebugLog?.Invoke("[DB] Forced snapshot rewrite completed.");
-        }
-    }
-
-    // =======================================================================
-    // WAL REPLAY
-    // =======================================================================
-
-    private void ReplayWal()
-    {
-        foreach (var e in _wal.ReadAll())
-        {
-            switch (e.Type)
-            {
-                case WalEntryType.AddSection:
-                {
-                    var s = ParseRecord(e.Payload);
-                    DebugLog?.Invoke($"[SECTION WAL] AddSection {s.SectionName}");
-                    _sections[s.SectionName] = s;
-                    break;
-                }
-
-                case WalEntryType.UpdateSection:
-                {
-                    var s = ParseRecord(e.Payload);
-                    DebugLog?.Invoke($"[SECTION WAL] UpdateSection {s.SectionName}");
-                    _sections[s.SectionName] = s;
-                    break;
-                }
-
-                case WalEntryType.DeleteSection:
-                {
-                    var name = Encoding.UTF8.GetString(e.Payload);
-                    DebugLog?.Invoke($"[SECTION WAL] DeleteSection {name}");
-                    _sections.Remove(name);
-                    break;
-                }
-            }
-        }
-    }
-
-    // =======================================================================
-    // DB LOADING
-    // =======================================================================
-
-    private Dictionary<string, FtpSection> LoadDb()
-    {
-        var enc = File.ReadAllBytes(_dbPath);
-        var dec = Decrypt(enc);
-        var raw = Lz4Codec.Decompress(dec);
-
-        using var ms = new MemoryStream(raw);
-        using var br = new BinaryReader(ms);
-
-        var count = br.ReadUInt32();
-        var dict = new Dictionary<string, FtpSection>(StringComparer.OrdinalIgnoreCase);
-
-        for (uint i = 0; i < count; i++)
-        {
-            var len = br.ReadUInt32();
-            var rec = br.ReadBytes((int)len);
-            var s = ParseRecord(rec);
-
-            dict[s.SectionName] = s;
-        }
-
-        return dict;
-    }
-
-    private Dictionary<string, FtpSection> CreateEmptyDb()
-    {
-        DebugLog?.Invoke("[SECTION DB] Creating empty section DB...");
-
-        var dict = new Dictionary<string, FtpSection>(StringComparer.OrdinalIgnoreCase);
-
-        // Create classic default section "default"
-        dict["default"] = new FtpSection(
-            SectionName: "default",
-            RelativePath: "/",
-            UploadMultiplier: 1,
-            DownloadMultiplier: 1,
-            DefaultCreditsKb: 0
+        // Default baseline section
+        _sections["default"] = new Config.Ftpd.FtpSection(
+            Name: "default",
+            VirtualRoot: "/",
+            FreeLeech: false,
+            RatioUploadUnit: 1,
+            RatioDownloadUnit: 3,
+            NukeMultiplier: 0.0
         );
-
-        WriteSnapshot(dict);
-        return dict;
     }
 
-    // =======================================================================
-    // SNAPSHOT
-    // =======================================================================
-
-    private void RewriteSnapshot()
-    {
-        DebugLog?.Invoke("[SECTION DB] WAL compaction triggered…");
-        WriteSnapshot(_sections);
-        _wal.Clear();
-    }
-
-    private void WriteSnapshot(Dictionary<string, FtpSection> dict)
+    // ==========================================================
+    // SNAPSHOT WRITE
+    // ==========================================================
+    private void WriteSnapshot()
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
 
-        bw.Write((uint)dict.Count);
+        bw.Write((uint)_sections.Count);
 
-        foreach (var s in dict.Values)
+        foreach (var s in _sections.Values)
         {
             var rec = BuildRecord(s);
             bw.Write((uint)rec.Length);
@@ -257,110 +126,222 @@ public sealed class BinarySectionStore : ISectionStore
 
         var raw = ms.ToArray();
         var compressed = Lz4Codec.Compress(raw);
-        var encrypted = Encrypt(compressed);
+        var encrypted = EncryptSnapshot(compressed);
 
         AtomicSnapshot.WriteAtomic(_dbPath, encrypted);
     }
 
-    // =======================================================================
-    // RECORD FORMAT (v1, stable)
-    // =======================================================================
+    // ==========================================================
+    // SNAPSHOT READ
+    // ==========================================================
+    private void ParseSnapshot(byte[] raw)
+    {
+        using var ms = new MemoryStream(raw);
+        using var br = new BinaryReader(ms);
 
-    private byte[] BuildRecord(FtpSection s)
+        _sections.Clear();
+        var count = br.ReadUInt32();
+
+        for (uint i = 0; i < count; i++)
+        {
+            var len = br.ReadUInt32();
+            var rec = br.ReadBytes((int)len);
+
+            var s = ParseRecord(rec);
+            _sections[s.Name] = s;
+        }
+    }
+
+    // ==========================================================
+    // WAL REPLAY
+    // ==========================================================
+    private void ReplayWal()
+    {
+        foreach (var e in _wal.ReadAll())
+        {
+            switch (e.Type)
+            {
+                case WalEntryType.AddSection:
+                case WalEntryType.UpdateSection:
+                    {
+                        var s = ParseRecord(e.Payload);
+                        _sections[s.Name] = s;
+                        break;
+                    }
+
+                case WalEntryType.DeleteSection:
+                    {
+                        var name = Encoding.UTF8.GetString(e.Payload);
+                        _sections.Remove(name);
+                        break;
+                    }
+            }
+        }
+    }
+
+    // ==========================================================
+    // PUBLIC API (ISectionStore)
+    // ==========================================================
+    public Config.Ftpd.FtpSection? FindSection(string sectionName)
+        => _sections.TryGetValue(sectionName, out var s) ? s : null;
+
+    public IEnumerable<Config.Ftpd.FtpSection> GetAllSections()
+        => _sections.Values;
+
+    public bool TryAddSection(Config.Ftpd.FtpSection section, out string? error)
+    {
+        if (_sections.ContainsKey(section.Name))
+        {
+            error = "Section already exists.";
+            return false;
+        }
+
+        var rec = BuildRecord(section);
+        _wal.Append(new WalEntry(WalEntryType.AddSection, rec));
+
+        _sections[section.Name] = section;
+        CompactCheck();
+
+        error = null;
+        return true;
+    }
+
+    public bool TryUpdateSection(Config.Ftpd.FtpSection section, out string? error)
+    {
+        if (!_sections.ContainsKey(section.Name))
+        {
+            error = "Section not found.";
+            return false;
+        }
+
+        var rec = BuildRecord(section);
+        _wal.Append(new WalEntry(WalEntryType.UpdateSection, rec));
+
+        _sections[section.Name] = section;
+        CompactCheck();
+
+        error = null;
+        return true;
+    }
+
+    public bool TryDeleteSection(string sectionName, out string? error)
+    {
+        if (!_sections.ContainsKey(sectionName))
+        {
+            error = "Section not found.";
+            return false;
+        }
+
+        _wal.Append(new WalEntry(WalEntryType.DeleteSection, Encoding.UTF8.GetBytes(sectionName)));
+        _sections.Remove(sectionName);
+
+        CompactCheck();
+        error = null;
+        return true;
+    }
+
+    private void CompactCheck()
+    {
+        if (_wal.NeedsCompaction())
+        {
+            WriteSnapshot();
+            _wal.Clear();
+        }
+    }
+
+    // ==========================================================
+    // RECORD FORMAT (Unified FtpSection)
+    // ==========================================================
+    private byte[] BuildRecord(Config.Ftpd.FtpSection s)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
 
-        // lengths first
-        var nameBytes = Encoding.UTF8.GetBytes(s.SectionName);
-        var pathBytes = Encoding.UTF8.GetBytes(s.RelativePath);
+        var nameBytes = Encoding.UTF8.GetBytes(s.Name);
+        var rootBytes = Encoding.UTF8.GetBytes(s.VirtualRoot);
 
-        bw.Write((ushort)nameBytes.Length);   // nameLen
-        bw.Write((ushort)pathBytes.Length);   // pathLen
+        bw.Write((ushort)nameBytes.Length);
+        bw.Write((ushort)rootBytes.Length);
 
-        // data
-        bw.Write(s.UploadMultiplier);
-        bw.Write(s.DownloadMultiplier);
-        bw.Write(s.DefaultCreditsKb);
+        bw.Write(s.FreeLeech);
+        bw.Write(s.RatioUploadUnit);
+        bw.Write(s.RatioDownloadUnit);
 
-        // strings
+        // Nullable double
+        bw.Write(s.NukeMultiplier.HasValue);
+        if (s.NukeMultiplier.HasValue)
+            bw.Write(s.NukeMultiplier.Value);
+
         bw.Write(nameBytes);
-        bw.Write(pathBytes);
+        bw.Write(rootBytes);
 
         return ms.ToArray();
     }
 
-    private FtpSection ParseRecord(byte[] buf)
+    private Config.Ftpd.FtpSection ParseRecord(byte[] data)
     {
-        using var ms = new MemoryStream(buf);
+        using var ms = new MemoryStream(data);
         using var br = new BinaryReader(ms);
 
-        string ReadStr(int len) => Encoding.UTF8.GetString(br.ReadBytes(len));
-
         var nameLen = br.ReadUInt16();
-        var pathLen = br.ReadUInt16();
+        var rootLen = br.ReadUInt16();
 
-        var up = br.ReadInt64();
-        var down = br.ReadInt64();
-        var credits = br.ReadInt64();
+        var free = br.ReadBoolean();
+        var up = br.ReadInt32();
+        var down = br.ReadInt32();
 
-        var name = ReadStr(nameLen);
-        var path = ReadStr(pathLen);
+        var hasNuke = br.ReadBoolean();
+        double? nuke = hasNuke ? br.ReadDouble() : null;
 
-        return new FtpSection(
-            SectionName: name,
-            RelativePath: path,
-            UploadMultiplier: up,
-            DownloadMultiplier: down,
-            DefaultCreditsKb: credits
+        var name = Encoding.UTF8.GetString(br.ReadBytes(nameLen));
+        var root = Encoding.UTF8.GetString(br.ReadBytes(rootLen));
+
+        return new Config.Ftpd.FtpSection(
+            Name: name,
+            VirtualRoot: root,
+            FreeLeech: free,
+            RatioUploadUnit: up,
+            RatioDownloadUnit: down,
+            NukeMultiplier: nuke ?? 1
         );
     }
 
-    // =======================================================================
+    // ==========================================================
     // ENCRYPTION
-    // =======================================================================
-
-    private byte[] Encrypt(byte[] buf)
+    // ==========================================================
+    private byte[] EncryptSnapshot(byte[] plain)
     {
         var nonce = RandomNumberGenerator.GetBytes(12);
+        var cipher = new byte[plain.Length];
         var tag = new byte[16];
-        var ciphertext = new byte[buf.Length];
 
-        using (var gcm = new AesGcm(_aesKey))
-            gcm.Encrypt(nonce, buf, ciphertext, tag);
+        using var gcm = new AesGcm(_masterKey);
+        gcm.Encrypt(nonce, plain, cipher, tag);
 
-        using var ms = new MemoryStream();
-        ms.Write(nonce);
-        ms.Write(ciphertext);
-        ms.Write(tag);
-        return ms.ToArray();
+        var output = new byte[12 + cipher.Length + 16];
+        Buffer.BlockCopy(nonce, 0, output, 0, 12);
+        Buffer.BlockCopy(cipher, 0, output, 12, cipher.Length);
+        Buffer.BlockCopy(tag, 0, output, 12 + cipher.Length, 16);
+        return output;
     }
 
-    private byte[] Decrypt(byte[] enc)
+    private byte[] DecryptSnapshot(byte[] buf)
     {
-        ReadOnlySpan<byte> nonce = enc[..12];
-        ReadOnlySpan<byte> tag = enc[^16..];
-        ReadOnlySpan<byte> ciphertext = enc[12..^16];
+        ReadOnlySpan<byte> nonce = buf[..12];
+        ReadOnlySpan<byte> tag = buf[^16..];
+        ReadOnlySpan<byte> cipher = buf[12..^16];
 
-        var buf = new byte[ciphertext.Length];
+        var plain = new byte[cipher.Length];
 
-        using (var gcm = new AesGcm(_aesKey))
-            gcm.Decrypt(nonce, ciphertext, tag, buf);
+        using var gcm = new AesGcm(_masterKey);
+        gcm.Decrypt(nonce, cipher, tag, plain);
 
-        return buf;
+        return plain;
     }
 
-    private static byte[] DeriveKey(string pw, byte[] salt)
-    {
-        using var pbk = new Rfc2898DeriveBytes(
-            Encoding.UTF8.GetBytes(pw),
-            salt,
-            200_000,
-            HashAlgorithmName.SHA256);
-
-        return pbk.GetBytes(32);
-    }
-
+    // ==========================================================
+    // SALT + KEY
+    // ==========================================================
     private static byte[] EnsureSalt(string path)
     {
         if (File.Exists(path))
@@ -371,39 +352,20 @@ public sealed class BinarySectionStore : ISectionStore
         return salt;
     }
 
-    // =======================================================================
-    // HOT RELOAD
-    // =======================================================================
-
-    private void StartWatcher()
+    private byte[] DeriveKey(string masterPassword, byte[] salt)
     {
-        var dir = Path.GetDirectoryName(_dbPath)!;
-        var file = Path.GetFileName(_dbPath);
+        using var pbkdf = new Rfc2898DeriveBytes(
+            Encoding.UTF8.GetBytes(masterPassword),
+            salt,
+            200_000,
+            HashAlgorithmName.SHA256);
 
-        _watcher = new FileSystemWatcher(dir, file)
-        {
-            NotifyFilter = NotifyFilters.LastWrite
-        };
+        return pbkdf.GetBytes(32);
+    }
 
-        _watcher.Changed += (_, __) =>
-        {
-            lock (_sync)
-            {
-                try
-                {
-                    DebugLog?.Invoke("[SECTION DB] Hot reload…");
-                    var updated = LoadDb();
-                    _sections.Clear();
-                    foreach (var kv in updated)
-                        _sections[kv.Key] = kv.Value;
-                }
-                catch
-                {
-                    DebugLog?.Invoke("[SECTION DB] Hot reload failed.");
-                }
-            }
-        };
-
-        _watcher.EnableRaisingEvents = true;
+    public void ForceSnapshotRewrite()
+    {
+        WriteSnapshot();
+        _wal.Clear();
     }
 }

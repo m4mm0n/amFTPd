@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-24
  *  
  *  License:
  *      MIT License
@@ -17,14 +17,16 @@
 
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
+using amFTPd.Config.Fxp;
 using amFTPd.Config.Ident;
+using amFTPd.Config.Irc;
 using amFTPd.Config.Vfs;
 
 namespace amFTPd.Config.Daemon;
 
 /// <summary>
 /// Represents the root configuration for an AmFtpd server instance, including server, TLS, storage, identity, virtual
-/// file system, and rule/group settings.
+/// file system, and various rule configurations.
 /// </summary>
 /// <param name="Server">The server configuration settings, including network endpoints and general server options.</param>
 /// <param name="Tls">The TLS configuration settings used to secure FTP connections.</param>
@@ -36,22 +38,18 @@ namespace amFTPd.Config.Daemon;
 /// directories.</param>
 /// <param name="RatioRules">A collection of ratio rules, keyed by path or pattern, that specify upload/download ratio requirements.</param>
 /// <param name="Groups">A collection of group configurations, keyed by group name, that define user group settings and permissions.</param>
+/// <param name="FxpPolicy">Optional FXP policy configuration that governs file transfer policies between FTP servers.</param>
+/// <param name="Irc">Optional IRC configuration for integrating with IRC networks for notifications or commands.</param>
 public sealed record AmFtpdConfigRoot(
     AmFtpdServerConfig Server,
     AmFtpdTlsConfig Tls,
     AmFtpdStorageConfig Storage,
     IdentConfig Ident,
     VfsConfig Vfs,
-
-    // NEW — Section rules
     Dictionary<string, SectionRule> Sections,
-
-    // NEW — Directory-level rules
     Dictionary<string, DirectoryRule> DirectoryRules,
-
-    // NEW — Ratio rules (per-path or per-pattern)
     Dictionary<string, RatioRule> RatioRules,
-
-    // NEW — Group configurations
-    Dictionary<string, GroupConfig> Groups
+    Dictionary<string, GroupConfig> Groups,
+    FxpPolicyConfig? FxpPolicy = null,
+    IrcConfig? Irc = null
 );

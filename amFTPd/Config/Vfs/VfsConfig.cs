@@ -15,44 +15,103 @@
  * ====================================================================================================
  */
 
+using System;
+
 namespace amFTPd.Config.Vfs;
 
 /// <summary>
-/// Represents the configuration settings for a virtual file system (VFS).
+/// Configuration for the virtual file system.
 /// </summary>
-/// <remarks>This configuration defines the behavior and constraints of the virtual file system, 
-/// including case sensitivity, mount points, user-specific mounts, virtual files,  file size limits, and access
-/// restrictions. It also includes caching settings  for metadata to optimize performance.</remarks>
 public sealed record VfsConfig
 {
     /// <summary>
-    /// Gets a value indicating whether string comparisons are performed using case-sensitive matching.
+    /// Old style: all mounts in one list.
     /// </summary>
-    /// <remarks>Set this property to <see langword="true"/> to enable case-sensitive operations. When <see
-    /// langword="false"/>, comparisons ignore character casing.</remarks>
-    public bool CaseSensitive { get; init; } = false;
+    public IReadOnlyList<VfsMount> Mounts { get; init; } =
+        Array.Empty<VfsMount>();
+
     /// <summary>
-    /// Gets the collection of virtual file system mounts configured for this instance.
+    /// User-specific mounts. These are considered before global mounts.
     /// </summary>
-    public List<VfsMount> Mounts { get; init; } = new();
+    public IReadOnlyList<VfsUserMount> UserMounts { get; init; } =
+        Array.Empty<VfsUserMount>();
+
     /// <summary>
-    /// Gets the collection of user-defined virtual file system mounts associated with this instance.
+    /// Helper view of global mounts (same as <see cref="Mounts"/>).
     /// </summary>
-    public List<VfsUserMount> UserMounts { get; init; } = new();
-    /// <summary>
-    /// Gets the collection of virtual files associated with this instance.
-    /// </summary>
-    public List<VfsVirtualFile> VirtualFiles { get; init; } = new();
+    public IReadOnlyList<VfsMount> GlobalMounts => Mounts;
 
-    /// <summary>Maximum allowed file size in bytes (0 = unlimited).</summary>
-    public long MaxFileSizeBytes { get; init; } = 0;
+    public VfsMount? ResolveMount(
+        string? username,
+        string virtualPath,
+        out string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            virtualPath = "/";
 
-    /// <summary>Block extensions (e.g. ".exe", ".bat").</summary>
-    public List<string> DenyExtensions { get; init; } = new();
+        if (!virtualPath.StartsWith("/", StringComparison.Ordinal))
+            virtualPath = "/" + virtualPath;
 
-    /// <summary>Hide/deny hidden files.</summary>
-    public bool DenyHiddenFiles { get; init; } = false;
+        var userNameNorm = username?.Trim() ?? string.Empty;
 
-    /// <summary>Cache TTL for metadata (seconds).</summary>
-    public int CacheTtlSeconds { get; init; } = 30;
+        // 1. user-specific mounts
+        var userMount = UserMounts
+            .Where(um => string.Equals(um.Username, userNameNorm, StringComparison.OrdinalIgnoreCase))
+            .Select(um => um.Mount)
+            .OrderByDescending(m => m.VirtualRoot.Length)
+            .FirstOrDefault(m => IsPrefix(m.VirtualRoot, virtualPath));
+
+        if (userMount is not null)
+        {
+            relativePath = GetRelativePath(userMount.VirtualRoot, virtualPath);
+            return userMount;
+        }
+
+        // 2. global mounts
+        var globalMount = Mounts
+            .OrderByDescending(m => m.VirtualRoot.Length)
+            .FirstOrDefault(m => IsPrefix(m.VirtualRoot, virtualPath));
+
+        if (globalMount is not null)
+        {
+            relativePath = GetRelativePath(globalMount.VirtualRoot, virtualPath);
+            return globalMount;
+        }
+
+        relativePath = "/";
+        return null;
+    }
+
+    private static bool IsPrefix(string root, string path)
+    {
+        if (!root.StartsWith("/"))
+            root = "/" + root;
+
+        if (!root.EndsWith("/"))
+            root += "/";
+
+        if (!path.StartsWith("/"))
+            path = "/" + path;
+
+        return path.Equals(root.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+               || path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetRelativePath(string root, string path)
+    {
+        if (!root.StartsWith("/"))
+            root = "/" + root;
+
+        if (!root.EndsWith("/"))
+            root += "/";
+
+        if (!path.StartsWith("/"))
+            path = "/" + path;
+
+        if (path.Equals(root.TrimEnd('/', (char)StringComparison.OrdinalIgnoreCase)))
+            return "/";
+
+        var rel = path[root.Length..];
+        return string.IsNullOrEmpty(rel) ? "/" : "/" + rel.TrimStart('/');
+    }
 }

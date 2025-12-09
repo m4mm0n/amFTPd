@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-28
  *  
  *  License:
  *      MIT License
@@ -20,38 +20,40 @@ using amFTPd.Config.Ftpd.RatioRules;
 namespace amFTPd.Core.Ratio
 {
     /// <summary>
-    /// Provides functionality for managing and applying directory-specific rules to virtual paths, including rule
-    /// lookup and rule merging operations.
+    /// Provides functionality to resolve a directory rule based on a given path.
     /// </summary>
-    /// <remarks>Use this class to retrieve directory rules for specific virtual paths and to merge directory
-    /// rules with base ratio rules. Instances are immutable after construction and thread-safe for concurrent
-    /// access.</remarks>
+    /// <remarks>The <see cref="DirectoryRuleEngine"/> matches a given path against a collection of predefined
+    /// directory rules. Rules are evaluated in descending order of their virtual path length, ensuring the most
+    /// specific match is returned.</remarks>
     public sealed class DirectoryRuleEngine
     {
-        private readonly Dictionary<string, DirectoryRule> _rules;
-        /// <summary>
-        /// Initializes a new instance of the DirectoryRuleEngine class with the specified set of directory rules.
-        /// </summary>
-        /// <param name="rules">A dictionary containing directory rules, keyed by rule name. If null, an empty set of rules is used.</param>
-        public DirectoryRuleEngine(Dictionary<string, DirectoryRule> rules) => _rules = rules ?? new();
+        private readonly IReadOnlyDictionary<string, DirectoryRule> _rules;
 
-        /// <summary>
-        /// Finds the directory rule for a given virtual path.
-        /// Exact match only.
-        /// </summary>
-        public DirectoryRule? GetRule(string virtualPath) => _rules.TryGetValue(virtualPath, out var rule) ? rule : null;
+        public DirectoryRuleEngine(IReadOnlyDictionary<string, DirectoryRule> rules)
+        {
+            _rules = rules ?? throw new ArgumentNullException(nameof(rules));
+        }
 
-        /// <summary>
-        /// Merges a directory rule with a base RatioRule (section/global).
-        /// </summary>
-        public RatioRule Merge(RatioRule baseRule, DirectoryRule? overrideRule) =>
-            overrideRule is null
-                ? baseRule
-                : new RatioRule(
-                    Ratio: overrideRule.Ratio ?? baseRule.Ratio,
-                    IsFree: overrideRule.IsFree ?? baseRule.IsFree,
-                    MultiplyCost: overrideRule.MultiplyCost ?? baseRule.MultiplyCost,
-                    UploadBonus: overrideRule.UploadBonus ?? baseRule.UploadBonus
-                );
+        public DirectoryRule? Resolve(string path)
+        {
+            path = Normalize(path);
+
+            foreach (var r in _rules.Values
+                         .OrderByDescending(r => r.VirtualPath.Length))
+            {
+                if (path.StartsWith(r.VirtualPath, StringComparison.OrdinalIgnoreCase))
+                    return r;
+            }
+
+            return null;
+        }
+
+        private static string Normalize(string p)
+        {
+            p = p.Replace('\\', '/');
+            if (!p.StartsWith('/'))
+                p = "/" + p;
+            return p;
+        }
     }
 }

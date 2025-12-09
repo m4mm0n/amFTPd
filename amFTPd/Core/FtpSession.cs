@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Last Modified:  2025-12-02
  *  
  *  License:
  *      MIT License
@@ -19,6 +19,7 @@ using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Vfs;
 using amFTPd.Core.Ident;
+using amFTPd.Core.Sections;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Security;
@@ -26,6 +27,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace amFTPd.Core;
@@ -40,7 +42,7 @@ namespace amFTPd.Core;
 /// client connection and are responsible for  maintaining session-specific state, such as the current working
 /// directory, user account,  and transfer settings. The session also tracks activity timestamps for idle timeout
 /// management.</remarks>
-internal sealed class FtpSession : IAsyncDisposable
+public sealed class FtpSession : IAsyncDisposable
 {
     #region Private Fields
     private readonly NetworkStream _baseStream;
@@ -157,6 +159,7 @@ internal sealed class FtpSession : IAsyncDisposable
     /// <param name="tls">The <see cref="TlsConfig"/> object containing TLS configuration settings for secure communication.</param>
     /// <param name="identCfg">The <see cref="IdentConfig"/> object used to configure the Ident protocol for the session.</param>
     /// <param name="vfsCfg">The <see cref="VfsConfig"/> object used to configure the virtual file system for the session.</param>
+    /// <param name="sectionResolver">The <see cref="SectionResolver"/> used to resolve sections for the VFS manager.</param>
     public FtpSession(
         TcpClient control,
         IFtpLogger log,
@@ -166,7 +169,8 @@ internal sealed class FtpSession : IAsyncDisposable
         string defaultProt,
         TlsConfig tls,
         IdentConfig identCfg,
-        VfsConfig vfsCfg)
+        VfsConfig vfsCfg,
+        SectionResolver sectionResolver)
     {
         Control = control;
         _log = log;
@@ -180,7 +184,10 @@ internal sealed class FtpSession : IAsyncDisposable
         _tls = tls;
 
         IdentManager = new IdentManager(identCfg);
-        VfsManager = new VfsManager(vfsCfg, fs);
+        VfsManager = new VfsManager(
+            vfsCfg.Mounts,
+            vfsCfg.UserMounts,
+            sectionResolver);
         SessionId = Interlocked.Increment(ref _nextSessionId);
         _sessions[SessionId] = this;
     }
@@ -228,6 +235,7 @@ internal sealed class FtpSession : IAsyncDisposable
         await _ctrlStream.WriteAsync(bytes, 0, bytes.Length, ct);
         await _ctrlStream.FlushAsync(ct);
     }
+
     /// <summary>
     /// Upgrades the current connection to use TLS encryption.
     /// </summary>
@@ -235,12 +243,40 @@ internal sealed class FtpSession : IAsyncDisposable
     /// upgrade is complete, the connection will use TLS for all subsequent communication.</remarks>
     /// <param name="tls">The TLS configuration settings used to authenticate the server.</param>
     /// <returns>A task that represents the asynchronous operation.</returns>
-    public async Task UpgradeToTlsAsync(TlsConfig tls)
+    public async Task UpgradeToTlsAsync(TlsConfig tls, CancellationToken ct = default)
     {
-        var ssl = new SslStream(_baseStream, leaveInnerStreamOpen: false);
-        await ssl.AuthenticateAsServerAsync(tls.CreateServerOptions());
-        _ctrlStream = ssl;
-        TlsActive = true;
+        if (tls is null)
+            throw new ArgumentNullException(nameof(tls));
+
+        if (tls.Certificate is null)
+            throw new InvalidOperationException("TLS configuration has no certificate.");
+
+        // If already TLS, don’t re-wrap
+        if (_ctrlStream is SslStream)
+            return;
+
+        var ssl = new SslStream(
+            innerStream: _ctrlStream,
+            leaveInnerStreamOpen: false // when TLS dies, so does the control socket
+        );
+
+        try
+        {
+            var options = tls.CreateServerOptions();
+            if (options.ServerCertificate is null)
+                throw new InvalidOperationException("TlsConfig returned options without a ServerCertificate.");
+
+            await ssl.AuthenticateAsServerAsync(options, ct).ConfigureAwait(false);
+
+            _ctrlStream = ssl;
+            _log.Log(FtpLogLevel.Debug, "Control connection successfully upgraded to TLS.");
+        }
+        catch (Exception ex)
+        {
+            _log.Log(FtpLogLevel.Error, "TLS handshake failed on control connection.", ex);
+            ssl.Dispose();
+            throw;
+        }
     }
     /// <summary>
     /// Opens a passive FTP data connection and binds it to an available port within the configured range.
@@ -260,8 +296,42 @@ internal sealed class FtpSession : IAsyncDisposable
         var local = (IPEndPoint)Control.Client.LocalEndPoint!;
         var bindAddress = local.Address;
 
+        // Parse passive ports from the config string
+        var portsToTry = new List<int>();
+
+        var passiveRange = _cfg.PassivePorts;
+
+        if (!string.IsNullOrWhiteSpace(passiveRange))
+        {
+            // First try "start-end" syntax
+            var rangeParts = passiveRange.Split('-', 2);
+            if (rangeParts.Length == 2 &&
+                int.TryParse(rangeParts[0], out var startPort) &&
+                int.TryParse(rangeParts[1], out var endPort) &&
+                endPort >= startPort)
+            {
+                for (var port = startPort; port <= endPort; port++)
+                    portsToTry.Add(port);
+            }
+            else
+            {
+                // Fallback: treat as comma-separated list "2121,2222,2323"
+                foreach (var part in passiveRange.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (int.TryParse(part.Trim(), out var port))
+                        portsToTry.Add(port);
+                }
+            }
+        }
+
+        // If nothing was parsed, fall back to the main listening port (or pick whatever default you like)
+        if (portsToTry.Count == 0)
+        {
+            portsToTry.Add((int)_cfg.Port);
+        }
+
         var chosenPort = -1;
-        for (var p = _cfg.PassivePorts.Start; p <= _cfg.PassivePorts.End; p++)
+        foreach (var p in portsToTry)
         {
             try
             {
@@ -274,7 +344,10 @@ internal sealed class FtpSession : IAsyncDisposable
             }
         }
 
-        return chosenPort < 0 ? throw new InvalidOperationException("No passive port available.") : chosenPort;
+        if (chosenPort < 0)
+            throw new InvalidOperationException("No passive port available.");
+
+        return chosenPort;
     }
     /// <summary>
     /// Establishes an active FTP data connection to the specified IP address and port.

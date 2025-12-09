@@ -18,34 +18,120 @@
 namespace amFTPd.Config.Ftpd.RatioRules
 {
     /// <summary>
-    /// Represents a rule that defines ratio-based parameters for cost calculation and bonus allocation.
+    /// Describes ratio behavior for a logical section or group.
     /// </summary>
-    /// <remarks>Use <see cref="Default"/> to obtain a standard ratio rule with default values. This record is
-    /// immutable and thread-safe.</remarks>
-    /// <param name="Ratio">The ratio value used to determine cost adjustments and bonus calculations. Must be greater than or equal to
-    /// zero.</param>
-    /// <param name="IsFree">Indicates whether the rule applies a free cost. Set to <see langword="true"/> to waive associated costs;
-    /// otherwise, <see langword="false"/>.</param>
-    /// <param name="MultiplyCost">The multiplier applied to the base cost when calculating the final cost under this rule. Must be greater than or
-    /// equal to zero.</param>
-    /// <param name="UploadBonus">The bonus value awarded for uploads when this rule is applied. Must be greater than or equal to zero.</param>
-    public sealed record RatioRule(
-        double Ratio,
-        bool IsFree,
-        double MultiplyCost,
-        double UploadBonus
-    )
+    public sealed record RatioRule
     {
+        /// <summary>Rule name.</summary>
+        public string Name { get; init; } = string.Empty;
+
+        /// <summary>Credits per KiB uploaded.</summary>
+        public int CreditsPerKiBUploaded { get; init; }
+
+        /// <summary>Credits per KiB downloaded.</summary>
+        public int CreditsPerKiBDownloaded { get; init; }
+
+        /// <summary>Minimum ratio to enforce (null disables).</summary>
+        public double? MinimumRatio { get; init; }
+
+        /// <summary>If true, downloads are free (no deduction).</summary>
+        public bool? IsFree { get; init; }
+
+        /// <summary>Ratio factor (e.g. 3.0 = 1:3).</summary>
+        public double? Ratio { get; init; }
+
+        /// <summary>Cost multiplier.</summary>
+        public double? MultiplyCost { get; init; } = 1.0;
+
+        /// <summary>Extra upload bonus multiplier.</summary>
+        public double? UploadBonus { get; init; } = 0.0;
+
+        /// <summary>Time multiplier for this rule (null = default).</summary>
+        public double? TimeMultiplier { get; init; }
+
+        public int MinHour { get; init; }
+
+        public int MaxHour { get; init; }
+
+        public long CalculateUploadCredits(long sizeInBytes)
+        {
+            if (sizeInBytes <= 0)
+                return 0;
+
+            var kib = sizeInBytes / 1024.0;
+            return (long)(kib * CreditsPerKiBUploaded);
+        }
+
+        public long CalculateDownloadCost(long sizeInBytes)
+        {
+            if (IsFree.Value || sizeInBytes <= 0)
+                return 0;
+
+            var kib = sizeInBytes / 1024.0;
+            return (long)(kib * CreditsPerKiBDownloaded * MultiplyCost);
+        }
+
+        public RatioRule()
+        {
+        }
+
         /// <summary>
-        /// Gets the default ratio rule configuration used when no custom rule is specified.
+        /// Compatibility ctor – named arg "Ratio" + flags like IsFree, MultiplyCost, UploadBonus.
         /// </summary>
-        /// <remarks>Use this property to obtain a standard ratio rule with typical values for general
-        /// scenarios. The returned instance is immutable and can be shared safely across threads.</remarks>
-        public static RatioRule Default { get; } = new(
-            Ratio: 1.0,
-            IsFree: false,
-            MultiplyCost: 1.0,
-            UploadBonus: 1.0
-        );
+        public RatioRule(
+            string Name,
+            double Ratio,
+            double MultiplyCost = 1.0,
+            bool IsFree = false,
+            double UploadBonus = 0.0,
+            int CreditsPerKiBUploaded = 0,
+            int CreditsPerKiBDownloaded = 0,
+            double? MinimumRatio = null)
+        {
+            this.Name = Name;
+            this.Ratio = Ratio;
+            this.MultiplyCost = MultiplyCost;
+            this.IsFree = IsFree;
+            this.UploadBonus = UploadBonus;
+            this.CreditsPerKiBUploaded = CreditsPerKiBUploaded;
+            this.CreditsPerKiBDownloaded = CreditsPerKiBDownloaded;
+            this.MinimumRatio = MinimumRatio;
+        }
+
+        public RatioRule(
+            string Name,
+            double? Ratio,
+            double? MultiplyCost,
+            bool? IsFree,
+            double? UploadBonus,
+            int MinHour,
+            int MaxHour,
+            double? TimeMultiplier)
+        {
+            this.Name = Name;
+            this.Ratio = Ratio;
+            this.MultiplyCost = MultiplyCost;
+            this.IsFree = IsFree;
+            this.UploadBonus = UploadBonus;
+            this.MinHour = MinHour;
+            this.MaxHour = MaxHour;
+            this.TimeMultiplier = TimeMultiplier;
+        }
+        public RatioRule(
+            double? Ratio,
+            double? MultiplyCost,
+            bool? IsFree,
+            double? UploadBonus)
+            : this(
+                Name: string.Empty,
+                Ratio: Ratio,
+                MultiplyCost: MultiplyCost,
+                IsFree: IsFree,
+                UploadBonus: UploadBonus,
+                MinHour: 0,
+                MaxHour: 24,
+                TimeMultiplier: null)
+        {
+        }
     }
 }

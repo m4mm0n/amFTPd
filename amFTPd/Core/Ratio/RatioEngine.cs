@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-28
  *  
  *  License:
  *      MIT License
@@ -17,145 +17,87 @@
 
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
+using amFTPd.Scripting;
 
 namespace amFTPd.Core.Ratio
 {
     /// <summary>
-    /// Provides methods for resolving ratio rules and calculating credit earnings and costs for FTP users based on
-    /// upload and download activity.
+    /// Provides functionality to compute and resolve effective ratio rules based on section, directory, and ratio
+    /// configurations.
     /// </summary>
-    /// <remarks>The RatioEngine encapsulates logic for determining effective ratio rules for virtual paths
-    /// and users, as well as computing credit-related operations such as upload earnings and download costs. It
-    /// supports directory-level, section-level, and per-path rule resolution, and applies user-specific modifiers such
-    /// as VIP status and free-leech conditions. This class is thread-safe for concurrent read operations if the
-    /// underlying rule dictionaries are not modified after construction.</remarks>
+    /// <remarks>The <see cref="RatioEngine"/> class is designed to evaluate and determine the appropriate
+    /// <see cref="RatioRule"/> for a given virtual path and user group. It relies on predefined rules and
+    /// configurations, including section rules, directory rules, and ratio rules, to perform the resolution.</remarks>
     public sealed class RatioEngine
     {
         private readonly Dictionary<string, SectionRule> _sections;
-        private readonly Dictionary<string, DirectoryRule> _directoryRules;
+        private readonly Dictionary<string, DirectoryRule> _dirRules;
         private readonly Dictionary<string, RatioRule> _ratioRules;
         private readonly Dictionary<string, GroupConfig> _groups;
+
         /// <summary>
-        /// Initializes a new instance of the RatioEngine class with the specified section, directory, ratio, and group
-        /// configurations.
+        /// Initializes a new instance of the <see cref="RatioEngine"/> class with the specified configuration rules and
+        /// group settings.
         /// </summary>
-        /// <param name="sections">A dictionary containing section rules, keyed by section name. If null, an empty dictionary is used.</param>
-        /// <param name="directoryRules">A dictionary containing directory rules, keyed by directory name. If null, an empty dictionary is used.</param>
-        /// <param name="ratioRules">A dictionary containing ratio rules, keyed by rule name. If null, an empty dictionary is used.</param>
-        /// <param name="groups">A dictionary containing group configurations, keyed by group name. If null, an empty dictionary is used.</param>
+        /// <param name="sections">A dictionary containing section rules, where the key is the section name and the value is the corresponding
+        /// <see cref="SectionRule"/>. This parameter cannot be <see langword="null"/>.</param>
+        /// <param name="dirRules">A dictionary containing directory rules, where the key is the directory name and the value is the
+        /// corresponding <see cref="DirectoryRule"/>. This parameter cannot be <see langword="null"/>.</param>
+        /// <param name="ratioRules">A dictionary containing ratio rules, where the key is the ratio name and the value is the corresponding <see
+        /// cref="RatioRule"/>. This parameter cannot be <see langword="null"/>.</param>
+        /// <param name="groups">A dictionary containing group configurations, where the key is the group name and the value is the
+        /// corresponding <see cref="GroupConfig"/>. This parameter cannot be <see langword="null"/>.</param>
+        /// <exception cref="ArgumentNullException">Thrown if any of the parameters <paramref name="sections"/>, <paramref name="dirRules"/>, <paramref
+        /// name="ratioRules"/>, or <paramref name="groups"/> is <see langword="null"/>.</exception>
         public RatioEngine(
             Dictionary<string, SectionRule> sections,
-            Dictionary<string, DirectoryRule> directoryRules,
+            Dictionary<string, DirectoryRule> dirRules,
             Dictionary<string, RatioRule> ratioRules,
             Dictionary<string, GroupConfig> groups)
         {
-            _sections = sections ?? new();
-            _directoryRules = directoryRules ?? new();
-            _ratioRules = ratioRules ?? new();
-            _groups = groups ?? new();
+            _sections = sections ?? throw new ArgumentNullException(nameof(sections));
+            _dirRules = dirRules ?? throw new ArgumentNullException(nameof(dirRules));
+            _ratioRules = ratioRules ?? throw new ArgumentNullException(nameof(ratioRules));
+            _groups = groups ?? throw new ArgumentNullException(nameof(groups));
         }
 
         /// <summary>
-        /// Computes the effective ratio rule for a given virtual path and user.
+        /// Computes the effective ratio rule for a user + virtual path.
+        /// Purely SectionRule, DirectoryRule, RatioRule based.
         /// </summary>
-        public RatioRule ResolveRule(string virtualPath, FtpUser user)
+        public RatioRule Resolve(string virtualPath, string? primaryGroup, RatioResolutionPipeline pipeline)
         {
-            // 1) Directory-level override (exact match)
-            if (_directoryRules.TryGetValue(virtualPath, out var dir))
-            {
-                var rr = BuildFromDirectoryRule(dir);
-                if (rr is not null)
-                    return rr;
-            }
-
-            // 2) Section-level match (prefix match)
-            foreach (var sec in _sections.Values.Where(sec => virtualPath.StartsWith(sec.VirtualRoot, StringComparison.OrdinalIgnoreCase)))
-                return new RatioRule(
-                    Ratio: sec.Ratio,
-                    IsFree: sec.IsFree,
-                    MultiplyCost: sec.MultiplyCost,
-                    UploadBonus: sec.UploadBonus
-                );
-
-            // 3) RatioRules dictionary (per-path rule)
-            foreach (var kv in from kv in _ratioRules let key = kv.Key where virtualPath.StartsWith(key, StringComparison.OrdinalIgnoreCase) select kv)
-                return kv.Value;
-
-            // 4) Global default
-            return RatioRule.Default;
+            return pipeline.Resolve(virtualPath, primaryGroup);
         }
 
-        private RatioRule? BuildFromDirectoryRule(DirectoryRule dr)
+        /// <summary>
+        /// Evaluates login-specific policy for the provided context.
+        /// This is invoked from the PASS handler to decide whether to allow the login,
+        /// optionally adjust speed limits or credits, etc.
+        /// </summary>
+        /// <param name="ctx">The login context to evaluate.</param>
+        /// <returns>
+        /// An <see cref="AMScriptResult"/> describing the action (allow/deny) and any side effects,
+        /// such as new speed limits or credit deltas.
+        /// </returns>
+        public AMScriptResult ResolveLoginRule(RatioLoginContext ctx)
         {
-            if (dr.IsFree == null
-                && dr.Ratio == null
-                && dr.MultiplyCost == null
-                && dr.UploadBonus == null)
-                return null;
+            if (ctx is null) throw new ArgumentNullException(nameof(ctx));
 
-            return new RatioRule(
-                Ratio: dr.Ratio ?? 1.0,
-                IsFree: dr.IsFree ?? false,
-                MultiplyCost: dr.MultiplyCost ?? 1.0,
-                UploadBonus: dr.UploadBonus ?? 1.0
+            // For now: no special login rules – always allow, no cost, no earned upload.
+            // This keeps the PASS wiring simple and compile-safe.
+            //
+            // Later, you can use:
+            //  - ctx.UserName / ctx.GroupName for group-based login policy
+            //  - ctx.RemoteAddress / ctx.RemoteHost for IP / host-based blocks
+            //  - ctx.NowUtc for time-of-day login windows
+            // and return Deny / DenyWithReason, or set NewDownloadLimit / NewUploadLimit, etc.
+
+            return new AMScriptResult(
+                Action: AMRuleAction.Allow,
+                CostDownload: 0L,
+                EarnedUpload: 0L
             );
-        }
-
-        /// <summary>
-        /// Computes how many KB of credits the user earns from an upload.
-        /// </summary>
-        public long ComputeUploadEarnedKb(long bytes, RatioRule rule, FtpUser user)
-        {
-            if (bytes <= 0)
-                return 0;
-
-            var kb = bytes / 1024.0;
-
-            var bonus = rule.UploadBonus;
-
-            // VIP multiplier
-            if (user.IsVip)
-                bonus *= 1.5;
-
-            return (long)Math.Round(kb * bonus, MidpointRounding.AwayFromZero);
-        }
-
-        /// <summary>
-        /// Computes how many KB credits a download costs.
-        /// Returns 0 if directory is free-leech.
-        /// </summary>
-        public long ComputeDownloadCostKb(long bytes, RatioRule rule, FtpUser user)
-        {
-            if (user.IsNoRatio)
-                return 0;
-
-            if (rule.IsFree)
-                return 0;
-
-            if (bytes <= 0)
-                return 0;
-
-            var kb = bytes / 1024.0;
-            var cost = kb / rule.Ratio;
-
-            cost *= rule.MultiplyCost;
-
-            return (long)Math.Round(cost, MidpointRounding.AwayFromZero);
-        }
-
-        /// <summary>
-        /// Checks if user has enough credits to download the given number of bytes.
-        /// </summary>
-        public bool HasEnoughCredits(FtpUser user, long bytes, RatioRule rule)
-        {
-            if (user.IsNoRatio)
-                return true;
-
-            if (rule.IsFree)
-                return true;
-
-            var cost = ComputeDownloadCostKb(bytes, rule, user);
-            return user.CreditsKb >= cost;
         }
     }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Last Modified:  2025-11-28
  *  
  *  License:
  *      MIT License
@@ -30,265 +30,326 @@ namespace amFTPd.Config.Ftpd
     /// supports concurrent access.</remarks>
     public sealed class InMemoryUserStore : IUserStore
     {
-        #region Private Fields
-
         private readonly Dictionary<string, FtpUser> _users;
-        private readonly Dictionary<string, int> _currentLogins = new();
-        private readonly Lock _sync = new();
         private readonly string _configPath;
+        private readonly Dictionary<string, int> _activeLogins = new(StringComparer.OrdinalIgnoreCase);
+        private readonly object _loginLock = new();
 
-        #endregion
-        /// <summary>
-        /// Initializes a new instance of the <see cref="InMemoryUserStore"/> class with the specified user dictionary
-        /// and configuration path.
-        /// </summary>
-        /// <remarks>This constructor sets up the in-memory user store with the provided user data and
-        /// configuration path. Ensure that the <paramref name="users"/> dictionary is populated with valid user entries
-        /// before using this instance.</remarks>
-        /// <param name="users">A dictionary containing user data, where the key is the username and the value is an <see cref="FtpUser"/>
-        /// object. Cannot be null.</param>
-        /// <param name="configPath">The file path to the configuration file. Cannot be null or empty.</param>
-        private InMemoryUserStore(Dictionary<string, FtpUser> users, string configPath)
+        private static readonly JsonSerializerOptions JsonOptions = new()
         {
-            _users = users;
-            _configPath = configPath;
+            WriteIndented = true,
+            PropertyNameCaseInsensitive = true
+        };
+
+        public InMemoryUserStore(Dictionary<string, FtpUser> users, string configPath)
+        {
+            _users = users ?? throw new ArgumentNullException(nameof(users));
+            _configPath = configPath ?? throw new ArgumentNullException(nameof(configPath));
         }
-        /// <summary>
-        /// Loads an <see cref="InMemoryUserStore"/> from the specified file path. If the file does not exist, a new
-        /// store is created with a default admin user and saved to the file.
-        /// </summary>
-        /// <remarks>The default admin user is created with the username "admin" and password "admin".
-        /// This user has administrative privileges and a home directory set to the root ("/"). It is recommended to
-        /// change the default password after initialization for security purposes.</remarks>
-        /// <param name="path">The path to the file containing the user store configuration. If the file does not exist, it will be created
-        /// with default settings.</param>
-        /// <returns>An <see cref="InMemoryUserStore"/> instance populated with users from the specified file, or a new store
-        /// with a default admin user if the file does not exist.</returns>
+
+        // =====================================================================
+        // Static loader used by AmFtpdConfigLoader
+        // =====================================================================
+
         public static InMemoryUserStore LoadFromFile(string path)
         {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("UsersDbPath must not be empty.", nameof(path));
+
             if (!File.Exists(path))
             {
-                // Seed default admin: user "admin", password "admin"
-                var admin = new FtpUser(
-                    UserName: "admin",
-                    PasswordHash: PasswordHasher.HashPassword("admin"),
-                    HomeDir: "/",
-                    IsAdmin: true,
-                    AllowFxp: false,
-                    AllowUpload: true,
-                    AllowDownload: true,
-                    AllowActiveMode: true,
-                    MaxConcurrentLogins: 5,
-                    IdleTimeout: TimeSpan.FromMinutes(30),
-                    MaxUploadKbps: 0,
-                    MaxDownloadKbps: 0,
-                    PrimaryGroup: "admins",
-                    SecondaryGroups: ImmutableArray<string>.Empty,
-                    CreditsKb: 1024 * 1024, // 1GB default credits
-                    AllowedIpMask: null,
-                    RequireIdentMatch: false,
-                    RequiredIdent: null,
-                    FlagsRaw: string.Empty
-                );
-
-                var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [admin.UserName] = admin
-                };
+                // First run: create default admin
+                var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
+                var admin = CreateDefaultAdminUser();
+                dict[admin.UserName] = admin;
 
                 var store = new InMemoryUserStore(dict, path);
-                store.Save(); // create file
+                store.Save();
                 return store;
             }
 
-            var json = File.ReadAllText(path);
-            var cfg = JsonSerializer.Deserialize<FtpUserConfig>(json) ?? FtpUserConfig.Empty;
-
-            var users = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
-            foreach (var u in cfg.Users)
+            try
             {
-                users[u.UserName] = new FtpUser(
-                    UserName: u.UserName,
-                    PasswordHash: u.PasswordHash,
-                    HomeDir: u.HomeDir,
-                    IsAdmin: u.IsAdmin,
-                    AllowFxp: u.AllowFxp,
-                    AllowUpload: u.AllowUpload,
-                    AllowDownload: u.AllowDownload,
-                    AllowActiveMode: u.AllowActiveMode,
-                    MaxConcurrentLogins: u.MaxConcurrentLogins,
-                    IdleTimeout: TimeSpan.FromSeconds(u.IdleTimeoutSeconds),
-                    MaxUploadKbps: u.MaxUploadKbps,
-                    MaxDownloadKbps: u.MaxDownloadKbps,
-                    PrimaryGroup: u.GroupName ?? "users",
-                    SecondaryGroups: ImmutableArray<string>.Empty,
-                    CreditsKb: u.CreditsKb,
-                    AllowedIpMask: u.AllowedIpMask,
-                    RequireIdentMatch: u.RequireIdentMatch,
-                    RequiredIdent: u.RequiredIdent,
-                    FlagsRaw: string.Empty
-                );
-            }
+                var json = File.ReadAllText(path);
+                var cfgUsers = JsonSerializer.Deserialize<List<FtpUserConfigUser>>(json, JsonOptions)
+                               ?? new List<FtpUserConfigUser>();
 
-            return new InMemoryUserStore(users, path);
+                var users = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var cu in cfgUsers)
+                {
+                    var user = FromConfig(cu);
+                    users[user.UserName] = user;
+                }
+
+                return new InMemoryUserStore(users, path);
+            }
+            catch
+            {
+                // Corrupt file → fall back to a minimal admin-only store.
+                var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
+                var admin = CreateDefaultAdminUser();
+                dict[admin.UserName] = admin;
+
+                return new InMemoryUserStore(dict, path);
+            }
         }
 
-        private void Save()
-        {
-            var cfg = new FtpUserConfig(
-                _users.Values
-                    .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
-                    .Select(u => new FtpUserConfigUser(
-                        UserName: u.UserName,
-                        PasswordHash: u.PasswordHash,
-                        HomeDir: u.HomeDir,
-                        IsAdmin: u.IsAdmin,
-                        AllowFxp: u.AllowFxp,
-                        AllowUpload: u.AllowUpload,
-                        AllowDownload: u.AllowDownload,
-                        AllowActiveMode: u.AllowActiveMode,
-                        MaxConcurrentLogins: u.MaxConcurrentLogins,
-                        IdleTimeoutSeconds: (int)u.IdleTimeout.TotalSeconds,
-                        MaxUploadKbps: u.MaxUploadKbps,
-                        MaxDownloadKbps: u.MaxDownloadKbps,
-                        GroupName: u.GroupName,
-                        CreditsKb: u.CreditsKb,
-                        AllowedIpMask: u.AllowedIpMask,
-                        RequireIdentMatch: u.RequireIdentMatch,
-                        RequiredIdent: u.RequiredIdent
-                    ))
-                    .ToList()
-            );
+        // =====================================================================
+        // Persistence
+        // =====================================================================
 
-            var json = JsonSerializer.Serialize(cfg, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
+        public void Save()
+        {
+            var list = _users.Values
+                .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
+                .Select(ToConfig)
+                .ToList();
+
+            var json = JsonSerializer.Serialize(list, JsonOptions);
+
+            var dir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
 
             File.WriteAllText(_configPath, json);
         }
-        /// <summary>
-        /// Attempts to authenticate a user with the specified username and password.
-        /// </summary>
-        /// <remarks>This method verifies the provided username and password against the stored user data.
-        /// If the authentication succeeds, the method ensures that the user has not exceeded their maximum allowed
-        /// concurrent logins. The method is thread-safe.</remarks>
-        /// <param name="user">The username of the user attempting to authenticate.</param>
-        /// <param name="password">The password associated with the specified username.</param>
-        /// <param name="account">When this method returns, contains the authenticated <see cref="FtpUser"/> object if authentication
-        /// succeeds; otherwise, <see langword="null"/>. This parameter is passed uninitialized.</param>
-        /// <returns><see langword="true"/> if the user is successfully authenticated; otherwise, <see langword="false"/>.</returns>
-        public bool TryAuthenticate(string user, string password, out FtpUser? account)
+
+        // =====================================================================
+        // IUserStore implementation
+        // =====================================================================
+
+        public FtpUser? FindUser(string userName)
         {
-            account = null;
+            if (string.IsNullOrWhiteSpace(userName))
+                return null;
 
-            if (!_users.TryGetValue(user, out var u))
+            return _users.TryGetValue(userName, out var u) ? u : null;
+        }
+
+        public bool TryAuthenticate(string userName, string password, out FtpUser? user)
+        {
+            user = null;
+
+            if (!_users.TryGetValue(userName, out var acc))
                 return false;
 
-            if (!PasswordHasher.VerifyPassword(password, u.PasswordHash))
+            if (acc.Disabled)
                 return false;
 
-            lock (_sync)
+            if (!VerifyPassword(acc.PasswordHash, password))
+                return false;
+
+            // ----- NEW: enforce MaxConcurrentLogins -----
+            if (acc.MaxConcurrentLogins > 0)
             {
-                var count = _currentLogins.TryGetValue(u.UserName, out var c) ? c : 0;
-                if (u.MaxConcurrentLogins > 0 && count >= u.MaxConcurrentLogins)
-                    return false;
+                lock (_loginLock)
+                {
+                    var current = _activeLogins.TryGetValue(userName, out var c) ? c : 0;
+                    if (current >= acc.MaxConcurrentLogins)
+                    {
+                        // too many sessions
+                        return false;
+                    }
 
-                _currentLogins[u.UserName] = count + 1;
+                    _activeLogins[userName] = current + 1;
+                }
             }
+            // --------------------------------------------
 
-            account = u;
+            user = acc;
             return true;
         }
-        /// <summary>
-        /// Handles the logout process for the specified FTP user, decrementing their active login count.
-        /// </summary>
-        /// <remarks>This method ensures that the active login count for the specified user is decremented
-        /// in a thread-safe manner. If the user does not have any active logins, no changes are made.</remarks>
-        /// <param name="user">The FTP user who is logging out. Cannot be <see langword="null"/>.</param>
-        public void OnLogout(FtpUser user)
-        {
-            lock (_sync)
-                if (_currentLogins.TryGetValue(user.UserName, out var c) && c > 0)
-                    _currentLogins[user.UserName] = c - 1;
-        }
-        /// <summary>
-        /// Finds and returns the user associated with the specified username.
-        /// </summary>
-        /// <param name="userName">The username of the user to find. Cannot be <see langword="null"/> or empty.</param>
-        /// <returns>The <see cref="FtpUser"/> object associated with the specified username, or <see langword="null"/> if no
-        /// user is found.</returns>
-        public FtpUser? FindUser(string userName)
-            => _users.TryGetValue(userName, out var u) ? u : null;
-        /// <summary>
-        /// Retrieves all FTP users in the system, sorted by username in a case-insensitive manner.
-        /// </summary>
-        /// <remarks>The returned collection is a snapshot of the current users at the time of the method
-        /// call.  Changes to the user list after the method is called will not be reflected in the returned collection.
-        /// This method is thread-safe.</remarks>
-        /// <returns>An <see cref="IEnumerable{T}"/> containing all FTP users, sorted by username in ascending order.</returns>
-        public IEnumerable<FtpUser> GetAllUsers()
-        {
-            lock (_sync)
-                return _users.Values
-                    .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-        }
-        /// <summary>
-        /// Attempts to add a new FTP user to the system.
-        /// </summary>
-        /// <remarks>This method ensures thread safety by locking the internal user collection during the
-        /// operation. If a user with the same username already exists, the method does not add the user and sets the
-        /// <paramref name="error"/> parameter to an appropriate message.</remarks>
-        /// <param name="user">The <see cref="FtpUser"/> object representing the user to be added. The user's <see
-        /// cref="FtpUser.UserName"/> must be unique.</param>
-        /// <param name="error">When the method returns, contains an error message if the operation fails; otherwise, <see
-        /// langword="null"/>.</param>
-        /// <returns><see langword="true"/> if the user was successfully added; otherwise, <see langword="false"/>.</returns>
+
         public bool TryAddUser(FtpUser user, out string? error)
         {
-            lock (_sync)
-            {
-                if (_users.ContainsKey(user.UserName))
-                {
-                    error = "User already exists.";
-                    return false;
-                }
+            error = null;
 
-                _users[user.UserName] = user;
-                Save();
+            if (string.IsNullOrWhiteSpace(user.UserName))
+            {
+                error = "UserName must not be empty.";
+                return false;
             }
 
-            error = null;
+            if (_users.ContainsKey(user.UserName))
+            {
+                error = "User already exists.";
+                return false;
+            }
+
+            _users[user.UserName] = user;
+            Save();
             return true;
         }
-        /// <summary>
-        /// Attempts to update the details of an existing FTP user.
-        /// </summary>
-        /// <remarks>This method is thread-safe. If the specified user does not exist, the update
-        /// operation will fail, and an error message will be provided in the <paramref name="error"/>
-        /// parameter.</remarks>
-        /// <param name="user">The <see cref="FtpUser"/> object containing the updated user details. The <see cref="FtpUser.UserName"/>
-        /// property must match an existing user.</param>
-        /// <param name="error">When this method returns, contains an error message if the update fails; otherwise, <see langword="null"/>.
-        /// This parameter is passed uninitialized.</param>
-        /// <returns><see langword="true"/> if the user details were successfully updated; otherwise, <see langword="false"/>.</returns>
+
         public bool TryUpdateUser(FtpUser user, out string? error)
         {
-            lock (_sync)
-            {
-                if (!_users.ContainsKey(user.UserName))
-                {
-                    error = "User does not exist.";
-                    return false;
-                }
+            error = null;
 
-                _users[user.UserName] = user;
-                Save();
+            if (string.IsNullOrWhiteSpace(user.UserName))
+            {
+                error = "UserName must not be empty.";
+                return false;
             }
 
-            error = null;
+            _users[user.UserName] = user;
+            Save();
             return true;
+        }
+
+        public void OnLogout(FtpUser user)
+        {
+            if (user is null)
+                return;
+
+            if (user.MaxConcurrentLogins > 0)
+            {
+                lock (_loginLock)
+                {
+                    if (_activeLogins.TryGetValue(user.UserName, out var c))
+                    {
+                        c--;
+                        if (c <= 0)
+                        {
+                            _activeLogins.Remove(user.UserName);
+                        }
+                        else
+                        {
+                            _activeLogins[user.UserName] = c;
+                        }
+                    }
+                }
+            }
+
+            // If you want "last logout" persistence etc, do it here.
+            Save();
+        }
+
+        public IEnumerable<FtpUser> GetAllUsers()
+            => _users.Values;
+
+        // Optional helper for admin / SITE commands
+        public bool TryDeleteUser(string userName, out string? error)
+        {
+            error = null;
+            if (!_users.Remove(userName))
+            {
+                error = "User not found.";
+                return false;
+            }
+
+            Save();
+            return true;
+        }
+
+        // =====================================================================
+        // Mapping: FtpUserConfigUser <-> FtpUser
+        // =====================================================================
+
+        private static FtpUser FromConfig(FtpUserConfigUser cu)
+        {
+            var idle = cu.IdleTimeoutSeconds > 0
+                ? TimeSpan.FromSeconds(cu.IdleTimeoutSeconds)
+                : (TimeSpan?)null;
+
+            // ctor: FtpUser(string, string, bool, string, string, IReadOnlyList<string>,
+            //               bool, bool, bool, bool, bool, bool,
+            //               string, string, TimeSpan?, int, int, long,
+            //               IReadOnlyList<FtpSection>, int, bool, string?)
+            return new FtpUser(
+                cu.UserName,                                      // userName
+                cu.PasswordHash,                                  // passwordHash
+                cu.Disabled,                                      // disabled
+                cu.HomeDir,                                       // homeDir
+                cu.GroupName,                                     // primary group (by position)
+                cu.SecondaryGroups ?? Array.Empty<string>(),      // secondary groups
+                cu.IsAdmin || cu.IsAdministrator,                 // isAdmin
+                cu.AllowFxp,                                      // allowFxp
+                cu.AllowUpload,                                   // allowUpload
+                cu.AllowDownload,                                 // allowDownload
+                cu.AllowActiveMode,                               // allowActiveMode
+                cu.RequireIdentMatch,                             // requireIdentMatch
+                cu.AllowedIpMask ?? string.Empty,                 // allowedIpMask
+                cu.RequiredIdent ?? string.Empty,                 // requiredIdent
+                idle,                                             // idleTimeout
+                cu.MaxUploadKbps,                                 // maxUploadKbps
+                cu.MaxDownloadKbps,                               // maxDownloadKbps
+                cu.CreditsKb,                                     // creditsKb
+                Array.Empty<FtpSection>(),                        // sections (none from JSON)
+                cu.MaxConcurrentLogins,                           // maxConcurrentLogins
+                IsNoRatio: false,                                 // isNoRatio
+                FlagsRaw: string.Empty                            // flagsRaw (for SITE FLAGS etc.)
+            );
+        }
+
+        private static FtpUserConfigUser ToConfig(FtpUser u)
+        {
+            return new FtpUserConfigUser(
+                UserName: u.UserName,
+                PasswordHash: u.PasswordHash,
+                Disabled: u.Disabled,
+                HomeDir: u.HomeDir,
+                GroupName: u.GroupName ?? string.Empty,
+                SecondaryGroups: u.SecondaryGroups ?? Array.Empty<string>(),
+                IsAdmin: u.IsAdmin,
+                IsAdministrator: u.IsAdmin,
+                AllowFxp: u.AllowFxp,
+                AllowUpload: u.AllowUpload,
+                AllowDownload: u.AllowDownload,
+                AllowActiveMode: u.AllowActiveMode,
+                RequireIdentMatch: u.RequireIdentMatch,
+                AllowedIpMask: u.AllowedIpMask,
+                RequiredIdent: u.RequiredIdent,
+                IdleTimeoutSeconds: u.IdleTimeout.HasValue
+                    ? (int)u.IdleTimeout.Value.TotalSeconds
+                    : 0,
+                MaxUploadKbps: u.MaxUploadKbps,
+                MaxDownloadKbps: u.MaxDownloadKbps,
+                CreditsKb: u.CreditsKb,
+                MaxConcurrentLogins: u.MaxConcurrentLogins
+            );
+        }
+
+        private static FtpUser CreateDefaultAdminUser()
+        {
+            return new FtpUser(
+                "admin",                                  // userName
+                PasswordHasher.HashPassword("admin"),     // passwordHash
+                Disabled: false,
+                HomeDir: "/",
+                "admins",                                 // primary group (by position)
+                Array.Empty<string>(),                    // secondary groups
+                IsAdmin: true,
+                AllowFxp: false,
+                AllowUpload: true,
+                AllowDownload: true,
+                AllowActiveMode: true,
+                RequireIdentMatch: false,
+                AllowedIpMask: string.Empty,
+                RequiredIdent: string.Empty,
+                IdleTimeout: TimeSpan.FromMinutes(30),
+                MaxUploadKbps: 0,
+                MaxDownloadKbps: 0,
+                CreditsKb: 1024 * 1024,                   // 1 GB
+                Sections: Array.Empty<FtpSection>(),
+                MaxConcurrentLogins: 5,
+                IsNoRatio: false,
+                FlagsRaw: string.Empty
+            );
+        }
+
+        // =====================================================================
+        // Password verification helper (no VerifyHashedPassword in hasher)
+        // =====================================================================
+        private static bool VerifyPassword(string storedHash, string password)
+        {
+            return string.IsNullOrEmpty(storedHash)
+                ? string.IsNullOrEmpty(password)
+                :
+                // Accept either plain-text (for old configs)…
+                string.Equals(storedHash, password, StringComparison.Ordinal) ||
+                // …or PBKDF2-SHA256 formatted hashes.
+                PasswordHasher.VerifyPassword(password, storedHash);
         }
     }
 }

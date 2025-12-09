@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
- *  Last Modified:  2025-11-23
+ *  Last Modified:  2025-12-03
  *  
  *  License:
  *      MIT License
@@ -15,63 +15,101 @@
  * ====================================================================================================
  */
 
+using System;
+
 namespace amFTPd.Config.Ftpd.RatioRules
 {
     /// <summary>
-    /// Represents a set of access and ratio rules that can be applied to a directory,
-    /// including upload/download permissions, free-leech, cost multipliers, and ratio overrides.
+    /// Maps a path prefix to a logical ratio section with additional flags.
     /// </summary>
-    /// <remarks>
-    /// All properties are optional (<c>null</c> = no explicit rule at this level).
-    /// This lets you define partial overrides on directory trees.
-    /// </remarks>
-    /// <param name="AllowUpload">
-    /// If <c>false</c>, uploads are not allowed in this directory subtree.
-    /// If <c>true</c>, uploads are explicitly allowed. If <c>null</c>, inherit default/global behavior.
-    /// </param>
-    /// <param name="AllowDownload">
-    /// If <c>false</c>, downloads are not allowed in this directory subtree.
-    /// If <c>true</c>, downloads are explicitly allowed. If <c>null</c>, inherit default/global behavior.
-    /// </param>
-    /// <param name="IsFree">
-    /// If <c>true</c>, transfers in this subtree are free-leech (no credit cost).
-    /// If <c>false</c>, normal ratio applies. If <c>null</c>, inherit.
-    /// </param>
-    /// <param name="MultiplyCost">
-    /// Optional multiplier applied to cost (e.g. 0.5 = half cost, 2.0 = double cost).
-    /// </param>
-    /// <param name="UploadBonus">
-    /// Optional multiplier applied to upload credit earnings (e.g. 2.0 = double credits).
-    /// </param>
-    /// <param name="Ratio">
-    /// Optional ratio override for this subtree (e.g. 3.0 = 1:3, 1.0 = 1:1, etc.).
-    /// </param>
-    /// <param name="AllowList">
-    /// If <c>false</c>, directory listings (LIST/NLST/MLSD/MLST) are not allowed in this subtree.
-    /// If <c>true</c>, they are explicitly allowed. If <c>null</c>, inherit default behavior.
-    /// </param>
-    public sealed record DirectoryRule(
-        bool? AllowUpload,
-        bool? AllowDownload,
-        bool? IsFree,
-        double? MultiplyCost,
-        double? UploadBonus,
-        double? Ratio,
-        bool? AllowList
-    )
+    public sealed record DirectoryRule
     {
+        public static DirectoryRule Empty { get; } = new();
+
+        /// <summary>Section name this directory belongs to.</summary>
+        public string SectionName { get; init; } = string.Empty;
+
+        /// <summary>Virtual path prefix (e.g. "/0DAY").</summary>
+        public string PathPrefix { get; init; } = "/";
+
+        /// <summary>Alias for <see cref="PathPrefix"/> for older code.</summary>
+        public string VirtualPath
+        {
+            get => PathPrefix;
+            init => PathPrefix = value;
+        }
+
+        /// <summary>Whether this rule is enabled.</summary>
+        public bool Enabled { get; init; } = true;
+
+        /// <summary>Allow uploads here.</summary>
+        public bool AllowUpload { get; init; } = true;
+
+        /// <summary>Allow downloads here.</summary>
+        public bool AllowDownload { get; init; } = true;
+
+        /// <summary>Allow LIST here.</summary>
+        public bool AllowList { get; init; } = true;
+
+        /// <summary>Ratio factor for this dir (e.g. 3.0 = 1:3).</summary>
+        public double Ratio { get; init; } = 0.0;
+
+        /// <summary>If true, downloads are free (no ratio spent).</summary>
+        public bool IsFree { get; init; }
+
+        /// <summary>Multiplier for cost (e.g. 2x cost).</summary>
+        public double MultiplyCost { get; init; } = 1.0;
+
+        /// <summary>Additional upload bonus multiplier.</summary>
+        public double UploadBonus { get; init; } = 0.0;
+
+        public bool IsMatch(string virtualPath)
+        {
+            if (!Enabled)
+                return false;
+
+            if (string.IsNullOrWhiteSpace(virtualPath))
+                return false;
+
+            if (!virtualPath.StartsWith("/", StringComparison.Ordinal))
+                virtualPath = "/" + virtualPath;
+
+            var prefix = PathPrefix;
+            if (!prefix.StartsWith("/", StringComparison.Ordinal))
+                prefix = "/" + prefix;
+
+            return virtualPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>
-        /// Gets an empty directory rule instance with all properties unset
-        /// (no explicit restrictions; everything inherits from higher levels / defaults).
+        /// Compatibility ctor supporting named args like AllowUpload, Ratio, etc.
         /// </summary>
-        public static DirectoryRule Empty { get; } = new(
-            AllowUpload: null,
-            AllowDownload: null,
-            IsFree: null,
-            MultiplyCost: null,
-            UploadBonus: null,
-            Ratio: null,
-            AllowList: null
-        );
+        public DirectoryRule(
+            string SectionName,
+            string VirtualPath,
+            bool AllowUpload = true,
+            bool AllowDownload = true,
+            bool AllowList = true,
+            double Ratio = 0.0,
+            bool IsFree = false,
+            double MultiplyCost = 1.0,
+            double UploadBonus = 0.0,
+            bool Enabled = true)
+        {
+            this.SectionName = SectionName;
+            this.PathPrefix = VirtualPath;
+            this.AllowUpload = AllowUpload;
+            this.AllowDownload = AllowDownload;
+            this.AllowList = AllowList;
+            this.Ratio = Ratio;
+            this.IsFree = IsFree;
+            this.MultiplyCost = MultiplyCost;
+            this.UploadBonus = UploadBonus;
+            this.Enabled = Enabled;
+        }
+
+        public DirectoryRule()
+        {
+        }
     }
 }

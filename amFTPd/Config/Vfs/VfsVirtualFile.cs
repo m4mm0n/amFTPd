@@ -15,19 +15,38 @@
  * ====================================================================================================
  */
 
+using System.Text;
+
 namespace amFTPd.Config.Vfs;
 
 /// <summary>
-/// Represents a virtual file in a virtual file system, with optional static content or dynamically generated
-/// content.
+/// Describes a single virtual file exposed by the FTP server.
+/// This is typically used for things like MOTD, rules.txt, etc.
 /// </summary>
-/// <param name="VirtualPath">The virtual path of the file within the virtual file system. This path uniquely identifies the file.</param>
-/// <param name="StaticContent">The static content of the file, if available. If <see langword="null"/>, the content may be dynamically
-/// generated.</param>
-/// <param name="ScriptName">The name of the script or handler used to dynamically generate the content, if applicable. This value is
-/// optional and may be <see langword="null"/>.</param>
-public sealed record VfsVirtualFile(
-    string VirtualPath,
-    string? StaticContent,   // if null, dynamic script/handler may generate content
-    string? ScriptName       // hook name in AMScript to generate content, optional
-);
+public sealed record VfsVirtualFile
+{
+    /// <summary>
+    /// Full virtual path as seen by the client, e.g. "/_welcome.txt".
+    /// </summary>
+    public string VirtualPath { get; init; } = "/";
+
+    /// <summary>
+    /// MIME type of the content. Defaults to "text/plain".
+    /// </summary>
+    public string ContentType { get; init; } = "text/plain";
+
+    /// <summary>
+    /// File content as UTF-8 text.
+    /// </summary>
+    public string Content { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Last modified timestamp of the virtual file.
+    /// </summary>
+    public DateTimeOffset LastModified { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Returns the content encoded as UTF-8 bytes.
+    /// </summary>
+    public byte[] GetBytes() => Encoding.UTF8.GetBytes(Content);
+}

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-27
  *  
  *  License:
  *      MIT License
@@ -37,10 +37,8 @@ public sealed class BinaryGroupStore : IGroupStore
     private readonly string _walPath;
     private readonly byte[] _masterKey;
     private readonly Dictionary<string, FtpGroup> _groups = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Lock _sync = new();
     private readonly WalFile _wal;
 
-    private FileSystemWatcher? _watcher;
     public Action<string>? DebugLog;
 
     public BinaryGroupStore(string dbPath, string masterPassword)
@@ -48,259 +46,70 @@ public sealed class BinaryGroupStore : IGroupStore
         _dbPath = dbPath;
         _walPath = dbPath + ".wal";
 
-        var salted = EnsureSaltFile(dbPath + ".salt");
-        _masterKey = DeriveKey(masterPassword, salted);
+        var salt = EnsureSalt(dbPath + ".salt");
+        _masterKey = DeriveKey(masterPassword, salt);
 
         _wal = new WalFile(_walPath, _masterKey);
 
-        _groups = File.Exists(dbPath) ? LoadDb() : CreateEmptyDb();
-
+        LoadOrCreateSnapshot();
         ReplayWal();
-        StartWatcher();
     }
 
-    // ============================================================
-    // PUBLIC API
-    // ============================================================
-
-    public FtpGroup? FindGroup(string g)
-        => _groups.TryGetValue(g, out var grp) ? grp : null;
-
-    public IEnumerable<FtpGroup> GetAllGroups()
-        => _groups.Values;
-
-    public bool TryAddGroup(FtpGroup g, out string? err)
+    // ========================================================
+    // INITIAL LOAD
+    // ========================================================
+    private void LoadOrCreateSnapshot()
     {
-        lock (_sync)
+        const int MinLen = 12 + 16 + 1;
+        var fi = new FileInfo(_dbPath);
+
+        if (!fi.Exists || fi.Length < MinLen)
         {
-            if (_groups.ContainsKey(g.GroupName))
-            {
-                err = "Group exists.";
-                return false;
-            }
+            DebugLog?.Invoke("[GROUP DB] Creating new snapshot...");
+            CreateDefaultGroups();
+            WriteSnapshot();
+            return;
+        }
 
-            var rec = BuildRecord(g);
-            _wal.Append(new WalEntry(WalEntryType.AddGroup, rec));
-            _groups[g.GroupName] = g;
-
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            err = null;
-            return true;
+        try
+        {
+            var enc = File.ReadAllBytes(_dbPath);
+            var dec = DecryptSnapshot(enc);
+            var raw = Lz4Codec.Decompress(dec);
+            ParseSnapshot(raw);
+        }
+        catch
+        {
+            DebugLog?.Invoke("[GROUP DB] Snapshot corrupt — creating fresh.");
+            _groups.Clear();
+            CreateDefaultGroups();
+            WriteSnapshot();
         }
     }
 
-    public bool TryUpdateGroup(FtpGroup g, out string? err)
+    private void CreateDefaultGroups()
     {
-        lock (_sync)
-        {
-            if (!_groups.ContainsKey(g.GroupName))
-            {
-                err = "Not found.";
-                return false;
-            }
+        _groups.Clear();
 
-            var rec = BuildRecord(g);
-            _wal.Append(new WalEntry(WalEntryType.UpdateGroup, rec));
-            _groups[g.GroupName] = g;
-
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            err = null;
-            return true;
-        }
-    }
-
-    public bool TryDeleteGroup(string name, out string? err)
-    {
-        lock (_sync)
-        {
-            if (!_groups.ContainsKey(name))
-            {
-                err = "Not found.";
-                return false;
-            }
-
-            var nameBytes = Encoding.UTF8.GetBytes(name);
-            _wal.Append(new WalEntry(WalEntryType.DeleteGroup, nameBytes));
-
-            _groups.Remove(name);
-
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            err = null;
-            return true;
-        }
-    }
-
-    public void ForceSnapshotRewrite()
-    {
-        lock (_sync)
-        {
-            WriteSnapshot(_groups); // Users or Groups or Sections
-            _wal.Clear();
-            DebugLog?.Invoke("[DB] Forced snapshot rewrite completed.");
-        }
-    }
-
-    public bool TryRenameGroup(string oldName, string newName, out string? error)
-    {
-        lock (_sync)
-        {
-            if (!_groups.ContainsKey(oldName))
-            {
-                error = $"Group '{oldName}' not found.";
-                return false;
-            }
-
-            if (_groups.ContainsKey(newName))
-            {
-                error = $"A group named '{newName}' already exists.";
-                return false;
-            }
-
-            // Fetch group
-            var g = _groups[oldName];
-
-            // Create updated group record
-            var updated = g with { GroupName = newName };
-
-            // WAL: group rename = DeleteGroup(oldName) + AddGroup(newName)
-            // because WAL entries do not have a Rename opcode.
-            //
-            // This keeps the WAL format *simple* and makes replay trivial.
-            //
-            _wal.Append(new WalEntry(
-                WalEntryType.DeleteGroup,
-                Encoding.UTF8.GetBytes(oldName)
-            ));
-
-            var record = BuildRecord(updated);
-            _wal.Append(new WalEntry(
-                WalEntryType.AddGroup,
-                record
-            ));
-
-            // Update memory
-            _groups.Remove(oldName);
-            _groups[newName] = updated;
-
-            DebugLog?.Invoke($"[GROUP-DB] Rename '{oldName}' → '{newName}'");
-
-            // Check compaction
-            if (_wal.NeedsCompaction())
-                RewriteSnapshot();
-
-            error = null;
-            return true;
-        }
-    }
-
-    // ============================================================
-    // WAL REPLAY
-    // ============================================================
-
-    private void ReplayWal()
-    {
-        foreach (var e in _wal.ReadAll())
-        {
-            switch (e.Type)
-            {
-                case WalEntryType.AddGroup:
-                {
-                    var g = ParseRecord(e.Payload);
-                    DebugLog?.Invoke($"[GROUP WAL] AddGroup {g.GroupName}");
-                    _groups[g.GroupName] = g;
-                    break;
-                }
-                case WalEntryType.UpdateGroup:
-                {
-                    var g = ParseRecord(e.Payload);
-                    DebugLog?.Invoke($"[GROUP WAL] UpdateGroup {g.GroupName}");
-                    _groups[g.GroupName] = g;
-                    break;
-                }
-                case WalEntryType.DeleteGroup:
-                {
-                    var name = Encoding.UTF8.GetString(e.Payload);
-                    DebugLog?.Invoke($"[GROUP WAL] DeleteGroup {name}");
-                    _groups.Remove(name);
-                    break;
-                }
-            }
-        }
-    }
-
-    // ============================================================
-    // DB LOADING
-    // ============================================================
-
-    private Dictionary<string, FtpGroup> LoadDb()
-    {
-        var enc = File.ReadAllBytes(_dbPath);
-        var dec = Decrypt(enc);
-        var raw = Lz4Codec.Decompress(dec);
-
-        var dict = new Dictionary<string, FtpGroup>(StringComparer.OrdinalIgnoreCase);
-
-        using var ms = new MemoryStream(raw);
-        using var br = new BinaryReader(ms);
-
-        var count = br.ReadUInt32();
-
-        for (uint i = 0; i < count; i++)
-        {
-            var len = br.ReadUInt32();
-            var rec = br.ReadBytes((int)len);
-
-            var g = ParseRecord(rec);
-            dict[g.GroupName] = g;
-        }
-
-        return dict;
-    }
-
-    private Dictionary<string, FtpGroup> CreateEmptyDb()
-    {
-        DebugLog?.Invoke("[GROUP DB] Creating empty group database...");
-
-        var dict = new Dictionary<string, FtpGroup>(StringComparer.OrdinalIgnoreCase);
-
-        // Default "admins" group
-        dict["admins"] = new FtpGroup(
+        _groups["admins"] = new FtpGroup(
             GroupName: "admins",
-            Description: "Builtin administrator group",
-            Users: new List<string>() { "admin" },
+            Description: "Administrators group",
+            Users: new List<string> { "admin" },
             SectionCredits: new Dictionary<string, long>()
         );
-
-        WriteSnapshot(dict);
-
-        return dict;
     }
 
-    // ============================================================
+    // ========================================================
     // SNAPSHOT WRITE
-    // ============================================================
-
-    private void RewriteSnapshot()
-    {
-        DebugLog?.Invoke("[GROUP DB] WAL compaction triggered...");
-        WriteSnapshot(_groups);
-        _wal.Clear();
-    }
-
-    private void WriteSnapshot(Dictionary<string, FtpGroup> dict)
+    // ========================================================
+    private void WriteSnapshot()
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
 
-        bw.Write((uint)dict.Count);
+        bw.Write((uint)_groups.Count);
 
-        foreach (var g in dict.Values)
+        foreach (var g in _groups.Values)
         {
             var rec = BuildRecord(g);
             bw.Write((uint)rec.Length);
@@ -309,30 +118,194 @@ public sealed class BinaryGroupStore : IGroupStore
 
         var raw = ms.ToArray();
         var compressed = Lz4Codec.Compress(raw);
-        var encrypted = Encrypt(compressed);
+        var encrypted = EncryptSnapshot(compressed);
 
         AtomicSnapshot.WriteAtomic(_dbPath, encrypted);
     }
 
-    // ============================================================
-    // RECORD FORMAT (v1)
-    // ============================================================
+    // ========================================================
+    // SNAPSHOT READ
+    // ========================================================
+    private void ParseSnapshot(byte[] raw)
+    {
+        using var ms = new MemoryStream(raw);
+        using var br = new BinaryReader(ms);
 
+        _groups.Clear();
+
+        var count = br.ReadUInt32();
+        for (uint i = 0; i < count; i++)
+        {
+            var len = br.ReadUInt32();
+            var rec = br.ReadBytes((int)len);
+            var grp = ParseRecord(rec);
+            _groups[grp.GroupName] = grp;
+        }
+    }
+
+    // ========================================================
+    // WAL REPLAY
+    // ========================================================
+    private void ReplayWal()
+    {
+        foreach (var e in _wal.ReadAll())
+        {
+            switch (e.Type)
+            {
+                case WalEntryType.AddGroup:
+                case WalEntryType.UpdateGroup:
+                    {
+                        var grp = ParseRecord(e.Payload);
+                        _groups[grp.GroupName] = grp;
+                        break;
+                    }
+
+                case WalEntryType.DeleteGroup:
+                    {
+                        var name = Encoding.UTF8.GetString(e.Payload);
+                        _groups.Remove(name);
+                        break;
+                    }
+
+                case WalEntryType.RenameGroup:
+                    {
+                        var payload = Encoding.UTF8.GetString(e.Payload).Split('|');
+                        var oldName = payload[0];
+                        var newName = payload[1];
+
+                        if (_groups.TryGetValue(oldName, out var g))
+                        {
+                            _groups.Remove(oldName);
+
+                            var updated = g with { GroupName = newName };
+                            _groups[newName] = updated;
+                        }
+                        break;
+                    }
+            }
+        }
+    }
+
+    // ========================================================
+    // PUBLIC API (implements IGroupStore fully)
+    // ========================================================
+    public FtpGroup? FindGroup(string groupName)
+        => _groups.TryGetValue(groupName, out var g) ? g : null;
+
+    public IEnumerable<FtpGroup> GetAllGroups()
+        => _groups.Values;
+
+    public bool TryAddGroup(FtpGroup group, out string? error)
+    {
+        if (_groups.ContainsKey(group.GroupName))
+        {
+            error = "Group exists.";
+            return false;
+        }
+
+        var rec = BuildRecord(group);
+        _wal.Append(new WalEntry(WalEntryType.AddGroup, rec));
+
+        _groups[group.GroupName] = group;
+        CompactCheck();
+        error = null;
+        return true;
+    }
+
+    public bool TryUpdateGroup(FtpGroup group, out string? error)
+    {
+        if (!_groups.ContainsKey(group.GroupName))
+        {
+            error = "Group does not exist.";
+            return false;
+        }
+
+        var rec = BuildRecord(group);
+        _wal.Append(new WalEntry(WalEntryType.UpdateGroup, rec));
+
+        _groups[group.GroupName] = group;
+        CompactCheck();
+        error = null;
+        return true;
+    }
+
+    public bool TryDeleteGroup(string groupName, out string? error)
+    {
+        if (!_groups.ContainsKey(groupName))
+        {
+            error = "Group does not exist.";
+            return false;
+        }
+
+        _wal.Append(new WalEntry(WalEntryType.DeleteGroup, Encoding.UTF8.GetBytes(groupName)));
+
+        _groups.Remove(groupName);
+        CompactCheck();
+        error = null;
+        return true;
+    }
+
+    public bool TryRenameGroup(string oldName, string newName, out string? error)
+    {
+        if (!_groups.ContainsKey(oldName))
+        {
+            error = $"Group '{oldName}' not found.";
+            return false;
+        }
+
+        if (_groups.ContainsKey(newName))
+        {
+            error = $"Group '{newName}' already exists.";
+            return false;
+        }
+
+        var payload = Encoding.UTF8.GetBytes(oldName + "|" + newName);
+        _wal.Append(new WalEntry(WalEntryType.RenameGroup, payload));
+
+        var group = _groups[oldName];
+        _groups.Remove(oldName);
+
+        var updated = group with { GroupName = newName };
+        _groups[newName] = updated;
+
+        CompactCheck();
+        error = null;
+        return true;
+    }
+
+    // ========================================================
+    // COMPACTION
+    // ========================================================
+    private void CompactCheck()
+    {
+        if (_wal.NeedsCompaction())
+        {
+            WriteSnapshot();
+            _wal.Clear();
+        }
+    }
+
+    // ========================================================
+    // RECORD FORMAT (exactly matches your FtpGroup structure)
+    // ========================================================
     private byte[] BuildRecord(FtpGroup g)
     {
         using var ms = new MemoryStream();
         using var bw = new BinaryWriter(ms);
 
-        // group name
-        var gName = Encoding.UTF8.GetBytes(g.GroupName);
-        bw.Write((ushort)gName.Length);
-
-        // description
+        var nameBytes = Encoding.UTF8.GetBytes(g.GroupName);
         var descBytes = Encoding.UTF8.GetBytes(g.Description ?? "");
-        bw.Write((ushort)descBytes.Length);
+        var userCount = g.Users.Count;
+        var credCount = g.SectionCredits.Count;
 
-        // users
-        bw.Write((ushort)g.Users.Count);
+        bw.Write((ushort)nameBytes.Length);
+        bw.Write((ushort)descBytes.Length);
+        bw.Write((ushort)userCount);
+        bw.Write((ushort)credCount);
+
+        bw.Write(nameBytes);
+        bw.Write(descBytes);
+
         foreach (var u in g.Users)
         {
             var ub = Encoding.UTF8.GetBytes(u);
@@ -340,26 +313,11 @@ public sealed class BinaryGroupStore : IGroupStore
             bw.Write(ub);
         }
 
-        // SectionCredits
-        bw.Write((ushort)g.SectionCredits.Count);
         foreach (var kv in g.SectionCredits)
         {
-            var keyBytes = Encoding.UTF8.GetBytes(kv.Key);
-            bw.Write((ushort)keyBytes.Length);
-            bw.Write(keyBytes);
-            bw.Write(kv.Value);
-        }
-
-        // now actual data:
-        bw.Write(gName);
-        bw.Write(descBytes);
-
-        foreach (var u in g.Users)
-            bw.Write(Encoding.UTF8.GetBytes(u));
-
-        foreach (var kv in g.SectionCredits)
-        {
-            bw.Write(Encoding.UTF8.GetBytes(kv.Key));
+            var sb = Encoding.UTF8.GetBytes(kv.Key);
+            bw.Write((ushort)sb.Length);
+            bw.Write(sb);
             bw.Write(kv.Value);
         }
 
@@ -371,94 +329,70 @@ public sealed class BinaryGroupStore : IGroupStore
         using var ms = new MemoryStream(buf);
         using var br = new BinaryReader(ms);
 
-        string ReadStr(ushort len) => Encoding.UTF8.GetString(br.ReadBytes(len));
-
-        // read lengths first
         var nameLen = br.ReadUInt16();
         var descLen = br.ReadUInt16();
-
         var userCount = br.ReadUInt16();
+        var credCount = br.ReadUInt16();
+
+        var name = Encoding.UTF8.GetString(br.ReadBytes(nameLen));
+        var desc = Encoding.UTF8.GetString(br.ReadBytes(descLen));
+
         var users = new List<string>(userCount);
-
-        var userLens = new ushort[userCount];
-        for (var i = 0; i < userCount; i++)
-            userLens[i] = br.ReadUInt16();
-
-        var secCount = br.ReadUInt16();
-        var secLens = new ushort[secCount];
-        for (var i = 0; i < secCount; i++)
-            secLens[i] = br.ReadUInt16();
-
-        // strings
-        var gName = ReadStr(nameLen);
-        var desc = ReadStr(descLen);
-
-        for (var i = 0; i < userCount; i++)
-            users.Add(ReadStr(userLens[i]));
-
-        var credits = new Dictionary<string, long>(secCount, StringComparer.OrdinalIgnoreCase);
-
-        for (var i = 0; i < secCount; i++)
+        for (int i = 0; i < userCount; i++)
         {
-            var key = ReadStr(secLens[i]);
-            var val = br.ReadInt64();
-            credits[key] = val;
+            var len = br.ReadUInt16();
+            users.Add(Encoding.UTF8.GetString(br.ReadBytes(len)));
         }
 
-        return new FtpGroup(
-            GroupName: gName,
-            Description: desc,
-            Users: users,
-            SectionCredits: credits
-        );
+        var creds = new Dictionary<string, long>();
+        for (int i = 0; i < credCount; i++)
+        {
+            var len = br.ReadUInt16();
+            var sec = Encoding.UTF8.GetString(br.ReadBytes(len));
+            var val = br.ReadInt64();
+            creds[sec] = val;
+        }
+
+        return new FtpGroup(name, desc, users, creds);
     }
 
-    // ============================================================
+    // ========================================================
     // ENCRYPTION
-    // ============================================================
-
-    private byte[] Encrypt(byte[] buf)
+    // ========================================================
+    private byte[] EncryptSnapshot(byte[] plain)
     {
         var nonce = RandomNumberGenerator.GetBytes(12);
+        var cipher = new byte[plain.Length];
         var tag = new byte[16];
-        var cipher = new byte[buf.Length];
 
-        using (var gcm = new AesGcm(_masterKey))
-            gcm.Encrypt(nonce, buf, cipher, tag);
+        using var gcm = new AesGcm(_masterKey);
+        gcm.Encrypt(nonce, plain, cipher, tag);
 
-        using var ms = new MemoryStream();
-        ms.Write(nonce);
-        ms.Write(cipher);
-        ms.Write(tag);
-        return ms.ToArray();
+        var res = new byte[12 + cipher.Length + 16];
+        Buffer.BlockCopy(nonce, 0, res, 0, 12);
+        Buffer.BlockCopy(cipher, 0, res, 12, cipher.Length);
+        Buffer.BlockCopy(tag, 0, res, 12 + cipher.Length, 16);
+        return res;
     }
 
-    private byte[] Decrypt(byte[] enc)
+    private byte[] DecryptSnapshot(byte[] buf)
     {
-        ReadOnlySpan<byte> nonce = enc[..12];
-        ReadOnlySpan<byte> tag = enc[^16..];
-        ReadOnlySpan<byte> ciphertext = enc[12..^16];
+        ReadOnlySpan<byte> nonce = buf[..12];
+        ReadOnlySpan<byte> tag = buf[^16..];
+        ReadOnlySpan<byte> cipher = buf[12..^16];
 
-        var buf = new byte[ciphertext.Length];
+        var plain = new byte[cipher.Length];
 
-        using (var gcm = new AesGcm(_masterKey))
-            gcm.Decrypt(nonce, ciphertext, tag, buf);
+        using var gcm = new AesGcm(_masterKey);
+        gcm.Decrypt(nonce, cipher, tag, plain);
 
-        return buf;
+        return plain;
     }
 
-    private byte[] DeriveKey(string pw, byte[] salt)
-    {
-        using var pbk = new Rfc2898DeriveBytes(
-            Encoding.UTF8.GetBytes(pw),
-            salt,
-            200_000,
-            HashAlgorithmName.SHA256);
-
-        return pbk.GetBytes(32);
-    }
-
-    private static byte[] EnsureSaltFile(string path)
+    // ========================================================
+    // SALT + KEY
+    // ========================================================
+    private static byte[] EnsureSalt(string path)
     {
         if (File.Exists(path))
             return File.ReadAllBytes(path);
@@ -468,39 +402,20 @@ public sealed class BinaryGroupStore : IGroupStore
         return salt;
     }
 
-    // ============================================================
-    // HOT RELOAD
-    // ============================================================
-
-    private void StartWatcher()
+    private byte[] DeriveKey(string masterPassword, byte[] salt)
     {
-        var dir = Path.GetDirectoryName(_dbPath)!;
-        var file = Path.GetFileName(_dbPath);
+        using var pbkdf = new Rfc2898DeriveBytes(
+            Encoding.UTF8.GetBytes(masterPassword),
+            salt,
+            200_000,
+            HashAlgorithmName.SHA256);
 
-        _watcher = new FileSystemWatcher(dir, file)
-        {
-            NotifyFilter = NotifyFilters.LastWrite
-        };
+        return pbkdf.GetBytes(32);
+    }
 
-        _watcher.Changed += (_, __) =>
-        {
-            lock (_sync)
-            {
-                try
-                {
-                    DebugLog?.Invoke("[GROUP DB] Hot reload…");
-                    var updated = LoadDb();
-                    _groups.Clear();
-                    foreach (var kv in updated)
-                        _groups[kv.Key] = kv.Value;
-                }
-                catch
-                {
-                    DebugLog?.Invoke("[GROUP DB] Hot reload failed.");
-                }
-            }
-        };
-
-        _watcher.EnableRaisingEvents = true;
+    public void ForceSnapshotRewrite()
+    {
+        WriteSnapshot();
+        _wal.Clear();
     }
 }

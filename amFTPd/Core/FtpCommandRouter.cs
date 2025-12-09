@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-23
+ *  Last Modified:  2025-12-05
  *  
  *  License:
  *      MIT License
@@ -19,8 +19,12 @@ using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Core.Access;
+using amFTPd.Core.Dupe;
+using amFTPd.Core.Events;
+using amFTPd.Core.Fxp;
 using amFTPd.Core.Race;
 using amFTPd.Core.Ratio;
+using amFTPd.Core.Site;
 using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
@@ -28,6 +32,7 @@ using amFTPd.Scripting;
 using amFTPd.Security;
 using System.Collections.Immutable;
 using System.Diagnostics;
+using System.Net;
 using FtpSection = amFTPd.Config.Ftpd.FtpSection;
 
 namespace amFTPd.Core;
@@ -40,8 +45,9 @@ namespace amFTPd.Core;
 /// commands, including  authentication, file system navigation, file transfers, and session management.  The <see
 /// cref="FtpCommandRouter"/> relies on injected dependencies such as  session state, logging, file system access, and
 /// configuration to perform its operations.</remarks>
-internal sealed partial class FtpCommandRouter
+public sealed partial class FtpCommandRouter
 {
+    #region Private Settings and Options
     private const int DataBufferSize = 64 * 1024;
     private readonly FtpSession _s;
     private readonly IFtpLogger _log;
@@ -54,6 +60,8 @@ internal sealed partial class FtpCommandRouter
     private readonly CreditEngine _credits;
     private readonly IUserStore _users;
     private readonly IGroupStore _groups;
+    private readonly RatioEngine? _ratioEngine;
+    private readonly FxpPolicyEngine? _fxpPolicy;
 
     private bool _isFxp;
 
@@ -64,11 +72,30 @@ internal sealed partial class FtpCommandRouter
     private AMScriptEngine? _siteScript;
     private AMScriptEngine? _userScript;
     private AMScriptEngine? _groupScript;
+    private AmFtpdRuntimeConfig _runtime;
 
     private readonly DirectoryAccessEvaluator _directoryAccess;
     private readonly Dictionary<string, DirectoryRule> _directoryRules;
 
     private readonly RaceEngine _raceEngine;
+
+    private readonly IReadOnlyDictionary<string, SiteCommandBase> _siteCommands;
+    private readonly SiteCommandContext _siteContext;
+    #endregion
+    #region Public Settings and Options
+    public FtpSession Session => _s;
+    public IFtpLogger Log => _log;
+    public FtpFileSystem FileSystem => _fs;
+    public FtpConfig Config => _cfg;
+    public SectionManager Sections => _sections;
+    public IUserStore Users => _users;
+    public IGroupStore Groups => _groups;
+    public RaceEngine RaceEngine => _raceEngine;
+    public CreditEngine Credits => _credits;
+    public AmFtpdRuntimeConfig Runtime { get; }
+    public Dictionary<string, DirectoryRule> DirectoryRules => _directoryRules;
+    public IReadOnlyDictionary<string, SiteCommandBase> SiteCommands => _siteCommands;
+    #endregion
 
     /// <summary>
     /// Gets the ratio calculation engine used to perform ratio-based computations.
@@ -113,15 +140,53 @@ internal sealed partial class FtpCommandRouter
         _tls = tls;
         _sections = sections;
 
-        RatioEngine = runtime.RatioEngine;
-        RatioPipeline = runtime.RatioPipeline;
-        DirectoryRuleEngine = runtime.DirectoryRuleEngine;
+        _runtime = runtime;
+        _ratioEngine = _runtime.RatioEngine;
+        _fxpPolicy = _runtime.FxpPolicy;
 
-        _directoryAccess = new DirectoryAccessEvaluator(runtime.DirectoryRules);
-        _directoryRules = runtime.DirectoryRules;
+        RatioEngine = _runtime.RatioEngine;
+        RatioPipeline = _runtime.RatioPipeline;
+        DirectoryRuleEngine = _runtime.DirectoryRuleEngine;
 
-        _raceEngine = runtime.RaceEngine;
+        _directoryAccess = new DirectoryAccessEvaluator(_runtime.DirectoryRules);
+        _directoryRules = _runtime.DirectoryRules;
+
+        _raceEngine = _runtime.RaceEngine;
+
+        // User / group / section stores
+        _users = _runtime.UserStore;
+
+        // Prefer DB-backed group & section stores if available, otherwise fall back
+        if (_runtime.GroupStore is not null && _runtime.SectionStore is not null)
+        {
+            _groups = _runtime.GroupStore;
+            var sectionStore = _runtime.SectionStore;
+            _credits = new CreditEngine(_users, _groups, sectionStore);
+        }
+        else
+        {
+            // No DB – you can either:
+            // 1) keep a minimal in-memory group/section store, or
+            // 2) throw for now if credits absolutely require them.
+            // For Phase 1: very simple in-memory stores would be enough.
+
+            _groups = new InMemoryGroupStore();      // you'll implement this tiny adapter
+            var sectionStore = new InMemorySectionStore(_sections); // also tiny adapter
+            _credits = new CreditEngine(_users, _groups, sectionStore);
+        }
+
+        _siteContext = new SiteCommandContext(this);
+        _siteCommands = SiteCommandRegistry.Build(_siteContext);
     }
+
+    /// <summary>
+    /// Processes the specified command string asynchronously.
+    /// </summary>
+    /// <param name="line">The command string to be processed. Cannot be <see langword="null"/> or empty.</param>
+    /// <param name="ct">A <see cref="CancellationToken"/> that can be used to cancel the operation.</param>
+    /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
+    public Task HandleCommandStringAsync(string line, CancellationToken ct)
+        => HandleAsync(line, ct);
 
     /// <summary>
     /// Handles an FTP command by parsing the input line, identifying the command, and executing the corresponding
@@ -203,7 +268,22 @@ internal sealed partial class FtpCommandRouter
             case "SYST": await _s.WriteAsync("215 UNIX Type: L8\r\n", ct); break;
             case "OPTS": await OPTS(arg, ct); break;
             case "NOOP": await _s.WriteAsync(FtpResponses.Ok, ct); break;
-            case "QUIT": await _s.WriteAsync(FtpResponses.Bye, ct); _s.MarkQuit(); break;
+
+            case "QUIT":
+                if (_s.Account is not null)
+                {
+                    _runtime.EventBus?.Publish(new FtpEvent
+                    {
+                        Type = FtpEventType.Logout,
+                        Timestamp = DateTimeOffset.UtcNow,
+                        User = _s.Account.UserName,
+                        Group = _s.Account.GroupName
+                    });
+                }
+                await _s.WriteAsync(FtpResponses.Bye, ct);
+                _s.MarkQuit();
+                break;
+
             case "HELP": await HELP(arg, ct); break;
             case "VERSION": await VERSION(ct); break;
             case "STAT": await STAT(arg, ct); break;
@@ -213,7 +293,9 @@ internal sealed partial class FtpCommandRouter
             case "ABOR": await _s.WriteAsync("226 Abort OK.\r\n", ct); break;
 
             // Path / navigation
-            case "PWD": await _s.WriteAsync($"257 \"{_s.Cwd}\" is the current directory.\r\n", ct); break;
+            case "PWD":
+                await _s.WriteAsync($"257 \"{_s.Cwd}\" is the current directory.\r\n", ct);
+                break;
             case "CWD": await CWD(arg, ct); break;
             case "CDUP": await CDUP(ct); break;
 
@@ -240,7 +322,7 @@ internal sealed partial class FtpCommandRouter
             case "DELE": await DELE(arg, ct); break;
             case "MKD": await MKD(arg, ct); break;
             case "RMD": await RMD(arg, ct); break;
-            case "RNFR": _s.RenameFrom = arg; await _s.WriteAsync("350 Ready for RNTO.\r\n", ct); break;
+            case "RNFR": await RNFR(arg, ct); break;
             case "RNTO": await RNTO(arg, ct); break;
 
             // SITE command
@@ -284,7 +366,7 @@ internal sealed partial class FtpCommandRouter
         _groupScript = groups;
     }
 
-    private FtpSection GetSectionForVirtual(string virtPath)
+    internal FtpSection GetSectionForVirtual(string virtPath)
     {
         // Normal routing first
         var section = _sections.GetSectionForPath(virtPath);
@@ -385,23 +467,42 @@ internal sealed partial class FtpCommandRouter
         return total;
     }
 
-    private async Task<bool> CheckDownloadCreditsAsync(FtpSection section, long bytes, CancellationToken ct)
+    private async Task<bool> CheckDownloadCreditsAsync(string virtPath, FtpSection section, long bytes, CancellationToken ct)
     {
         var account = _s.Account;
         if (account is null) return true;
-        if (section.FreeLeech) return true;
+        if (account.IsNoRatio) return true;
+
+        // Determine effective ratio rule (DirectoryRule / SectionRule / group RatioRule)
+        double ratio = 1.0;
+        double multiplyCost = 1.0;
+        var isFree = section.FreeLeech;
+
+        if (RatioPipeline is not null)
+        {
+            var group = account.GroupName ?? string.Empty;
+            var rule = RatioPipeline.Resolve(virtPath, group);
+
+            ratio = rule.Ratio ?? 0;
+            multiplyCost = rule.MultiplyCost ?? 0;
+
+            if (rule.IsFree ?? false)
+                isFree = true;
+        }
+        else
+        {
+            // Legacy: section-based ratio only
+            if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
+                ratio = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
+        }
+
+        if (isFree)
+            return true;
 
         var kb = bytes / 1024;
         if (kb <= 0) return true;
 
-        var cost = kb;
-
-        // Apply section ratio first (your original logic)
-        if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
-        {
-            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
-            cost = (long)Math.Round(kb * factor);
-        }
+        var cost = (long)Math.Round(kb * ratio * multiplyCost);
 
         // AMScript: credits.msl
         if (_creditScript is not null)
@@ -430,22 +531,41 @@ internal sealed partial class FtpCommandRouter
         return true;
     }
 
-    private void ApplyDownloadCredits(FtpSection section, long bytes)
+    private void ApplyDownloadCredits(string virtPath, FtpSection section, long bytes)
     {
         var account = _s.Account;
         if (account is null) return;
-        if (section.FreeLeech) return;
+        if (account.IsNoRatio) return;
 
         var kb = bytes / 1024;
         if (kb <= 0) return;
 
-        var cost = kb;
+        double ratio = 1.0;
+        double multiplyCost = 1.0;
+        var isFree = section.FreeLeech;
 
-        if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
+        if (RatioPipeline is not null)
         {
-            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
-            cost = (long)Math.Round(kb * factor);
+            var group = account.GroupName ?? string.Empty;
+            var rule = RatioPipeline.Resolve(virtPath, group);
+
+            ratio = rule.Ratio ?? 1.0;
+            multiplyCost = rule.MultiplyCost ?? 1.0;
+
+            if (rule.IsFree ?? false)
+                isFree = true;
         }
+        else
+        {
+            if (section.RatioUploadUnit > 0 && section.RatioDownloadUnit > 0)
+                ratio = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
+        }
+
+        if (isFree)
+            return;
+
+        var cost = (long)Math.Round(kb * ratio * multiplyCost);
+        if (cost <= 0) return;
 
         if (_creditScript is not null)
         {
@@ -463,7 +583,7 @@ internal sealed partial class FtpCommandRouter
             _s.SetAccount(updated);
     }
 
-    private void ApplyUploadCredits(FtpSection section, long bytes)
+    private void ApplyUploadCredits(string virtPath, FtpSection section, long bytes)
     {
         var account = _s.Account;
         if (account is null) return;
@@ -472,19 +592,45 @@ internal sealed partial class FtpCommandRouter
         var kb = bytes / 1024;
         if (kb <= 0) return;
 
-        long earned;
+        double ratio = 1.0;
+        double uploadBonus = 1.0;
+        var isFree = section.FreeLeech;
 
-        if (!section.FreeLeech &&
-            section.RatioUploadUnit > 0 &&
-            section.RatioDownloadUnit > 0)
+        if (RatioPipeline is not null)
         {
-            var factor = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
-            earned = (long)Math.Round(kb * factor);
+            var group = account.GroupName ?? string.Empty;
+            var rule = RatioPipeline.Resolve(virtPath, group);
+
+            ratio = rule.Ratio ?? 1.0;
+            uploadBonus = rule.UploadBonus ?? 1.0;
+
+            if (rule.IsFree ?? false)
+                isFree = true;
         }
         else
         {
-            earned = kb;
+            if (!section.FreeLeech &&
+                section.RatioUploadUnit > 0 &&
+                section.RatioDownloadUnit > 0)
+            {
+                ratio = (double)section.RatioDownloadUnit / section.RatioUploadUnit;
+            }
         }
+
+        long earned;
+
+        if (isFree)
+        {
+            // free-leech: uploads still earn, but 1:1 * bonus
+            earned = (long)Math.Round(kb * uploadBonus);
+        }
+        else
+        {
+            earned = (long)Math.Round(kb * ratio * uploadBonus);
+        }
+
+        if (earned <= 0)
+            return;
 
         if (_creditScript is not null)
         {
@@ -500,6 +646,87 @@ internal sealed partial class FtpCommandRouter
         var updated = account with { CreditsKb = account.CreditsKb + earned };
         if (_s.Users.TryUpdateUser(updated, out _))
             _s.SetAccount(updated);
+    }
+
+    private void UpdateDupeOnUpload(FtpSection section, string dirVirt, FtpUser acc, long transferred)
+    {
+        if (_runtime.DupeStore is not { } dupeStore)
+            return;
+
+        // Normalize virtual path similar to RaceEngine; safest is just to reuse dirVirt as-is
+        var virtDir = dirVirt.Replace('\\', '/');
+        if (!virtDir.StartsWith("/"))
+            virtDir = "/" + virtDir;
+
+        // Simple release name = last segment of directory path
+        var trimmed = virtDir.TrimEnd('/');
+        var releaseName = trimmed.Length == 0
+            ? "/"
+            : Path.GetFileName(trimmed);
+
+        var now = DateTimeOffset.UtcNow;
+
+        var existing = dupeStore.Find(section.Name, releaseName);
+
+        DupeEntry entry;
+        if (existing is null)
+        {
+            entry = new DupeEntry
+            {
+                ReleaseName = releaseName,
+                SectionName = section.Name,
+                VirtualPath = virtDir,
+                TotalBytes = transferred,
+                FirstSeen = now,
+                LastUpdated = now,
+                UploaderUser = acc.UserName,
+                UploaderGroup = acc.GroupName,
+                IsNuked = false,
+                NukeReason = null,
+                NukeMultiplier = 0
+            };
+        }
+        else
+        {
+            entry = existing with
+            {
+                TotalBytes = existing.TotalBytes + transferred,
+                LastUpdated = now,
+                UploaderUser = acc.UserName,
+                UploaderGroup = acc.GroupName
+            };
+        }
+
+        dupeStore.Upsert(entry);
+    }
+
+    private FxpRequest BuildFxpRequest(IPAddress remoteFxIp, FxpDirection direction)
+    {
+        var account = _s.Account;
+        string? sectionName = null;
+
+        try
+        {
+            var section = GetSectionForVirtual(_s.Cwd);
+            sectionName = section?.Name;
+        }
+        catch
+        {
+            // best-effort only; FXP checks still work without section
+        }
+
+        return new FxpRequest
+        {
+            UserName = account?.UserName ?? string.Empty,
+            GroupName = account?.GroupName,
+            SectionName = sectionName,
+            VirtualPath = _s.Cwd,
+            RemoteHost = remoteFxIp.ToString(),
+            RemoteIdent = _s.RemoteIdent,
+            UserAllowFxp = account?.AllowFxp ?? false,
+            IsAdmin = account?.IsAdmin ?? false,
+            Direction = direction
+        };
     }
 
     private static FtpUser CreatePseudoUser() =>
@@ -524,4 +751,5 @@ internal sealed partial class FtpCommandRouter
             RequiredIdent: null,
             FlagsRaw: string.Empty
         );
+
 }

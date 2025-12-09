@@ -18,14 +18,39 @@
 namespace amFTPd.Config.Vfs
 {
     /// <summary>
-    /// Represents a mapping between a virtual file system path and a physical file system path.
+    /// Describes a mapping from a virtual path to a physical directory on disk,
+    /// optionally with attached virtual files.
     /// </summary>
-    /// <param name="VirtualPath">The virtual path in the file system. This path is used to reference files or directories in the virtual file
-    /// system.</param>
-    /// <param name="PhysicalPath">The physical path on the underlying file system that corresponds to the virtual path. This path must be a valid
-    /// and accessible directory or file path.</param>
-    public sealed record VfsMount(
-        string VirtualPath,
-        string PhysicalPath
-    );
+    public sealed record VfsMount
+    {
+        public string Name { get; init; } = string.Empty;
+
+        /// <summary>Virtual root (e.g. "/pub").</summary>
+        public string VirtualRoot { get; init; } = "/";
+
+        /// <summary>Actual physical path on disk.</summary>
+        public string PhysicalPath { get; init; } = "/";
+
+        /// <summary>Compatibility alias used by some code.</summary>
+        public string VirtualPath
+        {
+            get => VirtualRoot;
+            init => VirtualRoot = value;
+        }
+
+        /// <summary>Physical path on disk.</summary>
+        public string PhysicalRoot { get; init; } = string.Empty;
+
+        public bool IsReadOnly { get; init; }
+
+        public IReadOnlyList<VfsVirtualFile> VirtualFiles { get; init; } =
+            Array.Empty<VfsVirtualFile>();
+
+        public VfsMount(string virtualPath, string physicalPath, bool isReadOnly = false)
+        {
+            VirtualPath = virtualPath;
+            PhysicalPath = physicalPath;
+            IsReadOnly = isReadOnly;
+        }
+    }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-11-28
  *  
  *  License:
  *      MIT License
@@ -15,101 +15,164 @@
  * ====================================================================================================
  */
 
+using amFTPd.Db;
 using System.Text.Json;
 
 namespace amFTPd.Config.Ftpd;
 
 /// <summary>
-/// Manages a collection of FTP sections, providing functionality to load, save, and retrieve sections based on virtual
-/// paths.
+/// Holds the runtime collection of <see cref="FtpSection"/> objects and
+/// provides helpers for loading them from JSON / DB.
 /// </summary>
-/// <remarks>The <see cref="SectionManager"/> class is designed to handle the configuration of FTP sections,
-/// including loading from and saving to a file. It supports retrieving sections based on the longest prefix match of a
-/// virtual path, ensuring that the most specific section is returned. If no match is found, a default section is used
-/// as a fallback.</remarks>
 public sealed class SectionManager
 {
-    private readonly List<FtpSection> _sections;
-    private readonly string _path;
+    private readonly IReadOnlyList<FtpSection> _sections;
 
-    private SectionManager(List<FtpSection> sections, string path)
+    public SectionManager(IEnumerable<FtpSection> sections)
     {
-        _sections = sections;
-        _path = path;
+        _sections = (sections ?? Array.Empty<FtpSection>())
+            .Select(s => s.Normalize())
+            .OrderByDescending(s => s.VirtualRoot.Length)
+            .ToArray();
     }
 
     /// <summary>
-    /// Loads a <see cref="SectionManager"/> instance from the specified configuration file. If the file does not exist,
-    /// a default configuration is created, saved, and returned.
+    /// Compatibility constructor – keeps older call sites that pass a
+    /// source description (e.g. "in-memory", "db") compiling.
     /// </summary>
-    /// <remarks>If the specified file does not exist, a default configuration is created with one free-leech
-    /// section and saved to the specified path. The default section has the name "DEFAULT", a virtual root of "/", and
-    /// a 1:1 upload-to-download ratio.</remarks>
-    /// <param name="path">The path to the configuration file. Must be a valid file path.</param>
-    /// <returns>A <see cref="SectionManager"/> instance initialized with the configuration data from the file, or a default
-    /// configuration if the file does not exist.</returns>
-    public static SectionManager LoadFromFile(string path)
+    public SectionManager(IEnumerable<FtpSection> sections, string sourceDescription)
+        : this(sections)
     {
-        if (!File.Exists(path))
-        {
-            // Default: one free-leech section for everything
-            var def = new FtpSection(
-                Name: "DEFAULT",
-                VirtualRoot: "/",
-                FreeLeech: true,
-                RatioUploadUnit: 1,
-                RatioDownloadUnit: 1
-            );
-
-            var mgr = new SectionManager(new List<FtpSection> { def }, path);
-            mgr.Save();
-            return mgr;
-        }
-
-        var json = File.ReadAllText(path);
-        var cfg = JsonSerializer.Deserialize<FtpSectionConfig>(json) ?? FtpSectionConfig.Empty;
-
-        return new SectionManager(cfg.Sections, path);
+        // sourceDescription is currently informational only.
+        // You can log or store it later if needed.
     }
+
     /// <summary>
-    /// Saves the current configuration to a file in JSON format.
+    /// All sections known at runtime.
     /// </summary>
-    /// <remarks>The configuration is serialized with indented formatting and written to the file specified by
-    /// the internal path.</remarks>
-    public void Save()
-    {
-        var cfg = new FtpSectionConfig(_sections);
-        var json = JsonSerializer.Serialize(cfg, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(_path, json);
-    }
+    public IReadOnlyList<FtpSection> GetSections() => _sections;
+
     /// <summary>
-    /// Retrieves a read-only list of FTP sections.
+    /// Returns the best matching <see cref="FtpSection"/> for a given virtual path.
+    /// Uses longest-prefix match on the section's VirtualRoot.
+    /// Never returns null – if nothing matches, a fallback section is returned.
     /// </summary>
-    /// <returns>A read-only list of <see cref="FtpSection"/> objects representing the FTP sections.</returns>
-    public IReadOnlyList<FtpSection> GetSections() => _sections.AsReadOnly();
-    /// <summary>
-    /// Retrieves the FTP section that corresponds to the specified virtual path.
-    /// </summary>
-    /// <remarks>The method normalizes the virtual path to use forward slashes ('/') and ensures it starts
-    /// with a leading slash. It performs a case-insensitive comparison to find the section with the longest matching
-    /// virtual root.</remarks>
-    /// <param name="virtualPath">The virtual path for which to find the corresponding FTP section. The path can use either forward slashes ('/')
-    /// or backslashes ('\') as directory separators.</param>
-    /// <returns>The <see cref="FtpSection"/> that best matches the specified virtual path based on the longest-prefix match. If
-    /// no match is found, the first section in the collection is returned as a fallback.</returns>
     public FtpSection GetSectionForPath(string virtualPath)
     {
-        // Normalize to slash
-        var vp = virtualPath.Replace('\\', '/');
-        if (!vp.StartsWith('/'))
-            vp = "/" + vp;
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            virtualPath = "/";
 
-        // Longest-prefix match
-        var best = _sections
-            .Where(s => vp.StartsWith(s.VirtualRoot, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(s => s.VirtualRoot.Length)
-            .FirstOrDefault();
+        virtualPath = virtualPath.Replace('\\', '/');
+        if (!virtualPath.StartsWith("/"))
+            virtualPath = "/" + virtualPath;
 
-        return best ?? _sections[0]; // fallback to first
+        // try to find a matching section by prefix
+        var match = _sections.FirstOrDefault(sec =>
+            virtualPath.StartsWith(sec.VirtualRoot, StringComparison.OrdinalIgnoreCase));
+
+        if (match is not null)
+            return match;
+
+        // Fallback: if we have at least one section, return the first one.
+        if (_sections.Count > 0)
+            return _sections[0];
+
+        // Ultimate fallback: synthetic default section
+        return new FtpSection(
+            Name: "DEFAULT",
+            VirtualRoot: "/",
+            FreeLeech: false,
+            RatioUploadUnit: 1,
+            RatioDownloadUnit: 1,
+            UploadMultiplier: 1.0,
+            DownloadMultiplier: 1.0,
+            NukeMultiplier: 1
+        ).Normalize();
+    }
+
+
+    // ---------------------------------------------------------------------
+    // JSON FILE BACKEND
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Loads sections from a JSON file at <paramref name="path"/>.
+    /// The file is expected to contain a JSON array of FtpSection objects.
+    /// </summary>
+    public static SectionManager LoadFromFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentNullException(nameof(path));
+
+        if (!File.Exists(path))
+            throw new FileNotFoundException("Sections file not found.", path);
+
+        var json = File.ReadAllText(path);
+        var sections = JsonSerializer.Deserialize<List<FtpSection>>(json)
+                       ?? new List<FtpSection>();
+
+        return new SectionManager(sections);
+    }
+
+    /// <summary>
+    /// Loads sections from <paramref name="path"/>, creating a minimal
+    /// default file if it does not exist yet.
+    /// </summary>
+    public static SectionManager LoadOrCreateDefault(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            throw new ArgumentNullException(nameof(path));
+
+        if (!File.Exists(path))
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(dir))
+                Directory.CreateDirectory(dir);
+
+            var defaultSections = new List<FtpSection>
+                {
+                    new FtpSection(
+                        Name: "DEFAULT",
+                        VirtualRoot: "/",
+                        FreeLeech: false,
+                        RatioUploadUnit: 1,
+                        RatioDownloadUnit: 1,
+                        UploadMultiplier: 1.0,
+                        DownloadMultiplier: 1.0,
+                        NukeMultiplier: 1
+                    ).Normalize()
+                };
+
+            var json = JsonSerializer.Serialize(
+                defaultSections,
+                new JsonSerializerOptions { WriteIndented = true });
+
+            File.WriteAllText(path, json);
+            return new SectionManager(defaultSections);
+        }
+
+        return LoadFromFile(path);
+    }
+
+    // ---------------------------------------------------------------------
+    // DB BACKEND (ISectionStore) – stubbed for now
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Creates a SectionManager from a section-store backend.
+    /// Currently returns an empty set; hook into the real ISectionStore
+    /// implementation whenever you’re ready.
+    /// </summary>
+    public static SectionManager FromSectionStore(ISectionStore store, string sourceDescription)
+    {
+        if (store is null)
+            throw new ArgumentNullException(nameof(store));
+
+        // TODO: integrate with real ISectionStore implementation, e.g.:
+        // var sections = store.GetAllSections().Select( MapToFtpSection );
+        // return new SectionManager(sections);
+
+        // For now, keep it compiling and predictable.
+        return new SectionManager(Array.Empty<FtpSection>());
     }
 }

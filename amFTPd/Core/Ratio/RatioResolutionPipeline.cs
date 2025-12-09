@@ -4,7 +4,7 @@
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
  *  Last Modified:  2025-11-22
- *  
+ *
  *  License:
  *      MIT License
  *      https://opensource.org/licenses/MIT
@@ -15,6 +15,7 @@
  * ====================================================================================================
  */
 
+using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
 
 namespace amFTPd.Core.Ratio
@@ -31,64 +32,79 @@ namespace amFTPd.Core.Ratio
     {
         private readonly DirectoryRuleEngine _dirEngine;
         private readonly SectionResolver _sectionResolver;
-        private readonly Dictionary<string, RatioRule> _ratioRules;
-        /// <summary>
-        /// Initializes a new instance of the RatioResolutionPipeline class with the specified directory rule engine,
-        /// section resolver, and ratio rules.
-        /// </summary>
-        /// <param name="dirEngine">The directory rule engine used to evaluate directory-based rules during ratio resolution. Cannot be null.</param>
-        /// <param name="sectionResolver">The section resolver responsible for determining applicable sections for ratio calculations. Cannot be null.</param>
-        /// <param name="ratioRules">A dictionary containing ratio rules, keyed by rule name, that define how ratios are resolved. Cannot be
-        /// null.</param>
+        private readonly IReadOnlyDictionary<string, RatioRule> _ratioRules;
+
         public RatioResolutionPipeline(
             DirectoryRuleEngine dirEngine,
             SectionResolver sectionResolver,
-            Dictionary<string, RatioRule> ratioRules)
+            IReadOnlyDictionary<string, RatioRule> ratioRules)
         {
             _dirEngine = dirEngine;
             _sectionResolver = sectionResolver;
-            _ratioRules = ratioRules;
+            _ratioRules = ratioRules ?? throw new ArgumentNullException(nameof(ratioRules));
         }
 
         /// <summary>
-        /// Resolves the effective ratio rule using:
-        ///  1. Directory override
-        ///  2. Section rule
-        ///  3. RatioRules dictionary
-        ///  4. Global default
+        /// Resolve ratio rule for a path + group pair.
+        /// 
+        /// Returns:
+        ///     1. DirectoryRule (highest priority)
+        ///     2. SectionRule
+        ///     3. RatioRule (lowest priority)
         /// </summary>
-        public RatioRule Resolve(string virtualPath)
+        public RatioRule Resolve(string virtPath, string? group)
         {
-            // level 1: directory override
-            var dir = _dirEngine.GetRule(virtualPath);
-            if (dir is not null)
-            {
+            virtPath = Normalize(virtPath);
+
+            //---------------------------------------------------------------------
+            // 1. Directory rules (strongest override)
+            //---------------------------------------------------------------------
+            var dRule = _dirEngine.Resolve(virtPath);
+            if (dRule != null)
                 return new RatioRule(
-                    Ratio: dir.Ratio ?? 1.0,
-                    IsFree: dir.IsFree ?? false,
-                    MultiplyCost: dir.MultiplyCost ?? 1.0,
-                    UploadBonus: dir.UploadBonus ?? 1.0
+                    Ratio: dRule.Ratio,
+                    IsFree: dRule.IsFree,
+                    MultiplyCost: dRule.MultiplyCost,
+                    UploadBonus: dRule.UploadBonus
                 );
+
+            //---------------------------------------------------------------------
+            // 2. Section rule
+            //---------------------------------------------------------------------
+            var section = _sectionResolver.Resolve(virtPath);
+            if (section != null)
+                return new RatioRule(
+                    Ratio: section.Ratio,
+                    IsFree: section.IsFree,
+                    MultiplyCost: section.MultiplyCost,
+                    UploadBonus: section.UploadBonus
+                );
+
+            //---------------------------------------------------------------------
+            // 3. Group-based ratio rule
+            //---------------------------------------------------------------------
+            if (group != null && _ratioRules.TryGetValue(group, out var rRule))
+            {
+                return rRule;
             }
 
-            // level 2: matching section
-            var sec = _sectionResolver.Resolve(virtualPath);
-            if (sec is not null)
-            {
-                return new RatioRule(
-                    Ratio: sec.Ratio,
-                    IsFree: sec.IsFree,
-                    MultiplyCost: sec.MultiplyCost,
-                    UploadBonus: sec.UploadBonus
-                );
-            }
+            //---------------------------------------------------------------------
+            // 4. Fallback: 1:1 ratio, no free leech, no bonus.
+            //---------------------------------------------------------------------
+            return new RatioRule(
+                Ratio: 1.0,
+                IsFree: false,
+                MultiplyCost: 1.0,
+                UploadBonus: 1.0
+            );
+        }
 
-            // level 3: path-based ratio rule
-            foreach (var kv in from kv in _ratioRules let key = kv.Key where virtualPath.StartsWith(key, StringComparison.OrdinalIgnoreCase) select kv)
-                return kv.Value;
-
-            // level 4: global
-            return RatioRule.Default;
+        private static string Normalize(string p)
+        {
+            p = p.Replace('\\', '/');
+            if (!p.StartsWith('/'))
+                p = "/" + p;
+            return p;
         }
     }
 }

@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15
- *  Last Modified:  2025-11-20
+ *  Last Modified:  2025-12-02
  *  
  *  License:
  *      MIT License
@@ -66,9 +66,8 @@ namespace amFTPd.Utils
             WriteAt(0, startY++, bc + "╔" + new string('═', width) + "╗" + "\x1b[0m");
 
             // Banner lines
-            for (var i = 0; i < lines.Length; i++)
+            foreach (var raw in lines)
             {
-                var raw = lines[i];
                 var fire = GenerateFire(raw, frame);
 
                 var padLeft = (width - raw.Length) / 2;

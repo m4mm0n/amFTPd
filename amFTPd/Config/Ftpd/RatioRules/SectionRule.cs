@@ -3,7 +3,7 @@
  *  Project:        amFTPd - a managed FTP daemon
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-22
- *  Last Modified:  2025-11-22
+ *  Last Modified:  2025-11-28
  *  
  *  License:
  *      MIT License
@@ -18,30 +18,24 @@
 namespace amFTPd.Config.Ftpd.RatioRules
 {
     /// <summary>
-    /// Represents a rule that defines properties and multipliers for a specific section within a virtual hierarchy.
+    /// Connects a logical section to a particular <see cref="RatioRule"/>.
+    /// Example: Section "0DAY" uses RatioRule "STANDARD".
     /// </summary>
-    /// <param name="SectionName">The name of the section to which this rule applies.</param>
-    /// <param name="VirtualRoot">The virtual root path associated with the section. This typically identifies the section's location within a
-    /// hierarchy.</param>
-    /// <param name="Ratio">The default ratio value for the section, used to determine standard calculations or limits.</param>
-    /// <param name="IsFree">Indicates whether the section is designated as free-leech. Set to <see langword="true"/> if downloads in this
-    /// section do not count against user quotas; otherwise, <see langword="false"/>.</param>
-    /// <param name="MultiplyCost">The multiplier applied to costs within this section. Used to adjust cost calculations based on section-specific
-    /// rules.</param>
-    /// <param name="UploadBonus">The bonus multiplier applied to uploads in this section. Used to increase upload credit or rewards according to
-    /// section policy.</param>
-    public sealed record SectionRule(
-        string SectionName,
-        string VirtualRoot,
+    public sealed record SectionRule
+    {
+        /// <summary>
+        /// Section name, e.g. "0DAY".
+        /// </summary>
+        public string SectionName { get; init; } = string.Empty;
 
-        // Default ratio for this section
-        double Ratio,
+        /// <summary>
+        /// Associated ratio rule name, e.g. "STANDARD" or "VIP".
+        /// </summary>
+        public string RatioRuleName { get; init; } = string.Empty;
 
-        // Free-leech section?
-        bool IsFree,
-
-        // Multipliers
-        double MultiplyCost,
-        double UploadBonus
-    );
+        /// <summary>
+        /// Whether this mapping is enabled.
+        /// </summary>
+        public bool Enabled { get; init; } = true;
+    }
 }

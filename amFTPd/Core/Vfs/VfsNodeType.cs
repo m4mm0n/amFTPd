@@ -1,4 +1,21 @@
-﻿namespace amFTPd.Core.Vfs;
+﻿/*
+ * ====================================================================================================
+ *  Project:        amFTPd - a managed FTP daemon
+ *  Author:         Geir Gustavsen, ZeroLinez Softworx
+ *  Created:        2025-11-22
+ *  Last Modified:  2025-11-28
+ *  
+ *  License:
+ *      MIT License
+ *      https://opensource.org/licenses/MIT
+ *
+ *  Notes:
+ *      Please do not use for illegal purposes, and if you do use the project please refer to the original
+ *      author.
+ * ====================================================================================================
+ */
+
+namespace amFTPd.Core.Vfs;
 
 /// <summary>
 /// Specifies the type of a node in a virtual file system (VFS).

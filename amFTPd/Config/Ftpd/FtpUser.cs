@@ -20,140 +20,195 @@ using System.Collections.Immutable;
 namespace amFTPd.Config.Ftpd
 {
     /// <summary>
-    /// Represents an FTP user account, including authentication credentials, permissions, group memberships, transfer
-    /// limits, and access restrictions.
+    /// Runtime FTP user model, shaped to match how the stores/loaders construct it.
     /// </summary>
-    /// <remarks>This record encapsulates all configuration and access control information for an FTP user.
-    /// Group memberships, permissions, and transfer limits are enforced according to the properties specified. User
-    /// flags in <paramref name="FlagsRaw"/> may enable additional features such as VIP status or site operator
-    /// privileges. Thread safety is guaranteed for immutable properties.</remarks>
-    /// <param name="UserName">The unique user name used to identify and authenticate the FTP user. Cannot be null or empty.</param>
-    /// <param name="PasswordHash">The hashed password for the user account. Used for authentication; must be a valid hash string.</param>
-    /// <param name="HomeDir">The root directory assigned to the user. All file operations are relative to this directory. Cannot be null or
-    /// empty.</param>
-    /// <param name="IsAdmin">Indicates whether the user has administrative privileges. If <see langword="true"/>, the user can perform
-    /// administrative actions.</param>
-    /// <param name="AllowFxp">Indicates whether the user is permitted to use FXP (server-to-server file transfers).</param>
-    /// <param name="AllowUpload">Indicates whether the user is allowed to upload files to the server.</param>
-    /// <param name="AllowDownload">Indicates whether the user is allowed to download files from the server.</param>
-    /// <param name="AllowActiveMode">Indicates whether the user is permitted to use active FTP mode for data transfers.</param>
-    /// <param name="MaxConcurrentLogins">The maximum number of concurrent sessions allowed for this user. Must be greater than zero.</param>
-    /// <param name="IdleTimeout">The maximum duration the user session can remain idle before being disconnected. Specified as a <see
-    /// cref="TimeSpan"/>.</param>
-    /// <param name="MaxUploadKbps">The maximum upload speed allowed for the user, in kilobits per second. Must be zero or positive; zero means
-    /// unlimited.</param>
-    /// <param name="MaxDownloadKbps">The maximum download speed allowed for the user, in kilobits per second. Must be zero or positive; zero means
-    /// unlimited.</param>
-    /// <param name="PrimaryGroup">The primary group name assigned to the user. Used for group-based permissions and access control. Cannot be null
-    /// or empty.</param>
-    /// <param name="SecondaryGroups">A collection of additional group names the user belongs to, in addition to the primary group. May be empty if
-    /// the user has no secondary groups.</param>
-    /// <param name="CreditsKb">The number of credits available to the user, in kilobytes. Used to limit or track data transfer quotas.</param>
-    /// <param name="AllowedIpMask">An optional IP address mask specifying which client IPs are allowed to connect as this user. If null, no IP
-    /// restriction is enforced.</param>
-    /// <param name="RequireIdentMatch">Indicates whether IDENT protocol enforcement is required for this user. If <see langword="true"/>, the user's
-    /// IDENT must match <paramref name="RequiredIdent"/>.</param>
-    /// <param name="RequiredIdent">The IDENT string that must match for the user to log in, if <paramref name="RequireIdentMatch"/> is <see
-    /// langword="true"/>. If null, no IDENT enforcement is applied.</param>
-    /// <param name="FlagsRaw">A serialized string containing user-specific flags. Each character represents a distinct flag that controls user
-    /// features or restrictions.</param>
-    public sealed record FtpUser(
-        string UserName,
-        string PasswordHash,
-        string HomeDir,
-        bool IsAdmin,
-        bool AllowFxp,
-        bool AllowUpload,
-        bool AllowDownload,
-        bool AllowActiveMode,
-        int MaxConcurrentLogins,
-        TimeSpan IdleTimeout,
-        int MaxUploadKbps,
-        int MaxDownloadKbps,
-
-        // NEW — Primary group (replaces original GroupName)
-        string? PrimaryGroup,
-
-        // NEW — Secondary groups
-        ImmutableArray<string> SecondaryGroups,
-
-        // Credits (existing)
-        long CreditsKb,
-
-        // IP mask (existing)
-        string? AllowedIpMask,
-
-        // IDENT enforcement (existing)
-        bool RequireIdentMatch,
-        string? RequiredIdent,
-
-        // NEW — user flags (serialized string)
-        string FlagsRaw
-    )
+    public sealed record FtpUser
     {
-        /// <summary>
-        /// Gets the set of flag characters associated with this instance.
-        /// </summary>
-        /// <remarks>The returned set is immutable and will be empty if no flags are defined. This
-        /// property is initialized during object construction and cannot be modified after initialization.</remarks>
-        public ImmutableHashSet<char> Flags { get; init; } =
-            FlagsRaw is null
-                ? ImmutableHashSet<char>.Empty
-                : FlagsRaw.ToCharArray().ToImmutableHashSet();
-        /// <summary>
-        /// Determines whether the specified flag character is present in the set of flags.
-        /// </summary>
-        /// <param name="flag">The flag character to check for presence. The comparison is case-insensitive; both uppercase and lowercase
-        /// characters are treated equivalently.</param>
-        /// <returns>true if the specified flag is present; otherwise, false.</returns>
-        public bool HasFlag(char flag)
-            => Flags.Contains(char.ToUpperInvariant(flag));
-        /// <summary>
-        /// Gets a value indicating whether the user has VIP status.
-        /// </summary>
-        public bool IsVip => HasFlag('V');
-        /// <summary>
-        /// Gets a value indicating whether the user has site operator privileges.
-        /// </summary>
-        public bool IsSiteOp => HasFlag('S');
-        /// <summary>
-        /// Gets a value indicating whether the current instance represents a master entity.
-        /// </summary>
-        public bool IsMaster => HasFlag('M');
-        /// <summary>
-        /// Gets a value indicating whether the no-ratio flag is set for this instance.
-        /// </summary>
-        public bool IsNoRatio => HasFlag('1');
-        /// <summary>
-        /// Gets a value indicating whether the item is marked as hidden.
-        /// </summary>
-        public bool IsHidden => HasFlag('H');
-        /// <summary>
-        /// Gets a value indicating whether the user is immune to being kicked from the server.
-        /// </summary>
-        public bool IsKickImmune => HasFlag('Z');
-        /// <summary>
-        /// Gets a value indicating whether the user is required to use TLS for authentication.
-        /// </summary>
-        public bool IsRequireTlsUser => HasFlag('R');
+        public string UserName { get; init; } = string.Empty;
+
+        /// <summary>Compatibility alias if any code uses "Username".</summary>
+        public string Username
+        {
+            get => UserName;
+            init => UserName = value;
+        }
+
+        public string PasswordHash { get; init; } = string.Empty;
+
+        public bool Disabled { get; init; }
+
+        /// <summary>Physical home directory for this user.</summary>
+        public string HomeDir { get; init; } = string.Empty;
+
+        /// <summary>Primary group name.</summary>
+        public string PrimaryGroup { get; init; } = string.Empty;
+
+        /// <summary>Compatibility alias for older code using GroupName.</summary>
+        public string GroupName
+        {
+            get => PrimaryGroup;
+            init => PrimaryGroup = value;
+        }
+
+        /// <summary>Secondary groups.</summary>
+        public IReadOnlyList<string> SecondaryGroups { get; init; }
+            = Array.Empty<string>();
+
+        public bool IsAdmin { get; init; }
+
+        public bool AllowFxp { get; init; }
+        public bool AllowUpload { get; init; } = true;
+        public bool AllowDownload { get; init; } = true;
+        public bool AllowActiveMode { get; init; } = true;
+
+        public bool RequireIdentMatch { get; init; }
+        public string AllowedIpMask { get; init; } = string.Empty;
+        public string RequiredIdent { get; init; } = string.Empty;
 
         /// <summary>
-        /// Returns all groups user belongs to.
-        /// Primary + secondary combined.
+        /// Per-user idle timeout; null means "use server default".
         /// </summary>
-        public IEnumerable<string> AllGroups
-            => SecondaryGroups.Insert(0, PrimaryGroup ?? string.Empty);
+        public TimeSpan? IdleTimeout { get; init; }
+
+        public int MaxUploadKbps { get; init; }
+        public int MaxDownloadKbps { get; init; }
+
+        /// <summary>User credits in KiB.</summary>
+        public long CreditsKb { get; init; }
+
+        public int MaxConcurrentLogins { get; init; }
+
+        public bool IsNoRatio { get; init; }
+
+        public string FlagsRaw { get; init; } = string.Empty;
+
+        public IReadOnlyList<string> AllGroups
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(PrimaryGroup) && (SecondaryGroups == null || SecondaryGroups.Count == 0))
+                    return Array.Empty<string>();
+
+                if (SecondaryGroups == null || SecondaryGroups.Count == 0)
+                    return new[] { PrimaryGroup };
+
+                var all = new List<string>(1 + SecondaryGroups.Count);
+                if (!string.IsNullOrEmpty(PrimaryGroup))
+                    all.Add(PrimaryGroup);
+                all.AddRange(SecondaryGroups);
+                return all;
+            }
+        }
+
 
         /// <summary>
-        /// Gets the primary group name assigned to the user.
+        /// Sections this user can see/use. The semantics depend on real code,
+        /// but the type is what the stores already pass in.
         /// </summary>
-        public string? GroupName => PrimaryGroup;
+        public IReadOnlyList<FtpSection> Sections { get; init; }
+            = Array.Empty<FtpSection>();
+
+        public FtpUser()
+        {
+        }
 
         /// <summary>
-        /// Returns true if the user belongs to the specified group (primary or secondary).
+        /// Main ctor used by BinaryUserStore, InMemoryUserStore, DatabaseManager, etc.
+        /// Uses named arguments like "PrimaryGroup".
         /// </summary>
-        public bool IsInGroup(string group) => !string.IsNullOrWhiteSpace(group) &&
-                                               AllGroups.Any(g =>
-                                                   string.Equals(g, group, StringComparison.OrdinalIgnoreCase));
+        public FtpUser(
+            string UserName,
+            string PasswordHash,
+            bool Disabled,
+            string HomeDir,
+            string PrimaryGroup,
+            IReadOnlyList<string> SecondaryGroups,
+            bool IsAdmin,
+            bool AllowFxp,
+            bool AllowUpload,
+            bool AllowDownload,
+            bool AllowActiveMode,
+            bool RequireIdentMatch,
+            string AllowedIpMask,
+            string RequiredIdent,
+            TimeSpan? IdleTimeout,
+            int MaxUploadKbps,
+            int MaxDownloadKbps,
+            long CreditsKb,
+            IReadOnlyList<FtpSection> Sections,
+            int MaxConcurrentLogins = 0,
+            bool IsNoRatio = false,
+            string? FlagsRaw = null)
+        {
+            this.UserName = UserName;
+            this.PasswordHash = PasswordHash;
+            this.Disabled = Disabled;
+            this.HomeDir = HomeDir;
+            this.PrimaryGroup = PrimaryGroup;
+            this.SecondaryGroups = SecondaryGroups ?? Array.Empty<string>();
+            this.IsAdmin = IsAdmin;
+            this.AllowFxp = AllowFxp;
+            this.AllowUpload = AllowUpload;
+            this.AllowDownload = AllowDownload;
+            this.AllowActiveMode = AllowActiveMode;
+            this.RequireIdentMatch = RequireIdentMatch;
+            this.AllowedIpMask = AllowedIpMask;
+            this.RequiredIdent = RequiredIdent;
+            this.IdleTimeout = IdleTimeout;
+            this.MaxUploadKbps = MaxUploadKbps;
+            this.MaxDownloadKbps = MaxDownloadKbps;
+            this.CreditsKb = CreditsKb;
+            this.Sections = Sections ?? Array.Empty<FtpSection>();
+            this.MaxConcurrentLogins = MaxConcurrentLogins;
+            this.IsNoRatio = IsNoRatio;
+            this.FlagsRaw = FlagsRaw ?? string.Empty;
+        }
+
+        public FtpUser(
+            string UserName,
+            string PasswordHash,
+            string HomeDir,
+            string PrimaryGroup,
+            IReadOnlyList<string> SecondaryGroups,
+            bool IsAdmin,
+            bool AllowFxp,
+            bool AllowUpload,
+            bool AllowDownload,
+            bool AllowActiveMode,
+            bool RequireIdentMatch,
+            string? AllowedIpMask,
+            string? RequiredIdent,
+            TimeSpan? IdleTimeout,
+            int MaxUploadKbps,
+            int MaxDownloadKbps,
+            long CreditsKb,
+            int MaxConcurrentLogins = 0,
+            bool IsNoRatio = false,
+            string? FlagsRaw = null)
+            : this(
+                UserName: UserName,
+                PasswordHash: PasswordHash,
+                Disabled: false,                            // default
+                HomeDir: HomeDir,
+                PrimaryGroup: PrimaryGroup,
+                SecondaryGroups: SecondaryGroups,
+                IsAdmin: IsAdmin,
+                AllowFxp: AllowFxp,
+                AllowUpload: AllowUpload,
+                AllowDownload: AllowDownload,
+                AllowActiveMode: AllowActiveMode,
+                RequireIdentMatch: RequireIdentMatch,
+                AllowedIpMask: AllowedIpMask ?? string.Empty,
+                RequiredIdent: RequiredIdent ?? string.Empty,
+                IdleTimeout: IdleTimeout,
+                MaxUploadKbps: MaxUploadKbps,
+                MaxDownloadKbps: MaxDownloadKbps,
+                CreditsKb: CreditsKb,
+                Sections: Array.Empty<FtpSection>(),        // default: no sections
+                MaxConcurrentLogins: MaxConcurrentLogins,
+                IsNoRatio: IsNoRatio,
+                FlagsRaw: FlagsRaw)
+        {
+        }
     }
 }
