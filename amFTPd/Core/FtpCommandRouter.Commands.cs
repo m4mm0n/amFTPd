@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.Commands.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0x234C3F25
+ *  Last Modified:  2025-12-10 04:20:16
+ *  CRC32:          0x3FD473F2
  *  
  *  Description:
  *      Partial class for handling FTP commands within the FtpCommandRouter.
@@ -16,10 +16,6 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
-
-
-
-
 
 
 
@@ -40,6 +36,7 @@ namespace amFTPd.Core
     /// </summary>
     public sealed partial class FtpCommandRouter
     {
+        #region AMScript Context Builders
         private AMScriptContext BuildCreditContext(Config.Ftpd.FtpSection section, long bytes)
         {
             var account = _s.Account!;
@@ -184,6 +181,7 @@ namespace amFTPd.Core
                 Event: evt
             );
         }
+        #endregion
 
         // --- Auth / TLS ---
         #region Auth / TLS
@@ -869,7 +867,7 @@ namespace amFTPd.Core
             // FXP detection
             _isFxp = !ip.Equals(remote.Address);
 
-            // Active-mode policy via script
+            // Active-mode policy via AMScript (optional)
             if (_activeScript is not null)
             {
                 var ctx = BuildSimpleContextForFxpAndActive("EPRT");
@@ -881,8 +879,7 @@ namespace amFTPd.Core
                 }
             }
 
-            // FXP via script
-            // FXP via script
+            // FXP via AMScript (optional)
             if (_fxpScript is not null && _isFxp)
             {
                 var ctx = BuildSimpleContextForFxpAndActive("EPRT");
@@ -907,11 +904,9 @@ namespace amFTPd.Core
                 }
             }
 
-            // Built-in FXP policy
+            // Built-in FXP policy: simple IP mismatch check if account/cfg says FXP is not allowed.
             var allowFxp = _s.Account?.AllowFxp ?? _cfg.AllowFxp;
             if (!allowFxp && _isFxp)
-
-                if (!allowFxp && _isFxp)
             {
                 await _s.WriteAsync("504 FXP not allowed: IP mismatch.\r\n", ct);
                 return;

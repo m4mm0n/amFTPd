@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*.*.*'          # runs when you push tags like v1.2.3
 
+permissions:
+  contents: write
+  packages: write
+
 env:
   PROJECT_PATH: amFTPd/amFTPd.csproj   # <- from repo root
 

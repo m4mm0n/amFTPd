@@ -3,8 +3,8 @@
  *  File:           FtpServer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 04:00:28
- *  CRC32:          0x137A184F
+ *  Last Modified:  2025-12-10 04:14:06
+ *  CRC32:          0xCCFAAEBF
  *  
  *  Description:
  *      Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file tran...
@@ -16,10 +16,6 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
-
-
-
-
 
 
 

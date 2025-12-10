@@ -3,8 +3,8 @@
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 03:58:33
- *  CRC32:          0xED987E91
+ *  Last Modified:  2025-12-10 04:16:54
+ *  CRC32:          0x234D2E6A
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -384,16 +386,45 @@ public sealed class FtpSession : IAsyncDisposable
     /// <returns></returns>
     public async Task WithDataAsync(Func<Stream, Task> action, CancellationToken ct)
     {
+        // No data connection set up (no PASV/EPSV/PORT/EPRT).
         if (_data is null)
+        {
+            // Be explicit instead of silently returning.
+            await WriteAsync("425 Can't open data connection.\r\n", ct);
             return;
+        }
 
         try
         {
             await _data.SendAsync(action, ct);
         }
+        catch (OperationCanceledException)
+        {
+            // Cancelled → let the session loop handle it quietly.
+        }
+        catch (IOException)
+        {
+            // Network-level error on data connection.
+            // Return a proper 426 so clients know the transfer was aborted.
+            await WriteAsync("426 Connection closed; transfer aborted.\r\n", ct);
+        }
+        catch (Exception ex)
+        {
+            // Log unexpected data-channel errors and still send a control reply.
+            _log.Log(FtpLogLevel.Error, "Data connection error.", ex);
+            await WriteAsync("451 Requested action aborted. Local error in processing.\r\n", ct);
+        }
         finally
         {
-            await _data.DisposeAsync();
+            try
+            {
+                await _data.DisposeAsync();
+            }
+            catch
+            {
+                // ignore dispose failures
+            }
+
             _data = null;
         }
     }
