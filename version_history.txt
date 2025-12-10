@@ -5,11 +5,56 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
-[ v0.3.0.0 - 03.12.2025 ]
+[ v0.3.0.0 - 10.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
 * Oh dear, this is a major update - so please check the full changelog on the
   GitHub repo for details...
+
+Core architecture & plumbing:
+* All core classes (FtpServer, FtpSession, FtpCommandRouter, FtpFileSystem, 
+  FtpDataConnection, auth, logging, scripting, DB, security, utils) were modified.
+* New event bus (Core/Events) and race engine (Core/Race) were added.
+* Dupe system added (Core/Dupe, dupe commands, zipscript rescan/undupes)...
+
+VFS & sections:
+* VFS expanded with helpers like ResolveMount, GetRelativePath, VfsMount, 
+  VfsUserMount and section mapping (Db/SectionMappings.cs, Core/Sections/SectionResolver.cs).
+* In-memory stores for sections and groups added (faster, non-DB setups).
+
+Ratios, login, FXP:
+* New ratio login context (Core/RatioLoginContext, RatioEngineLoginExtensions)
+  plus corresponding config support.
+* FXP policy engine and config (Core/Fxp, Config/Fxp/FxpPolicyConfig.cs) with
+  directions, decisions, and requests.
+
+IRC integration:
+* Full IRC announcer stack: client, message types, FiSH/Blowfish ECB adapter
+  and codec, config extensions, etc.
+
+SITE command framework:
+* Generic IFtpSiteCommand, SiteCommandRouter, attribute-based registration.
+* Large suite of SITE commands: user/group admin, IP management, stats/day/week/month,
+  nukes/unnukes, rescan/dupe tools, KICK/KILL/WHO, PRE, sections, limits and more.
+
+Zipscript:
+* New zipscript engine and entities (file info/state/release status + DB entities).
+
+Database & maintenance:
+* DB schema extended with sections, races, zipscript entries, etc.
+* In-memory section store, database maintenance job & lock.
+
+Security & TLS:
+* Password hasher, TLS config touched; Blowfish ECB added for FiSH.
+* Transfer direction enum introduced.
+
+Config & bootstrap:
+* Config loader now async and capable of auto-creating default config
+  (EnsureDefaultConfigExistsAsync).
+* New configs for IRC, FXP, scripting extensions, and runtime config root.
+
+Presentation & branding:
+* New resources (logo PNG, resources designer) and console ANSI image helper.
 
 
 [ v0.2.1.0 - 23.11.2025 ]

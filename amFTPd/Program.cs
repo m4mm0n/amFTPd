@@ -3,8 +3,8 @@
  *  File:           Program.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xCAC83CCE
+ *  Last Modified:  2025-12-10 04:44:38
+ *  CRC32:          0xBAD5D4DA
  *  
  *  Description:
  *      Represents the entry point of the amFTPd application, a managed FTP daemon.
@@ -16,9 +16,6 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
-
-
-
 
 
 
@@ -112,17 +109,6 @@ namespace amFTPd
 
         static void PrintBanner()
         {
-            //var line2 = "A Managed FTP daemon";
-            //new[]
-            //{
-            //    @".______  ._____.___ .____________._._______ .______  ",
-            //    @":      \ :         |:_ ____/\__ _:|: ____  |:_ _   \ ",
-            //    @"|   .   ||   \  /  ||   _/    |  :||    :  ||   |   |",
-            //    @"|   :   ||   |\/   ||   |     |   ||   |___|| . |   |",
-            //    @"|___|   ||___| |   ||_. |     |   ||___|    |. ____/ ",
-            //    @"    |___|      |___|  :/      |___|          :/      ",
-            //    @"                      :                      :       "
-            //}.WriteBoxedBanner();
             AnsiConsoleImage.WriteImage(Resources.amftpd_logo);
             var ver = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion;
