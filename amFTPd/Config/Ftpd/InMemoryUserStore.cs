@@ -3,8 +3,8 @@
  *  File:           InMemoryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xDF7F7EC6
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xE3EE8133
  *  
  *  Description:
  *      Represents an in-memory user store for managing FTP user accounts.
@@ -21,8 +21,9 @@
 
 
 
+
+
 using amFTPd.Security;
-using System.Collections.Immutable;
 using System.Text.Json;
 
 namespace amFTPd.Config.Ftpd

@@ -6,7 +6,7 @@ on:
       - 'v*.*.*'          # runs when you push tags like v1.2.3
 
 env:
-  PROJECT_PATH: C:/Users/admin/source/repos/AMPED/amFTPd/amFTPd/amFTPd.csproj   # <--- adjust to your real .csproj path
+  PROJECT_PATH: amFTPd/amFTPd.csproj   # <- from repo root
 
 jobs:
   build:

@@ -3,8 +3,8 @@
  *  File:           CoreExtensions.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-01 05:44:45
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x3B6D27B5
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xDFD78BFC
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -20,15 +20,7 @@
 
 
 
-
-
-
-using System;
-using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace amFTPd.Utils
 {

@@ -3,8 +3,8 @@
  *  File:           FtpUser.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x76CDF59D
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xEEE98D0F
  *  
  *  Description:
  *      Runtime FTP user model, shaped to match how the stores/loaders construct it.
@@ -19,9 +19,6 @@
 
 
 
-
-
-using System.Collections.Immutable;
 
 namespace amFTPd.Config.Ftpd
 {

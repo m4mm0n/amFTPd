@@ -3,8 +3,8 @@
  *  File:           BinaryUserStoreMmap.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:12:17
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x8C55CB12
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0x71BDA3C0
  *  
  *  Description:
  *      Represents a memory-mapped binary user store that provides secure and efficient storage and retrieval of FTP user dat...
@@ -21,11 +21,12 @@
 
 
 
+
+
 using amFTPd.Config.Ftpd;
 using amFTPd.Security;
 using amFTPd.Utils;
 using System.Collections.Immutable;
-using System.IO.MemoryMappedFiles;
 using System.Security.Cryptography;
 using System.Text;
 

@@ -3,8 +3,8 @@
  *  File:           VfsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x0A855541
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xADF0D75F
  *  
  *  Description:
  *      Configuration for the virtual file system.
@@ -19,9 +19,6 @@
 
 
 
-
-
-using System;
 
 namespace amFTPd.Config.Vfs;
 

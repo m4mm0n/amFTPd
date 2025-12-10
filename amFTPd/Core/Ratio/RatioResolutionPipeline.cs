@@ -3,8 +3,8 @@
  *  File:           RatioResolutionPipeline.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-28 21:28:55
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xEFD6829F
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0x4ADABB13
  *  
  *  Description:
  *      Provides a pipeline for resolving the effective ratio rule for a given virtual path, using directory overrides, secti...
@@ -20,8 +20,6 @@
 
 
 
-
-using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
 
 namespace amFTPd.Core.Ratio

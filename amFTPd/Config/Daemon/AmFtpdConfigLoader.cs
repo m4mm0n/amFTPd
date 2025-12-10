@@ -3,8 +3,8 @@
  *  File:           AmFtpdConfigLoader.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xAF9DF9DC
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xB5AA1942
  *  
  *  Description:
  *      Asynchronously loads the runtime configuration for the FTP server from the specified configuration file.
@@ -21,6 +21,8 @@
 
 
 
+
+
 using amFTPd.Config.Ftpd;
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Fxp;
@@ -31,7 +33,6 @@ using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Security;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -91,7 +92,11 @@ public static class AmFtpdConfigLoader
                     WelcomeMessage = "Welcome to amFTPd",
                     AllowAnonymous = false,
                     RequireTlsForAuth = false,
-                    DataChannelProtectionDefault = "C", // Clear data channel
+
+                    // Use the enum name so it round-trips cleanly with Enum.TryParse.
+                    // Short RFC codes (C/P/S/E) are still supported by the parser below.
+                    DataChannelProtectionDefault = "Clear",
+
                     AllowActiveMode = true,
                     AllowFxp = false
                 },
@@ -179,12 +184,25 @@ public static class AmFtpdConfigLoader
         }
 
         // Parse data channel protection mode from string into enum.
-        if (!Enum.TryParse<DataChannelProtectionLevel>(
-                root.Server.DataChannelProtectionDefault,
-                ignoreCase: true,
-                out var dataProt))
+        // Accept both enum names (Clear, Private, ...) and RFC short codes (C, S, E, P).
+        var rawDataProt = (root.Server.DataChannelProtectionDefault ?? string.Empty).Trim();
+
+        DataChannelProtectionLevel dataProt;
+
+        if (string.IsNullOrEmpty(rawDataProt))
+            dataProt = DataChannelProtectionLevel.Clear;
+        else if (rawDataProt.Equals("C", StringComparison.OrdinalIgnoreCase))
+            dataProt = DataChannelProtectionLevel.Clear;
+        else if (rawDataProt.Equals("S", StringComparison.OrdinalIgnoreCase))
+            dataProt = DataChannelProtectionLevel.Safe;
+        else if (rawDataProt.Equals("E", StringComparison.OrdinalIgnoreCase))
+            dataProt = DataChannelProtectionLevel.Confidential;
+        else if (rawDataProt.Equals("P", StringComparison.OrdinalIgnoreCase))
+            dataProt = DataChannelProtectionLevel.Private;
+        else if (!Enum.TryParse<DataChannelProtectionLevel>(rawDataProt, ignoreCase: true, out dataProt))
         {
-            logger.Log(FtpLogLevel.Warn,
+            logger.Log(
+                FtpLogLevel.Warn,
                 $"Invalid DataChannelProtectionDefault '{root.Server.DataChannelProtectionDefault}', using Clear.");
             dataProt = DataChannelProtectionLevel.Clear;
         }

@@ -3,8 +3,8 @@
  *  File:           DirectoryRule.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xCAFA4DC6
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0x25628194
  *  
  *  Description:
  *      Maps a path prefix to a logical ratio section with additional flags.
@@ -19,9 +19,6 @@
 
 
 
-
-
-using System;
 
 namespace amFTPd.Config.Ftpd.RatioRules
 {

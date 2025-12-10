@@ -3,8 +3,8 @@
  *  File:           FtpConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xAB826914
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0x7D9E2EAA
  *  
  *  Description:
  *      Top-level FTP configuration.
@@ -19,9 +19,6 @@
 
 
 
-
-
-using System.Net;
 
 namespace amFTPd.Config.Ftpd
 {

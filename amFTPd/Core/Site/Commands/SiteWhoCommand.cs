@@ -3,8 +3,8 @@
  *  File:           SiteWhoCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x352F3463
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xC6978A93
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -20,10 +20,6 @@
 
 
 
-
-
-
-using System.Net;
 using System.Text;
 
 namespace amFTPd.Core.Site.Commands;

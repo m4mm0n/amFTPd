@@ -3,8 +3,8 @@
  *  File:           SiteWipeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xE490B058
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0x6B695E4D
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -19,12 +19,6 @@
 
 
 
-
-
-
-
-using amFTPd.Core.Events;
-using amFTPd.Logging;
 
 namespace amFTPd.Core.Site.Commands;
 

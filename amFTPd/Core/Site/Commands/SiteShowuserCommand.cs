@@ -3,8 +3,8 @@
  *  File:           SiteShowuserCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 02:56:04
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF5A040FC
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0xF43CF8BA
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -20,10 +20,6 @@
 
 
 
-
-
-
-using amFTPd.Config.Ftpd;
 using System.Text;
 
 namespace amFTPd.Core.Site.Commands

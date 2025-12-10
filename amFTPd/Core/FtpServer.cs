@@ -3,8 +3,8 @@
  *  File:           FtpServer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xE566FDE6
+ *  Last Modified:  2025-12-10 04:00:28
+ *  CRC32:          0x137A184F
  *  
  *  Description:
  *      Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file tran...
@@ -21,6 +21,8 @@
 
 
 
+
+
 using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ident;
@@ -30,7 +32,6 @@ using amFTPd.Core.Sections;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 
@@ -172,13 +173,15 @@ public sealed class FtpServer
                 var rem = client.Client.RemoteEndPoint?.ToString() ?? "??";
                 _log.Log(FtpLogLevel.Info, $"Connection from {rem}");
 
+                var defaultProt = MapDataChannelProtectionToLetter(_cfg.DataChannelProtectionDefault);
+
                 await using var session = new FtpSession(
                     client,
                     _log,
                     _cfg,
                     _users,
                     fs,
-                    _cfg.DataChannelProtectionDefault.ToString(),
+                    defaultProt,
                     _tls,
                     _identCfg,
                     _vfsCfg,
@@ -212,6 +215,21 @@ public sealed class FtpServer
             });
         }
     }
+
+    private static string MapDataChannelProtectionToLetter(DataChannelProtectionLevel level)
+        => level switch
+        {
+            DataChannelProtectionLevel.Clear => "C",
+
+            // We don't distinguish Safe/Confidential/Private at the TCP level;
+            // anything non-clear is treated as "Private" (TLS on data connection).
+            DataChannelProtectionLevel.Safe => "P",
+            DataChannelProtectionLevel.Confidential => "P",
+            DataChannelProtectionLevel.Private => "P",
+
+            _ => "C"
+        };
+
     /// <summary>
     /// Stops the FTP server, canceling any ongoing operations and releasing resources.
     /// </summary>

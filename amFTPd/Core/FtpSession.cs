@@ -3,8 +3,8 @@
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x12B81096
+ *  Last Modified:  2025-12-10 03:58:33
+ *  CRC32:          0xED987E91
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -33,7 +35,6 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace amFTPd.Core;

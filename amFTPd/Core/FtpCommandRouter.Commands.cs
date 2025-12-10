@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.Commands.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xBB0436DC
+ *  Last Modified:  2025-12-10 03:58:32
+ *  CRC32:          0x234C3F25
  *  
  *  Description:
  *      Partial class for handling FTP commands within the FtpCommandRouter.
@@ -21,10 +21,11 @@
 
 
 
+
+
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
 using amFTPd.Core.Ident;
-using amFTPd.Core.Ratio;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Scripting;
