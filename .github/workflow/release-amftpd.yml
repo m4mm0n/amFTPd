@@ -1,0 +1,127 @@
+name: Release amFTPd
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'          # runs when you push tags like v1.2.3
+
+env:
+  PROJECT_PATH: C:/Users/admin/source/repos/AMPED/amFTPd/amFTPd/amFTPd.csproj   # <--- adjust to your real .csproj path
+
+jobs:
+  build:
+    name: Build for ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            archive: zip
+          - rid: linux-x64
+            os: ubuntu-latest
+            archive: tar.gz
+          - rid: linux-arm64
+            os: ubuntu-latest
+            archive: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'   # or 8.0.x / whatever amFTPd targets
+
+      - name: Publish ${{ matrix.rid }}
+        shell: pwsh
+        run: |
+          dotnet publish "$env:PROJECT_PATH" `
+            -c Release `
+            -r "${{ matrix.rid }}" `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:PublishTrimmed=true `
+            -o "out/${{ matrix.rid }}"
+
+      - name: Archive ${{ matrix.rid }}
+        shell: pwsh
+        run: |
+          $rid = "${{ matrix.rid }}"
+          $outDir = "out/$rid"
+          New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
+          $version = "${{ github.ref_name }}"    # e.g. v1.2.3
+          $ext = "${{ matrix.archive }}"
+          $archiveName = "amFTPd-$version-$rid.$ext"
+
+          if ($ext -eq "zip") {
+            Compress-Archive -Path "$outDir/*" -DestinationPath "artifacts/$archiveName"
+          }
+          else {
+            tar -czf "artifacts/$archiveName" -C $outDir .
+          }
+
+      - name: Upload artifact ${{ matrix.rid }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: amftpd-${{ matrix.rid }}
+          path: artifacts/*
+
+  # Build & push Docker image to GHCR
+  docker:
+    name: Publish Docker image
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write      # needed to push to ghcr.io
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository_owner }}/amftpd
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}    # built-in token works for GHCR :contentReference[oaicite:0]{index=0}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  # Create GitHub Release with all binaries attached
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/**/*        # attach all built archives
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
