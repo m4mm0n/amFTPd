@@ -3,8 +3,8 @@
  *  File:           FtpAuthorization.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-17 05:27:55
- *  Last Modified:  2025-12-10 04:14:14
- *  CRC32:          0x575E6390
+ *  Last Modified:  2025-12-10 04:29:32
+ *  CRC32:          0xB15D46B7
  *  
  *  Description:
  *      Per-user, per-command authorization based on FtpUser flags. This is a coarse gate; individual handlers and AMScript m...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -87,7 +89,7 @@ namespace amFTPd.Security
 
                 // --- Admin-only commands ---
                 "SITE" =>
-                    user.IsAdmin,
+                    true,
 
                 // Default: allow, and let handler/AMScript decide more fine-grained policy.
                 _ => true
