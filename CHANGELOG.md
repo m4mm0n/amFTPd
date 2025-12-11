@@ -1,11 +1,301 @@
-   ________  ________  ________  ________   ________  ________  ________ 
-  ╱    ╱   ╲╱        ╲╱        ╲╱        ╲ ╱        ╲╱        ╲╱    ╱   ╲
- ╱         ╱         ╱         ╱        _╱_╱       ╱╱         ╱         ╱
- ╲        ╱        _╱        _╱-        ╱╱         ╱         ╱         ╱ 
-  ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
-                           [ VERSION HISTORY ]
+[ v0.4.1.0 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* 0.4.0.0 hardening with ABOR-aware reputation and better transfer handling...
 
-## [ v0.2.0.0 - 22.11.2025 ]
+[ v0.4.0.0 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Minor code cleanup and optimizations...
+* Major changes to the security among other things...
+
+New files:
++ Config/Ftpd/FtpSessionReputation.cs
++ Security/BanList/BanEntry.cs
++ Security/BanList/BanList.cs
++ Security/BanList/CidrBlock.cs
++ Security/HammerGuard/HammerDecision.cs
++ Security/HammerGuard/HammerGuard.cs
++ Security/HammerGuard/HammerState.cs
+
+Core/FtpCommandRouter.Commands.cs:
++ HandleSiteSecurityAsync added...
++ BuildCreditContext changed...
+* EPRT changed...
+* PASS changed...
+* SITE changed...
+* STAT changed...
+* USER changed...
+
+Core/FtpCommandRouter.cs:
++ RunPreDispatchPipelineAsync added...
+* ApplyDownloadCredits changed...
+* ApplyUploadCredits changed...
+* CheckDownloadCreditsAsync changed...
+* FtpCommandRouter changed...
+* HandleAsync changed...
+
+Core/FtpServer.cs:
++ NotifyFailedLogin added...
++ TryRegisterConnection added...
++ UnregisterConnection added...
+* FTP changed...
+* FtpServer changed...
+* Stop changed...
+
+Core/FtpSession.cs:
++ EvaluateReputationAfterLoginFailure added...
++ EvaluateReputationAfterTransferAbort added...
++ NotifyCommandExecuted added...
++ NotifyLoginFailed added...
++ TrimOldCommandTimestamps added...
+* FtpSession changed...
+* WithDataAsync changed...
+
+Core/Site/Commands/SiteDupeCommand.cs:
+* ExecuteAsync changed...
+
+Core/Site/Commands/SiteLimitsCommand.cs:
+* ExecuteAsync changed...
+
+Core/Site/Commands/SiteSearchCommand.cs:
+* ExecuteAsync changed...
+
+Core/Site/SiteCommandContext.cs:
++ New constructor added...
+
+Credits/CreditEngine.cs:
+* ComputeDownloadCost changed...
+* ComputeUploadCredits changed...
+
+Db/BinaryGroupStore.cs:
+* ParseRecord changed...
+
+Db/BinaryUserStore.cs:
+* ParseSnapshotData changed...
+
+Program.cs:
+* PrintBanner changed...
+
+Security/FtpAuthorization.cs:
++ CanUseSiteCommand added...
++ CommandRequiresLogin added...
+
+
+[ v0.3.0.0 - 10.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Oh dear, this is a major update - so please check the full changelog on the
+  GitHub repo for details...
+
+Core architecture & plumbing:
+* All core classes (FtpServer, FtpSession, FtpCommandRouter, FtpFileSystem, 
+  FtpDataConnection, auth, logging, scripting, DB, security, utils) were modified.
+* New event bus (Core/Events) and race engine (Core/Race) were added.
+* Dupe system added (Core/Dupe, dupe commands, zipscript rescan/undupes)...
+
+VFS & sections:
+* VFS expanded with helpers like ResolveMount, GetRelativePath, VfsMount, 
+  VfsUserMount and section mapping (Db/SectionMappings.cs, Core/Sections/SectionResolver.cs).
+* In-memory stores for sections and groups added (faster, non-DB setups).
+
+Ratios, login, FXP:
+* New ratio login context (Core/RatioLoginContext, RatioEngineLoginExtensions)
+  plus corresponding config support.
+* FXP policy engine and config (Core/Fxp, Config/Fxp/FxpPolicyConfig.cs) with
+  directions, decisions, and requests.
+
+IRC integration:
+* Full IRC announcer stack: client, message types, FiSH/Blowfish ECB adapter
+  and codec, config extensions, etc.
+
+SITE command framework:
+* Generic IFtpSiteCommand, SiteCommandRouter, attribute-based registration.
+* Large suite of SITE commands: user/group admin, IP management, stats/day/week/month,
+  nukes/unnukes, rescan/dupe tools, KICK/KILL/WHO, PRE, sections, limits and more.
+
+Zipscript:
+* New zipscript engine and entities (file info/state/release status + DB entities).
+
+Database & maintenance:
+* DB schema extended with sections, races, zipscript entries, etc.
+* In-memory section store, database maintenance job & lock.
+
+Security & TLS:
+* Password hasher, TLS config touched; Blowfish ECB added for FiSH.
+* Transfer direction enum introduced.
+
+Config & bootstrap:
+* Config loader now async and capable of auto-creating default config
+  (EnsureDefaultConfigExistsAsync).
+* New configs for IRC, FXP, scripting extensions, and runtime config root.
+
+Presentation & branding:
+* New resources (logo PNG, resources designer) and console ANSI image helper.
+
+
+[ v0.2.1.0 - 23.11.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* This update will break any existing configurations from previous versions,
+  as it introduces a new configuration structure for most of the new and old
+  features. Please make sure to read the updated documentation on how to use
+  the new configuration structure.
+  Also, the DatabaseManager has not yet been fully integrated!
+
+Config:
++ added Config/Ident/IdentConfig.cs...
++ added Config/Ident/IdentGroupMapping.cs...
++ added Config/Ident/IdentMode.cs...
++ added Config/Vfs/VfsConfig.cs...
++ added Config/Vfs/VfsMount.cs...
++ added Config/Vfs/VfsUserMount.cs...
++ added Config/Vfs/VfsVirtualFile.cs...
+
+Core:
++ added Core/Ident/IdentCache.cs...
++ added Core/Ident/IdentClient.cs...
++ added Core/Ident/IdentManager.cs...
++ added Core/Ident/IdentPolicyException.cs...
++ added Core/Ident/IdentResult.cs...
++ added Core/Vfs/VfsCache.cs...
++ added Core/Vfs/VfsManager.cs...
++ added Core/Vfs/VfsNode.cs...
++ added Core/Vfs/VfsNodeType.cs...
++ added Core/Vfs/VfsResolveResult.cs...
+
+Config/Daemon/AmFtpdConfigLoader.cs:
+* changed to load IdentConfig and VfsConfig...
+
+Config/Daemon/AmFtpdConfigRoot.cs:
+* changed to include IdentConfig and VfsConfig...
+
+Config/Daemon/AmFtpdRuntimeConfig.cs:
+* changed to include IdentConfig and VfsConfig...
+
+Config/Daemon/AmFtpdConfigLoader.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdConfigRoot.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdRuntimeConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdServerConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdStorageConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Daemon/AmFtpdTlsConfig.cs:
+* changed configuration handling (server/runtime/storage/TLS) to support new group/ratio and access features
+
+Config/Ftpd:
+* changed FtpConfig.cs
+* changed FtpSection.cs
+* changed FtpSectionConfig.cs
+* changed FtpUser.cs
+* changed FtpUserConfig.cs
+* changed FtpUserConfigUser.cs
+* changed IUserStore.cs
+* changed InMemoryUserStore.cs
+* changed SectionManager.cs
+
+Config/Scripting:
+* changed ScriptConfig.cs
+
+Core:
+* changed FtpCommandRouter.Commands.cs
+* changed FtpCommandRouter.cs
+* changed FtpDataConnection.cs
+* changed FtpFileSystem.cs
+* changed FtpPath.cs
+* changed FtpResponses.cs
+* changed FtpServer.cs
+* changed FtpSession.cs
+* changed FtpTransferMode.cs
+
+Ident:
+* changed Config/Ident/IdentConfig.cs
+* changed Config/Ident/IdentGroupMapping.cs
+* changed Config/Ident/IdentMode.cs
+* changed Core/Ident/IdentCache.cs
+* changed Core/Ident/IdentClient.cs
+* changed Core/Ident/IdentManager.cs
+* changed Core/Ident/IdentPolicyException.cs
+* changed Core/Ident/IdentResult.cs
+
+VFS:
+* changed Config/Vfs/VfsConfig.cs
+* changed Config/Vfs/VfsMount.cs
+* changed Config/Vfs/VfsUserMount.cs
+* changed Config/Vfs/VfsVirtualFile.cs
+* changed Core/Vfs/VfsCache.cs
+* changed Core/Vfs/VfsManager.cs
+* changed Core/Vfs/VfsNode.cs
+* changed Core/Vfs/VfsNodeType.cs
+* changed Core/Vfs/VfsResolveResult.cs
+
+Scripting:
+* changed Scripting/AMRule.cs
+* changed Scripting/AMRuleAction.cs
+* changed Scripting/AMScriptContext.cs
+* changed Scripting/AMScriptDefaults.cs
+* changed Scripting/AMScriptEngine.cs
+* changed Scripting/AMScriptResult.cs
+
+Credits:
+* changed Credits/CreditEngine.cs
+
+Race:
+* changed Core/Race/RaceEngine.cs
+* changed Core/Race/RaceSnapshot.cs
+
+Ratio:
++ added Core/Ratio/DirectoryRuleEngine.cs
++ added Core/Ratio/RatioEngine.cs
++ added Core/Ratio/RatioResolutionPipeline.cs
++ added Core/Ratio/SectionResolver.cs
+
+Access control:
++ added Core/Access/DirectoryAccess.cs
++ added Core/Access/DirectoryAccessEvaluator.cs
+
+Database:
+* changed AtomicSnapshot.cs
+* changed BackupManager.cs
+* changed BinaryGroupStore.cs
+* changed BinarySectionStore.cs
+* changed BinaryUserStore.cs
+* changed BinaryUserStoreMmap.cs
+* changed DatabaseManager.cs (still not fully implemented)
+* changed DbFsck.cs
+* changed DbFsckDeep.cs
+* changed DbRepair.cs
+* changed FsckResult.cs
+* changed GroupStoreSnapshot.cs
+* changed MmapFileUtils.cs
+* changed SectionStoreSnapshot.cs
+* changed SnapshotManager.cs
+* changed SnapshotOptions.cs
+* changed SnapshotResolver.cs
+* changed UserStoreSnapshot.cs
+
+Security:
+* changed CertificateHelper.cs
+* changed FtpAuthorization.cs
+* changed PasswordHasher.cs
+* changed TlsConfig.cs
++ added UserGroupResolver.cs
+
+Utils:
+* changed ConsoleBanner.cs
+* changed ConsoleExt.cs
+* changed ConsoleStyleExtensions.cs
+* changed Lz4Codec.cs
+
+[ v0.2.0.0 - 22.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
 - Now includes a more extensive Ident mode, a more extensive VFS implementation,
@@ -42,7 +332,7 @@ Config/Daemon/AmFtpdRuntimeConfig.cs:
 * changed to include IdentConfig and VfsConfig...
 
 Core/FtpCommandRouter.Commands.cs:
-* fixed PASS command to properly used IdentManager when needed...
+* fixed PASS command to properly use IdentManager when needed...
 * fixed LIST command to properly use VfsManager when needed...
 * fixed NLST command to properly use VfsManager when needed...
 * fixed MLSD command to properly use VfsManager when needed...
@@ -63,8 +353,7 @@ Core/FtpFileSystem.cs:
 Program.cs:
 * changed FTPServer initialization to include IdentManager, and VfsManager...
 
-
-## [ v0.1.1.0 - 21.11.2025 ]
+[ v0.1.1.0 - 21.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
 - Now includes a proper version history for each update, with partially detailed

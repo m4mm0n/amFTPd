@@ -5,6 +5,12 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.4.1.1 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Just fixed the GitHub release tagging...
+* No code changes, except the version number...
+
 [ v0.4.1.0 - 11.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
@@ -302,9 +308,6 @@ Utils:
 * changed ConsoleStyleExtensions.cs
 * changed Lz4Codec.cs
 
-
-<------------------------------------------------------------------------------------------------------------------->
-
 [ v0.2.0.0 - 22.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
@@ -362,8 +365,6 @@ Core/FtpFileSystem.cs:
 
 Program.cs:
 * changed FTPServer initialization to include IdentManager, and VfsManager...
-
-<------------------------------------------------------------------------------------------------------------------->
 
 [ v0.1.1.0 - 21.11.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^

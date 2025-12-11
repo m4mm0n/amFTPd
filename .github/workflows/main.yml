@@ -114,6 +114,34 @@ jobs:
     needs: [build, docker]
 
     steps:
+      - name: Checkout default branch (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Generate changelog and update CHANGELOG.md
+        shell: pwsh
+        run: |
+          ./.github/scripts/update-changelog.ps1
+
+      - name: Commit and push CHANGELOG.md
+        shell: bash
+        run: |
+          set -e
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "No changelog changes to commit."
+          else
+            git commit -m "Update changelog for ${CURRENT_TAG}"
+            git push origin ${{ github.event.repository.default_branch }}
+          fi
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -126,6 +154,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dist/**/*
-          generate_release_notes: true
+          body_path: CHANGELOG.md   # use the changelog text as release body
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
