@@ -5,6 +5,11 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.4.1.0 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* 0.4.0.0 hardening with ABOR-aware reputation and better transfer handling...
+
 [ v0.4.0.0 - 11.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

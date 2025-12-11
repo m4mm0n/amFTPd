@@ -3,8 +3,8 @@
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 04:24:01
- *  CRC32:          0xBB10E122
+ *  Last Modified:  2025-12-11 07:30:17
+ *  CRC32:          0xD6068EC3
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -65,11 +67,14 @@ public sealed class FtpSession : IAsyncDisposable
 
     private FtpDataConnection? _data;
 
+    private readonly Lock _dataLock = new();
+    private CancellationTokenSource? _dataTransferCts;
+
     private static readonly ConcurrentDictionary<int, FtpSession> _sessions = new();
     private static int _nextSessionId;
 
     private readonly Queue<DateTime> _commandTimestamps = new();
-    private readonly object _statsLock = new();
+    private readonly Lock _statsLock = new();
 
     private int _failedLoginAttempts;
     private int _abortedTransfers;
@@ -438,17 +443,34 @@ public sealed class FtpSession : IAsyncDisposable
             return;
         }
 
+        CancellationTokenSource? linkedCts = null;
+
         try
         {
-            await _data.SendAsync(action, ct);
+            // Create a CTS linked to the session token, so we can cancel just the transfer.
+            linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+            lock (_dataLock)
+            {
+                // If a previous CTS somehow exists, cancel + dispose it.
+                _dataTransferCts?.Cancel();
+                _dataTransferCts?.Dispose();
+                _dataTransferCts = linkedCts;
+            }
+
+            await _data.SendAsync(action, linkedCts.Token);
         }
         catch (OperationCanceledException)
         {
-            // Cancelled → let the session loop handle it quietly.
+            // Cancelled → typically ABOR or session shutdown.
+            // ABOR will send its own reply, so stay quiet here.
         }
         catch (IOException)
         {
             // Network-level error on data connection.
+            // Count this as an aborted transfer as well.
+            NotifyTransferAborted();
+
             // Return a proper 426 so clients know the transfer was aborted.
             await WriteAsync("426 Connection closed; transfer aborted.\r\n", ct);
         }
@@ -460,6 +482,16 @@ public sealed class FtpSession : IAsyncDisposable
         }
         finally
         {
+            lock (_dataLock)
+            {
+                if (ReferenceEquals(_dataTransferCts, linkedCts))
+                {
+                    _dataTransferCts = null;
+                }
+            }
+
+            linkedCts?.Dispose();
+
             try
             {
                 await _data.DisposeAsync();
@@ -645,7 +677,36 @@ public sealed class FtpSession : IAsyncDisposable
             TrimOldCommandTimestamps();
         }
     }
+    /// <summary>
+    /// Attempts to cancel the currently active data transfer (LIST/RETR/STOR/etc.).
+    /// Returns true if a transfer was in progress and has been cancelled.
+    /// </summary>
+    public bool CancelActiveDataTransfer()
+    {
+        CancellationTokenSource? cts;
 
+        lock (_dataLock)
+        {
+            cts = _dataTransferCts;
+            _dataTransferCts = null;
+        }
+
+        if (cts is null)
+            return false;
+
+        try
+        {
+            cts.Cancel();
+        }
+        finally
+        {
+            cts.Dispose();
+        }
+
+        // Count this as an aborted transfer from the session's point of view.
+        NotifyTransferAborted();
+        return true;
+    }
     /// <summary>
     /// Call from the PASS/LOGIN handling code when a login attempt fails.
     /// </summary>

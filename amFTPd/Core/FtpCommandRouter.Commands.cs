@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.Commands.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 04:28:41
- *  CRC32:          0x9CF6ABE4
+ *  Last Modified:  2025-12-11 07:30:49
+ *  CRC32:          0xC4D9F238
  *  
  *  Description:
  *      Partial class for handling FTP commands within the FtpCommandRouter.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -616,6 +618,23 @@ namespace amFTPd.Core
 
             await _s.WriteAsync(sb.ToString(), ct);
         }
+        private async Task ABOR(CancellationToken ct)
+        {
+            // Try to cancel the current data transfer (if any).
+            var hadTransfer = _s.CancelActiveDataTransfer();
+
+            if (hadTransfer)
+            {
+                // Transfer was in progress and is now cancelled.
+                await _s.WriteAsync("226 Abort command successful; transfer cancelled.\r\n", ct);
+            }
+            else
+            {
+                // No active transfer; still respond with a friendly OK.
+                await _s.WriteAsync("226 No transfer in progress.\r\n", ct);
+            }
+        }
+
         #endregion
 
         // --- Navigation ---

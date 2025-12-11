@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 04:26:20
- *  CRC32:          0xE45A3D19
+ *  Last Modified:  2025-12-11 07:31:16
+ *  CRC32:          0x5005C9CC
  *  
  *  Description:
  *      Routes and handles FTP commands received from a client session.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -299,7 +301,7 @@ public sealed partial class FtpCommandRouter
             case "ALLO": await _s.WriteAsync("202 ALLO command ignored.\r\n", ct); break;
             case "MODE": await _s.WriteAsync("200 Mode set to S.\r\n", ct); break;
             case "STRU": await _s.WriteAsync("200 Structure set to F.\r\n", ct); break;
-            case "ABOR": await _s.WriteAsync("226 Abort OK.\r\n", ct); break;
+            case "ABOR": await ABOR(ct); break;
 
             // Path / navigation
             case "PWD":
