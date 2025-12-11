@@ -3,8 +3,8 @@
  *  File:           BinarySectionStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:10:38
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xBF56207A
+ *  Last Modified:  2025-12-11 08:12:09
+ *  CRC32:          0x7F0D8EC5
  *  
  *  Description:
  *      Provides a thread-safe, encrypted, and persistent store for managing FTP sections.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -321,8 +323,9 @@ public sealed class BinarySectionStore : ISectionStore
         var cipher = new byte[plain.Length];
         var tag = new byte[16];
 
-        using var gcm = new AesGcm(_masterKey);
+        using var gcm = new AesGcm(_masterKey, 16);
         gcm.Encrypt(nonce, plain, cipher, tag);
+
 
         var output = new byte[12 + cipher.Length + 16];
         Buffer.BlockCopy(nonce, 0, output, 0, 12);
@@ -339,7 +342,7 @@ public sealed class BinarySectionStore : ISectionStore
 
         var plain = new byte[cipher.Length];
 
-        using var gcm = new AesGcm(_masterKey);
+        using var gcm = new AesGcm(_masterKey, 16);
         gcm.Decrypt(nonce, cipher, tag, plain);
 
         return plain;

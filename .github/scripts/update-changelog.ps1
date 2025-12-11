@@ -69,7 +69,7 @@ function Get-ChangedMethodNames {
     )
 
     # New version of the file at CURRENT_TAG
-    $newFileContent = git show "$CurrentTag:$File" 2>$null
+    $newFileContent = git show "$($CurrentTag):$File" 2>$null
     if (-not $newFileContent) {
         return @()
     }
@@ -103,7 +103,7 @@ function Get-ChangedMethodNames {
     # Previous methods by name to detect added vs changed
     $prevMethods = @{}
     if ($PreviousTag) {
-        $prevContent = git show "$PreviousTag:$File" 2>$null
+        $prevContent = git show "$($PreviousTag):$File" 2>$null
         if ($prevContent) {
             $prevLines = $prevContent -split "`n"
             Get-MethodDeclarations -Lines $prevLines | ForEach-Object {
@@ -184,7 +184,6 @@ $sectionLines = New-Object System.Collections.Generic.List[string]
 $sectionLines.Add($headerLine)
 $sectionLines.Add($underline)
 $sectionLines.Add("Whats new?")
-# You can tweak this line or add more bullets; this is just a generic summary:
 $sectionLines.Add("* Automated changelog based on git diff between ${range}...")
 $sectionLines.Add("")
 

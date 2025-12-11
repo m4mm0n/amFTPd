@@ -3,8 +3,8 @@
  *  File:           BinaryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:24:23
- *  Last Modified:  2025-12-11 04:26:20
- *  CRC32:          0x08E781B2
+ *  Last Modified:  2025-12-11 08:12:32
+ *  CRC32:          0x81BB9354
  *  
  *  Description:
  *      Provides a binary-based implementation of the <see cref="IUserStore"/> interface for managing FTP users.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -520,7 +522,7 @@ namespace amFTPd.Db
             var cipher = new byte[plain.Length];
             var tag = new byte[16];
 
-            using var gcm = new AesGcm(_masterKey);
+            using var gcm = new AesGcm(_masterKey, 16);
             gcm.Encrypt(nonce, plain, cipher, tag);
 
             var result = new byte[nonce.Length + cipher.Length + tag.Length];
@@ -539,7 +541,7 @@ namespace amFTPd.Db
 
             var plain = new byte[cipher.Length];
 
-            using var gcm = new AesGcm(_masterKey);
+            using var gcm = new AesGcm(_masterKey, 16);
             gcm.Decrypt(nonce, cipher, tag, plain);
 
             return plain;

@@ -3,8 +3,8 @@
  *  File:           BinaryUserStoreMmap.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:12:17
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0x71BDA3C0
+ *  Last Modified:  2025-12-11 08:13:19
+ *  CRC32:          0xD8BD3573
  *  
  *  Description:
  *      Represents a memory-mapped binary user store that provides secure and efficient storage and retrieval of FTP user dat...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -447,7 +449,7 @@ namespace amFTPd.Db
             ReadOnlySpan<byte> cipher = buf[12..^16];
 
             var plain = new byte[cipher.Length];
-            using var gcm = new AesGcm(_masterKey);
+            using var gcm = new AesGcm(_masterKey, 16);
             gcm.Decrypt(nonce, cipher, tag, plain);
 
             return plain;
@@ -459,7 +461,7 @@ namespace amFTPd.Db
             var cipher = new byte[plain.Length];
             var tag = new byte[16];
 
-            using var gcm = new AesGcm(_masterKey);
+            using var gcm = new AesGcm(_masterKey, 16);
             gcm.Encrypt(nonce, plain, cipher, tag);
 
             var result = new byte[nonce.Length + cipher.Length + tag.Length];

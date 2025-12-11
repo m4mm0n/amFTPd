@@ -3,8 +3,8 @@
  *  File:           WalFile.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 19:57:08
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x1E157829
+ *  Last Modified:  2025-12-11 08:15:17
+ *  CRC32:          0x874E2974
  *  
  *  Description:
  *      Represents a Write-Ahead Log (WAL) file that supports appending, reading, and managing log entries with encryption an...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -147,15 +149,16 @@ public sealed class WalFile
         var compressed = Lz4Codec.Compress(raw);
 
         var nonce = RandomNumberGenerator.GetBytes(12);
+        var cipher = new byte[compressed.Length];
         var tag = new byte[16];
-        var ciphertext = new byte[compressed.Length];
 
-        using (var gcm = new AesGcm(_masterKey))
-            gcm.Encrypt(nonce, compressed, ciphertext, tag);
+        using (var gcm = new AesGcm(_masterKey, 16))
+            gcm.Encrypt(nonce, compressed, cipher, tag);
+
 
         using var outMs = new MemoryStream();
         outMs.Write(nonce);
-        outMs.Write(ciphertext);
+        outMs.Write(cipher);
         outMs.Write(tag);
         return outMs.ToArray();
     }
@@ -165,12 +168,12 @@ public sealed class WalFile
         {
             ReadOnlySpan<byte> nonce = encrypted[..12];
             ReadOnlySpan<byte> tag = encrypted[^16..];
-            ReadOnlySpan<byte> ciphertext = encrypted[12..^16];
+            ReadOnlySpan<byte> cipher = encrypted[12..^16];
 
-            var decompressed = new byte[ciphertext.Length];
+            var decompressed = new byte[cipher.Length];
 
-            using (var gcm = new AesGcm(_masterKey))
-                gcm.Decrypt(nonce, ciphertext, tag, decompressed);
+            using (var gcm = new AesGcm(_masterKey, 16))
+                gcm.Decrypt(nonce, cipher, tag, decompressed);
 
             var raw = Lz4Codec.Decompress(decompressed);
 

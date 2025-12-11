@@ -3,8 +3,8 @@
  *  File:           BackupManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:16:29
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x71F78584
+ *  Last Modified:  2025-12-11 08:11:13
+ *  CRC32:          0x724CD899
  *  
  *  Description:
  *      Provides functionality for creating, restoring, listing, and deleting encrypted database backups.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -156,7 +158,7 @@ namespace amFTPd.Db
             var tag = new byte[16];
             var cipher = new byte[compressed.Length];
 
-            using (var gcm = new AesGcm(key))
+            using (var gcm = new AesGcm(key, 16))
                 gcm.Encrypt(nonce, compressed, cipher, tag);
 
             // Write payload
@@ -185,7 +187,7 @@ namespace amFTPd.Db
             if (cipherLen <= 0)
                 throw new Exception("Invalid backup format (cipher length).");
 
-            var cipher = br.ReadBytes((int)cipherLen);
+            var cipher = br.ReadBytes((int)(ms.Length - ms.Position - 16));
             var tag = br.ReadBytes(16);
 
             byte[] decompressed;
@@ -193,7 +195,7 @@ namespace amFTPd.Db
             try
             {
                 var compressed = new byte[cipher.Length];
-                using (var gcm = new AesGcm(key))
+                using (var gcm = new AesGcm(key, 16))
                     gcm.Decrypt(nonce, cipher, tag, compressed);
 
                 decompressed = Lz4Codec.Decompress(compressed);

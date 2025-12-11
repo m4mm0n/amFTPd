@@ -5,6 +5,12 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.4.1.2 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Minor code cleanup...
+* Fixed AesGcm implementation being obsolete...
+
 [ v0.4.1.1 - 11.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

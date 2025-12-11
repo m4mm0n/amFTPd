@@ -3,8 +3,8 @@
  *  File:           DbFsck.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:18:19
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x48265806
+ *  Last Modified:  2025-12-11 08:13:53
+ *  CRC32:          0xC170683B
  *  
  *  Description:
  *      Provides functionality to validate the integrity and structure of a database file, including its associated metadata...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -376,7 +378,7 @@ namespace amFTPd.Db
 
             var compressed = new byte[cipher.Length];
 
-            using (var gcm = new AesGcm(key))
+            using (var gcm = new AesGcm(key, 16))
                 gcm.Decrypt(nonce, cipher, tag, compressed);
 
             // LZ4 decompress enough to read first byte
@@ -419,8 +421,8 @@ namespace amFTPd.Db
 
             var plain = new byte[cipher.Length];
 
-            using (var gcm = new AesGcm(key))
-                gcm.Decrypt(nonce, cipher, tag, plain);
+            using var gcm = new AesGcm(key, 16);
+            gcm.Decrypt(nonce, cipher, tag, plain);
 
             return plain;
         }
