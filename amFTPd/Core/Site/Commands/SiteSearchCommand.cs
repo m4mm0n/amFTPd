@@ -3,8 +3,8 @@
  *  File:           SiteSearchCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 05:01:26
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xBA2AA514
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0x79A3AA35
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -53,7 +55,7 @@ namespace amFTPd.Core.Site.Commands
 
             var parts = argument.Split(' ', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             var pattern = parts[0];
-            string? sectionFilter = parts.Length > 1 ? parts[1] : null;
+            var sectionFilter = parts.Length > 1 ? parts[1] : null;
 
             var results = dupeStore.Search(pattern, sectionFilter, limit: 100);
             if (results.Count == 0)

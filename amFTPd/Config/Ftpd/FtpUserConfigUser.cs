@@ -3,8 +3,8 @@
  *  File:           FtpUserConfigUser.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x9AA7C50D
+ *  Last Modified:  2025-12-11 02:49:55
+ *  CRC32:          0x7D28BD4D
  *  
  *  Description:
  *      Raw config entry for a single user (as stored in DB / config).
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -67,6 +69,21 @@ namespace amFTPd.Config.Ftpd
         public int MaxDownloadKbps { get; init; }
 
         public long CreditsKb { get; init; }
+
+        /// <summary>
+        /// Optional override for global MaxConnectionsPerIp.
+        /// </summary>
+        public int? MaxConnectionsPerIpOverride { get; init; }
+
+        /// <summary>
+        /// Optional override for global MaxCommandsPerMinute.
+        /// </summary>
+        public int? MaxCommandsPerMinuteOverride { get; init; }
+
+        /// <summary>
+        /// Optional override for global MaxFailedLoginsPerIp.
+        /// </summary>
+        public int? MaxFailedLoginsPerIpOverride { get; init; }
 
         public FtpUserConfigUser()
         {

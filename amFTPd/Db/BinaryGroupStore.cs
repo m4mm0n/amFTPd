@@ -3,8 +3,8 @@
  *  File:           BinaryGroupStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:08:55
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xA8059F68
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0x7B042C27
  *  
  *  Description:
  *      Provides a secure, binary-based storage mechanism for managing FTP groups,  with support for write-ahead logging (WAL...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -344,14 +346,14 @@ public sealed class BinaryGroupStore : IGroupStore
         var desc = Encoding.UTF8.GetString(br.ReadBytes(descLen));
 
         var users = new List<string>(userCount);
-        for (int i = 0; i < userCount; i++)
+        for (var i = 0; i < userCount; i++)
         {
             var len = br.ReadUInt16();
             users.Add(Encoding.UTF8.GetString(br.ReadBytes(len)));
         }
 
         var creds = new Dictionary<string, long>();
-        for (int i = 0; i < credCount; i++)
+        for (var i = 0; i < credCount; i++)
         {
             var len = br.ReadUInt16();
             var sec = Encoding.UTF8.GetString(br.ReadBytes(len));

@@ -3,8 +3,8 @@
  *  File:           CreditEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:36:28
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF47D2CB5
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0xCC8E35C5
  *  
  *  Description:
  *      Provides functionality for calculating and managing user credits based on file uploads and downloads.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -74,7 +76,7 @@ namespace amFTPd.Credits
             var sizeKb = Math.Max(1L, sizeBytes / 1024L);
 
             // 1) Section multiplier
-            double multiplier = sec.UploadMultiplier;
+            var multiplier = sec.UploadMultiplier;
 
             // 2) Group override multiplier?
             if (grp != null && grp.SectionCredits.TryGetValue(sectionName, out var gmul))
@@ -102,7 +104,7 @@ namespace amFTPd.Credits
             var sizeKb = Math.Max(1L, sizeBytes / 1024L);
 
             // Base section multiplier (cost)
-            double multiplier = sec.DownloadMultiplier;
+            var multiplier = sec.DownloadMultiplier;
 
             // Group override cost
             if (grp != null && grp.SectionCredits.TryGetValue(sectionName, out var gmul))

@@ -3,8 +3,8 @@
  *  File:           FtpServer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 04:14:06
- *  CRC32:          0xCCFAAEBF
+ *  Last Modified:  2025-12-11 03:56:47
+ *  CRC32:          0x3FFD32F3
  *  
  *  Description:
  *      Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file tran...
@@ -19,6 +19,8 @@
 
 
 
+
+
 using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ident;
@@ -28,6 +30,10 @@ using amFTPd.Core.Sections;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
+using amFTPd.Security.BanList;
+using amFTPd.Security.HammerGuard;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -57,8 +63,25 @@ public sealed class FtpServer
     private readonly VfsConfig _vfsCfg;
     private readonly SectionResolver _sectionResolver;
 
+    private readonly HammerGuard _hammerGuard;
+    private readonly BanList _banList;
+
+    private readonly Lock _connectionLock = new();
+    private readonly ConcurrentDictionary<IPAddress, int> _connectionsPerIp = new();
+    private int _currentConnections;
+
     private readonly AmFtpdRuntimeConfig _runtime;
     #endregion
+
+    /// <summary>
+    /// Gets the current <see cref="HammerGuard"/> instance associated with this object.
+    /// </summary>
+    public HammerGuard HammerGuard => _hammerGuard;
+    /// <summary>
+    /// Gets the list of banned users associated with the current instance.
+    /// </summary>
+    public BanList BanList => _banList;
+
     /// <summary>
     /// Initializes a new instance of the FtpServer class using the specified runtime configuration and logger.
     /// </summary>
@@ -83,6 +106,9 @@ public sealed class FtpServer
         _identCfg = runtime.IdentConfig;
         _vfsCfg = runtime.VfsConfig;
         _sectionResolver = new SectionResolver(_sections.GetSections());
+
+        _hammerGuard = new HammerGuard(_cfg);
+        _banList = new BanList();
     }
     /// <summary>
     /// Starts the FTP(S) server and begins listening for incoming client connections.
@@ -143,7 +169,6 @@ public sealed class FtpServer
         userScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         groupScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
 
-
         // --------------------------------------------------------------------
         // Main accept loop
         // --------------------------------------------------------------------
@@ -164,50 +189,90 @@ public sealed class FtpServer
                 continue;
             }
 
-            _ = Task.Run(async () =>
+            // Determine remote endpoint
+            var remoteEndPoint = client.Client.RemoteEndPoint as IPEndPoint;
+            if (remoteEndPoint is null)
             {
-                var rem = client.Client.RemoteEndPoint?.ToString() ?? "??";
-                _log.Log(FtpLogLevel.Info, $"Connection from {rem}");
+                client.Dispose();
+                continue;
+            }
 
-                var defaultProt = MapDataChannelProtectionToLetter(_cfg.DataChannelProtectionDefault);
-
-                await using var session = new FtpSession(
-                    client,
-                    _log,
-                    _cfg,
-                    _users,
-                    fs,
-                    defaultProt,
-                    _tls,
-                    _identCfg,
-                    _vfsCfg,
-                    _sectionResolver
-                    );
-
-                var router = new FtpCommandRouter(session, _log, fs, _cfg, _tls, _sections, _runtime);
-
-                // Attach script engines so router can use AMScript in credits/FXP/active
-                router.AttachScriptEngines(
-                    creditScript,
-                    fxpScript,
-                    activeScript,
-                    sectionRoutingScript,
-                    siteScript,
-                    userScript, groupScript
-                );
-                
-                var ct = _cts!.Token;
-
+            // Connection limit / ban checks
+            if (!TryRegisterConnection(remoteEndPoint, out var rejectMessage))
+            {
                 try
                 {
-                    await session.RunAsync(router, ct);
+                    using var stream = client.GetStream();
+                    var msg = string.IsNullOrEmpty(rejectMessage)
+                        ? "421 Too many connections, try again later.\r\n"
+                        : $"421 {rejectMessage}\r\n";
+
+                    var buf = System.Text.Encoding.ASCII.GetBytes(msg);
+                    await stream.WriteAsync(buf.AsMemory(0, buf.Length), _cts.Token);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    _log.Log(FtpLogLevel.Error, $"Unhandled session error for {rem}", ex);
+                    // best effort
                 }
 
-                _log.Log(FtpLogLevel.Info, $"Connection closed: {rem}");
+                client.Dispose();
+                continue;
+            }
+
+            var rem = remoteEndPoint.ToString();
+            _log.Log(FtpLogLevel.Info, $"Connection from {rem}");
+
+            var defaultProt = MapDataChannelProtectionToLetter(_cfg.DataChannelProtectionDefault);
+
+            // capture for the task
+            var remoteCopy = remoteEndPoint;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await using var session = new FtpSession(
+                        client,
+                        _log,
+                        _cfg,
+                        _users,
+                        fs,
+                        defaultProt,
+                        _tls,
+                        _identCfg,
+                        _vfsCfg,
+                        _sectionResolver);
+
+                    var router = new FtpCommandRouter(this, session, _log, fs, _cfg, _tls, _sections, _runtime);
+
+                    // Attach script engines so router can use AMScript in credits/FXP/active
+                    router.AttachScriptEngines(
+                        creditScript,
+                        fxpScript,
+                        activeScript,
+                        sectionRoutingScript,
+                        siteScript,
+                        userScript,
+                        groupScript);
+
+                    var ct = _cts!.Token;
+
+                    try
+                    {
+                        await session.RunAsync(router, ct);
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Log(FtpLogLevel.Error, $"Unhandled session error for {rem}", ex);
+                    }
+
+                    _log.Log(FtpLogLevel.Info, $"Connection closed: {rem}");
+                }
+                finally
+                {
+                    // Always decrement global / per-IP counters
+                    UnregisterConnection(remoteCopy);
+                }
             });
         }
     }
@@ -225,6 +290,86 @@ public sealed class FtpServer
 
             _ => "C"
         };
+
+    private bool TryRegisterConnection(IPEndPoint remoteEndPoint, out string? rejectMessage)
+    {
+        rejectMessage = null;
+
+        if (_banList.IsBanned(remoteEndPoint.Address, out var banReason))
+        {
+            rejectMessage = banReason ?? "Access denied.";
+            _log.Log(FtpLogLevel.Warn, $"Rejected banned IP {remoteEndPoint.Address}: {rejectMessage}");
+            return false;
+        }
+
+        lock (_connectionLock)
+        {
+            var globalMax = _cfg.MaxConnectionsGlobal;
+            var perIpMax = _cfg.MaxConnectionsPerIp;
+
+            if (globalMax > 0 && _currentConnections >= globalMax)
+            {
+                rejectMessage = "Server at connection limit.";
+                _log.Log(FtpLogLevel.Warn,
+                    $"Rejecting {remoteEndPoint} (global limit reached: {globalMax})");
+                return false;
+            }
+
+            var ip = remoteEndPoint.Address;
+
+            var newPerIpCount = _connectionsPerIp.AddOrUpdate(ip, 1, (_, current) => current + 1);
+
+            if (perIpMax > 0 && newPerIpCount > perIpMax)
+            {
+                // revert increment
+                _connectionsPerIp.AddOrUpdate(ip, 0, (_, current) => Math.Max(0, current - 1));
+
+                rejectMessage = "Too many connections from your IP.";
+                _log.Log(FtpLogLevel.Warn,
+                    $"Rejecting {remoteEndPoint} (per IP limit reached: {newPerIpCount}/{perIpMax})");
+
+                return false;
+            }
+
+            _currentConnections++;
+        }
+
+        return true;
+    }
+
+    private void UnregisterConnection(IPEndPoint remoteEndPoint)
+    {
+        lock (_connectionLock)
+        {
+            if (_currentConnections > 0)
+                _currentConnections--;
+
+            var ip = remoteEndPoint.Address;
+
+            if (_connectionsPerIp.TryGetValue(ip, out var current))
+            {
+                if (current <= 1)
+                {
+                    _connectionsPerIp.TryRemove(ip, out _);
+                }
+                else
+                {
+                    _connectionsPerIp[ip] = current - 1;
+                }
+            }
+        }
+    }
+
+    // Optional helper for login failures from elsewhere:
+    public void NotifyFailedLogin(IPAddress address)
+    {
+        var decision = _hammerGuard.RegisterFailedLogin(address);
+        if (decision.ShouldBan && decision.BanDuration.HasValue)
+        {
+            _banList.AddTemporaryBan(address, decision.BanDuration.Value, decision.Reason);
+            _log.Log(FtpLogLevel.Warn,$"IP {address} temporarily banned for {decision.BanDuration} ({decision.Reason})");
+        }
+    }
 
     /// <summary>
     /// Stops the FTP server, canceling any ongoing operations and releasing resources.

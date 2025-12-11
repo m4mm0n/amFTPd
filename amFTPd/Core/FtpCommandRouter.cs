@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF794380E
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0xE45A3D19
  *  
  *  Description:
  *      Routes and handles FTP commands received from a client session.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -60,6 +62,7 @@ public sealed partial class FtpCommandRouter
     private readonly FtpFileSystem _fs;
     private readonly FtpConfig _cfg;
     private readonly TlsConfig _tls;
+    private readonly FtpServer _server;
 
     private readonly SectionManager _sections;
 
@@ -123,6 +126,7 @@ public sealed partial class FtpCommandRouter
     /// <remarks>All dependencies must be fully initialized before calling this constructor. This class relies
     /// on the provided runtime configuration to enable advanced features such as ratio enforcement and directory rule
     /// evaluation.</remarks>
+    /// <param name="server">The FTP server instance that hosts this command router.</param>
     /// <param name="s">The FTP session context used to route and process FTP commands.</param>
     /// <param name="log">The logger instance for recording FTP command activity and errors.</param>
     /// <param name="fs">The file system interface for managing file and directory operations within the FTP session.</param>
@@ -131,6 +135,7 @@ public sealed partial class FtpCommandRouter
     /// <param name="sections">The section manager responsible for handling configuration sections and related logic.</param>
     /// <param name="runtime">The runtime configuration providing engines and pipelines for ratio and directory rule processing.</param>
     public FtpCommandRouter(
+        FtpServer server,
         FtpSession s,
         IFtpLogger log,
         FtpFileSystem fs,
@@ -139,6 +144,7 @@ public sealed partial class FtpCommandRouter
         SectionManager sections,
         AmFtpdRuntimeConfig runtime)
     {
+        _server = server ?? throw new ArgumentNullException(nameof(server));
         _s = s ?? throw new ArgumentNullException(nameof(s));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _fs = fs ?? throw new ArgumentNullException(nameof(fs));
@@ -222,14 +228,16 @@ public sealed partial class FtpCommandRouter
         _log.Log(FtpLogLevel.Debug, $"CMD: {cmd} ARG: {arg}");
 
         // ------------------------------------------------------------------
-        // Unauthenticated command whitelist (central)
+        // Central pre-dispatch pipeline:
+        //   - hammer / flood detection
+        //   - login / unauthenticated whitelist
+        //   - static per-user permission checks
         // ------------------------------------------------------------------
-        if (_s.Account is null &&
-            !FtpAuthorization.IsCommandAllowedUnauthenticated(cmd))
-        {
-            await _s.WriteAsync("530 Please login with USER and PASS.\r\n", ct);
+        if (!await RunPreDispatchPipelineAsync(cmd, arg, ct))
             return;
-        }
+
+        // Count this command on the session stats
+        _s.NotifyCommandExecuted();
 
         // ------------------------------------------------------------------
         // AMSCRIPT GROUP RULES (per-command)
@@ -250,16 +258,6 @@ public sealed partial class FtpCommandRouter
                 await _s.WriteAsync(msg, ct);
                 return; // skip actual command handling
             }
-        }
-
-        // ------------------------------------------------------------------
-        // Static per-user permission checks (FtpUser flags)
-        // ------------------------------------------------------------------
-        if (_s.Account is not null &&
-            !FtpAuthorization.IsCommandAllowedForUser(_s.Account, cmd, arg))
-        {
-            await _s.WriteAsync("550 Permission denied.\r\n", ct);
-            return;
         }
 
         // ------------------------------------------------------------------
@@ -377,6 +375,103 @@ public sealed partial class FtpCommandRouter
         _groupScript = groups;
     }
 
+    private async Task<bool> RunPreDispatchPipelineAsync(
+        string cmd,
+        string arg,
+        CancellationToken ct)
+    {
+        // 1) Session blocked?
+        if (_s.Reputation == FtpSessionReputation.Blocked)
+        {
+            await _s.WriteAsync("421 Session blocked.\r\n", ct);
+            _log.Log(FtpLogLevel.Warn,
+                $"Blocked command from {_s.RemoteEndPoint}: {cmd} {arg}");
+            return false;
+        }
+
+        // 1b) Session is suspect → harsher rules
+        if (_s.Reputation == FtpSessionReputation.Suspect)
+        {
+            // a) Deny SITE outright for suspect sessions
+            if (cmd.Equals("SITE", StringComparison.OrdinalIgnoreCase))
+            {
+                await _s.WriteAsync("550 SITE is disabled for this session.\r\n", ct);
+                _log.Log(FtpLogLevel.Warn,
+                    $"SITE denied for suspect session from {_s.RemoteEndPoint}: {cmd} {arg}");
+                return false;
+            }
+
+            // b) Dynamic delay based on how far over thresholds we are
+            var loginSuspect = _cfg.FailedLoginSuspectThreshold > 0
+                ? _cfg.FailedLoginSuspectThreshold
+                : 3;
+
+            var abortSuspect = _cfg.AbortedTransferSuspectThreshold > 0
+                ? _cfg.AbortedTransferSuspectThreshold
+                : 5;
+
+            var overLogin = Math.Max(0, _s.FailedLoginAttempts - loginSuspect);
+            var overAbort = Math.Max(0, _s.AbortedTransfers - abortSuspect);
+            var penaltySteps = overLogin + overAbort;
+
+            // Base 250ms + 150ms per "step", capped at 2 seconds
+            var delayMs = 250 + penaltySteps * 150;
+            if (delayMs > 2000)
+                delayMs = 2000;
+
+            var delay = TimeSpan.FromMilliseconds(delayMs);
+
+            _log.Log(FtpLogLevel.Debug,
+                $"Applying Suspect throttle ({delay.TotalMilliseconds} ms) to {_s.RemoteEndPoint} for {cmd} {arg} " +
+                $"[FailedLogins={_s.FailedLoginAttempts}, AbortedTransfers={_s.AbortedTransfers}]");
+
+            await Task.Delay(delay, ct);
+        }
+
+        // 2) Hammer / flood detection per IP
+        var ip = _s.RemoteEndPoint?.Address;
+        if (ip is not null)
+        {
+            var decision = _server.HammerGuard.RegisterCommand(ip, cmd, _s.CommandsPerMinute);
+            if (decision.ShouldBan && decision.BanDuration.HasValue)
+            {
+                _server.BanList.AddTemporaryBan(ip, decision.BanDuration.Value, decision.Reason);
+                _s.Reputation = FtpSessionReputation.Blocked;
+
+                _log.Log(FtpLogLevel.Warn,
+                    $"IP {ip} banned by hammer guard for {decision.BanDuration}: {decision.Reason}");
+
+                await _s.WriteAsync("421 Temporarily banned.\r\n", ct);
+                return false;
+            }
+
+            if (decision.ShouldThrottle)
+            {
+                _log.Log(FtpLogLevel.Debug,
+                    $"Throttling {ip}, cmd={cmd}, CPM={_s.CommandsPerMinute}. Reason: {decision.Reason}");
+                await Task.Delay(decision.ThrottleDelay, ct);
+            }
+        }
+
+        // 3) Unauthenticated command whitelist (central)
+        if (_s.Account is null &&
+            !FtpAuthorization.IsCommandAllowedUnauthenticated(cmd))
+        {
+            await _s.WriteAsync("530 Please login with USER and PASS.\r\n", ct);
+            return false;
+        }
+
+        // 4) Static per-user permission checks (FtpUser flags)
+        if (_s.Account is not null &&
+            !FtpAuthorization.IsCommandAllowedForUser(_s.Account, cmd, arg))
+        {
+            await _s.WriteAsync("550 Permission denied.\r\n", ct);
+            return false;
+        }
+
+        return true;
+    }
+
     internal FtpSection GetSectionForVirtual(string virtPath)
     {
         // Normal routing first
@@ -485,8 +580,8 @@ public sealed partial class FtpCommandRouter
         if (account.IsNoRatio) return true;
 
         // Determine effective ratio rule (DirectoryRule / SectionRule / group RatioRule)
-        double ratio = 1.0;
-        double multiplyCost = 1.0;
+        var ratio = 1.0;
+        var multiplyCost = 1.0;
         var isFree = section.FreeLeech;
 
         if (RatioPipeline is not null)
@@ -551,8 +646,8 @@ public sealed partial class FtpCommandRouter
         var kb = bytes / 1024;
         if (kb <= 0) return;
 
-        double ratio = 1.0;
-        double multiplyCost = 1.0;
+        var ratio = 1.0;
+        var multiplyCost = 1.0;
         var isFree = section.FreeLeech;
 
         if (RatioPipeline is not null)
@@ -603,8 +698,8 @@ public sealed partial class FtpCommandRouter
         var kb = bytes / 1024;
         if (kb <= 0) return;
 
-        double ratio = 1.0;
-        double uploadBonus = 1.0;
+        var ratio = 1.0;
+        var uploadBonus = 1.0;
         var isFree = section.FreeLeech;
 
         if (RatioPipeline is not null)

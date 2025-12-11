@@ -3,8 +3,8 @@
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 04:16:54
- *  CRC32:          0x234D2E6A
+ *  Last Modified:  2025-12-11 04:24:01
+ *  CRC32:          0xBB10E122
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -65,6 +67,13 @@ public sealed class FtpSession : IAsyncDisposable
 
     private static readonly ConcurrentDictionary<int, FtpSession> _sessions = new();
     private static int _nextSessionId;
+
+    private readonly Queue<DateTime> _commandTimestamps = new();
+    private readonly object _statsLock = new();
+
+    private int _failedLoginAttempts;
+    private int _abortedTransfers;
+
     #endregion
     #region Public Properties and Methods
     /// <summary>
@@ -152,6 +161,40 @@ public sealed class FtpSession : IAsyncDisposable
     /// Gets the virtual file system manager responsible for managing file system operations.
     /// </summary>
     public VfsManager? VfsManager { get; }
+    /// <summary>
+    /// Gets the total number of commands that have been processed.
+    /// </summary>
+    public int TotalCommandCount { get; private set; }
+    /// <summary>
+    /// Gets the number of commands executed within the last minute.
+    /// </summary>
+    public int CommandsPerMinute
+    {
+        get
+        {
+            lock (_statsLock)
+            {
+                TrimOldCommandTimestamps();
+                return _commandTimestamps.Count;
+            }
+        }
+    }
+    /// <summary>
+    /// Gets the number of consecutive failed login attempts for the current user.
+    /// </summary>
+    public int FailedLoginAttempts => _failedLoginAttempts;
+    /// <summary>
+    /// Gets the number of file transfers that were aborted before completion.
+    /// </summary>
+    public int AbortedTransfers => _abortedTransfers;
+    /// <summary>
+    /// Gets the current reputation status of the FTP session.
+    /// </summary>
+    public FtpSessionReputation Reputation { get; internal set; } = FtpSessionReputation.Good;
+    /// <summary>
+    /// Gets the remote network endpoint to which the socket is connected.
+    /// </summary>
+    public IPEndPoint? RemoteEndPoint { get; }
     #endregion
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpSession"/> class, representing an FTP session with the specified
@@ -199,6 +242,7 @@ public sealed class FtpSession : IAsyncDisposable
             sectionResolver);
         SessionId = Interlocked.Increment(ref _nextSessionId);
         _sessions[SessionId] = this;
+        RemoteEndPoint = control.Client.RemoteEndPoint as IPEndPoint;
     }
     /// <summary>
     /// Marks the current operation as requesting to quit.
@@ -588,6 +632,118 @@ public sealed class FtpSession : IAsyncDisposable
 
         RemoteIdent = userField;
         return userField;
+    }
+    /// <summary>
+    /// Call from the command router whenever a command is successfully parsed and about to be dispatched.
+    /// </summary>
+    public void NotifyCommandExecuted()
+    {
+        lock (_statsLock)
+        {
+            TotalCommandCount++;
+            _commandTimestamps.Enqueue(DateTime.UtcNow);
+            TrimOldCommandTimestamps();
+        }
+    }
+
+    /// <summary>
+    /// Call from the PASS/LOGIN handling code when a login attempt fails.
+    /// </summary>
+    public void NotifyLoginFailed()
+    {
+        var newValue = Interlocked.Increment(ref _failedLoginAttempts);
+        EvaluateReputationAfterLoginFailure(newValue);
+    }
+
+    /// <summary>
+    /// Call when a transfer is aborted (ABOR or data connection force-closed).
+    /// </summary>
+    public void NotifyTransferAborted()
+    {
+        var newValue = Interlocked.Increment(ref _abortedTransfers);
+        EvaluateReputationAfterTransferAbort(newValue);
+    }
+
+    private void EvaluateReputationAfterLoginFailure(int failedCount)
+    {
+        lock (_statsLock)
+        {
+            if (Reputation == FtpSessionReputation.Blocked)
+                return; // already at worst state
+
+            var old = Reputation;
+
+            // Pull thresholds from config; fall back to sane defaults if unset.
+            var suspectThreshold = _cfg.FailedLoginSuspectThreshold > 0
+                ? _cfg.FailedLoginSuspectThreshold
+                : 3;
+
+            var blockThreshold = _cfg.FailedLoginBlockThreshold > 0
+                ? _cfg.FailedLoginBlockThreshold
+                : 6;
+
+            // Ensure blockThreshold is not lower than suspectThreshold
+            if (blockThreshold < suspectThreshold)
+                blockThreshold = suspectThreshold + 1;
+
+            if (failedCount >= blockThreshold)
+            {
+                Reputation = FtpSessionReputation.Blocked;
+            }
+            else if (failedCount >= suspectThreshold && Reputation == FtpSessionReputation.Good)
+            {
+                Reputation = FtpSessionReputation.Suspect;
+            }
+
+            if (Reputation != old)
+            {
+                _log.Log(
+                    FtpLogLevel.Warn,
+                    $"Session from {RemoteEndPoint} reputation changed {old} -> {Reputation} ({failedCount} failed logins).");
+            }
+        }
+    }
+    private void EvaluateReputationAfterTransferAbort(int abortedCount)
+    {
+        lock (_statsLock)
+        {
+            if (Reputation == FtpSessionReputation.Blocked)
+                return;
+
+            var old = Reputation;
+
+            var suspectThreshold = _cfg.AbortedTransferSuspectThreshold > 0
+                ? _cfg.AbortedTransferSuspectThreshold
+                : 5;
+
+            var blockThreshold = _cfg.AbortedTransferBlockThreshold > 0
+                ? _cfg.AbortedTransferBlockThreshold
+                : 10;
+
+            if (blockThreshold < suspectThreshold)
+                blockThreshold = suspectThreshold + 1;
+
+            if (abortedCount >= blockThreshold)
+            {
+                Reputation = FtpSessionReputation.Blocked;
+            }
+            else if (abortedCount >= suspectThreshold && Reputation == FtpSessionReputation.Good)
+            {
+                Reputation = FtpSessionReputation.Suspect;
+            }
+
+            if (Reputation != old)
+            {
+                _log.Log(
+                    FtpLogLevel.Warn,
+                    $"Session from {RemoteEndPoint} reputation changed {old} -> {Reputation} ({abortedCount} aborted transfers).");
+            }
+        }
+    }
+    private void TrimOldCommandTimestamps()
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-1);
+        while (_commandTimestamps.Count > 0 && _commandTimestamps.Peek() < cutoff) _commandTimestamps.Dequeue();
     }
     /// <summary>
     /// Asynchronously releases the resources used by the current instance.

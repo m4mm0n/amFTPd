@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.Commands.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 04:20:16
- *  CRC32:          0x3FD473F2
+ *  Last Modified:  2025-12-11 04:28:41
+ *  CRC32:          0x9CF6ABE4
  *  
  *  Description:
  *      Partial class for handling FTP commands within the FtpCommandRouter.
@@ -19,12 +19,16 @@
 
 
 
+
+
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
 using amFTPd.Core.Ident;
+using amFTPd.Core.Site;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Scripting;
+using amFTPd.Security;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -233,6 +237,14 @@ namespace amFTPd.Core
 
             if (!_s.Users.TryAuthenticate(username, arg, out var account) || account is null)
             {
+                // Track failed login attempts for hammer/flood logic
+                _s.NotifyLoginFailed();
+
+                if (_s.RemoteEndPoint?.Address is IPAddress ip)
+                {
+                    _server.NotifyFailedLogin(ip);
+                }
+
                 await _s.WriteAsync("530 Login incorrect.\r\n", ct);
                 return;
             }
@@ -568,21 +580,41 @@ namespace amFTPd.Core
 
         private async Task STAT(string arg, CancellationToken ct)
         {
+            // STAT with argument: behave like LIST (classic behaviour)
             if (!string.IsNullOrWhiteSpace(arg))
             {
-                await _s.WriteAsync("502 STAT with path not implemented.\r\n", ct);
+                await LIST(arg, ct);
                 return;
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine("211-FTP server status:");
-            sb.AppendLine($" Connected: {(_s.Control.Connected ? "Yes" : "No")}");
-            sb.AppendLine($" Logged in: {(_s.Account is not null ? "Yes" : "No")}");
-            sb.AppendLine($" User: {_s.UserName ?? "(none)"}");
-            sb.AppendLine($" CWD: {_s.Cwd}");
-            sb.AppendLine("211 End.");
 
-            await _s.WriteAsync(sb.ToString().Replace("\n", "\r\n"), ct);
+            var remote = _s.RemoteEndPoint?.ToString() ?? "<unknown>";
+            var ip = _s.RemoteEndPoint?.Address;
+            var userName = _s.Account?.UserName ?? "<not logged in>";
+
+            var isBanned = false;
+            if (ip is not null)
+            {
+                isBanned = _server.BanList.IsBanned(ip, out _);
+            }
+
+            // Classic 211 multi-line STAT response + short security line
+            sb.Append("211- FTP status\r\n");
+            sb.Append($"211- Remote     : {remote}\r\n");
+            sb.Append($"211- User       : {userName}\r\n");
+            sb.Append($"211- CWD        : {_s.Cwd}\r\n");
+
+            // Short, single-line security summary:
+            // rep=Good/Suspect/Blocked, cpm, failed, aborted, ipBanned
+            var bannedFlag = ip is null ? "n/a" : (isBanned ? "yes" : "no");
+            sb.Append(
+                $"211- Security   : rep={_s.Reputation}, cpm={_s.CommandsPerMinute}, " +
+                $"failed={_s.FailedLoginAttempts}, aborted={_s.AbortedTransfers}, ipBanned={bannedFlag}\r\n");
+
+            sb.Append("211 End of status.\r\n");
+
+            await _s.WriteAsync(sb.ToString(), ct);
         }
         #endregion
 
@@ -2244,24 +2276,96 @@ namespace amFTPd.Core
             // NO SCRIPT OVERRIDE OCCURRED → PROCESS BUILT-IN SITE COMMANDS VIA FRAMEWORK
             // --------------------------------------------------------------------------------------------------
 
+            var account = _s.Account;
+            if (account is null)
+            {
+                await _s.WriteAsync("530 Please login first.\r\n", ct);
+                return;
+            }
+
+            // Context for authorization: has verb, args, router, session, etc.
+            var authCtx = new SiteCommandContext(this, sub, rest);
+
+            if (!FtpAuthorization.CanUseSiteCommand(account, sub, authCtx))
+            {
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                _log.Log(FtpLogLevel.Warn,
+                    $"SITE {sub} rejected for user {account.UserName} from {_s.RemoteEndPoint}");
+                return;
+            }
+
+            // Special-case: SITE SECURITY is implemented directly here, not via _siteCommands
+            if (sub.Equals("SECURITY", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleSiteSecurityAsync(rest, ct);
+                return;
+            }
+
             if (!_siteCommands.TryGetValue(sub, out var cmd))
             {
                 await _s.WriteAsync($"502 Unknown SITE command '{sub}'.\r\n", ct);
                 return;
             }
 
-            // Permission check
-            var account = _s.Account;
-            if (cmd.RequiresAdmin)
+            // Existing per-command RequiresAdmin flag (extra guard, still valid)
+            if (cmd.RequiresAdmin && !account.IsAdmin)
             {
-                if (account is null || !account.IsAdmin)
-                {
-                    await _s.WriteAsync("550 Permission denied.\r\n", ct);
-                    return;
-                }
+                await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                return;
             }
 
             await cmd.ExecuteAsync(_siteContext, rest, ct);
+        }
+
+        private async Task HandleSiteSecurityAsync(string args, CancellationToken ct)
+        {
+            var sb = new StringBuilder();
+
+            var remote = _s.RemoteEndPoint?.ToString() ?? "<unknown>";
+            var ip = _s.RemoteEndPoint?.Address;
+
+            var isBanned = false;
+            string? banReason = null;
+
+            if (ip is not null)
+            {
+                isBanned = _server.BanList.IsBanned(ip, out banReason);
+            }
+
+            // Multi-line 211 response per RFC-style
+            sb.Append("211- Security status\r\n");
+            sb.Append($"211- Remote              : {remote}\r\n");
+            sb.Append($"211- Session reputation  : {_s.Reputation}\r\n");
+            sb.Append($"211- Failed logins       : {_s.FailedLoginAttempts}\r\n");
+            sb.Append($"211- Aborted transfers   : {_s.AbortedTransfers}\r\n");
+            sb.Append($"211- Commands/min (sess) : {_s.CommandsPerMinute}\r\n");
+            sb.Append($"211- Total commands      : {_s.TotalCommandCount}\r\n");
+
+            if (ip is not null)
+            {
+                var banLine = isBanned
+                    ? $"yes{(string.IsNullOrWhiteSpace(banReason) ? string.Empty : $" ({banReason})")}"
+                    : "no";
+
+                sb.Append($"211- IP banned           : {banLine}\r\n");
+            }
+            else
+            {
+                sb.Append("211- IP banned           : <n/a>\r\n");
+            }
+
+            sb.Append("211-\r\n");
+            sb.Append($"211- MaxConnectionsGlobal            : {_cfg.MaxConnectionsGlobal}\r\n");
+            sb.Append($"211- MaxConnectionsPerIp             : {_cfg.MaxConnectionsPerIp}\r\n");
+            sb.Append($"211- MaxFailedLoginsPerIp            : {_cfg.MaxFailedLoginsPerIp}\r\n");
+            sb.Append($"211- MaxCommandsPerMinute            : {_cfg.MaxCommandsPerMinute}\r\n");
+            sb.Append($"211- FailedLoginSuspectThreshold     : {_cfg.FailedLoginSuspectThreshold}\r\n");
+            sb.Append($"211- FailedLoginBlockThreshold       : {_cfg.FailedLoginBlockThreshold}\r\n");
+            sb.Append($"211- AbortedTransferSuspectThreshold : {_cfg.AbortedTransferSuspectThreshold}\r\n");
+            sb.Append($"211- AbortedTransferBlockThreshold   : {_cfg.AbortedTransferBlockThreshold}\r\n");
+            sb.Append("211 End of security status.\r\n");
+
+            await _s.WriteAsync(sb.ToString(), ct);
         }
 
         #region Old SITE commands (commented out)

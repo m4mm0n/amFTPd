@@ -3,8 +3,8 @@
  *  File:           SiteDupeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 03:56:36
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4C6895C6
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0x106DAC90
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -51,7 +53,7 @@ namespace amFTPd.Core.Site.Commands
 
             var parts = argument.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var pattern = parts[0];
-            string? sectionFilter = parts.Length > 1 ? parts[1] : null;
+            var sectionFilter = parts.Length > 1 ? parts[1] : null;
 
             var results = dupeStore.Search(pattern, sectionFilter, limit: 50);
 

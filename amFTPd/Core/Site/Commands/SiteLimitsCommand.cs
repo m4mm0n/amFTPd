@@ -3,8 +3,8 @@
  *  File:           SiteLimitsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 10:53:01
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x7670A656
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0x41585A52
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -113,7 +115,7 @@ public sealed class SiteLimitsCommand : SiteCommandBase
             return;
         }
 
-        TimeSpan? idleTimeout = user.IdleTimeout;
+        var idleTimeout = user.IdleTimeout;
         if (parts.Length >= 5)
         {
             if (!int.TryParse(parts[4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var idleSeconds))

@@ -3,8 +3,8 @@
  *  File:           FtpUser.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xEEE98D0F
+ *  Last Modified:  2025-12-11 03:18:27
+ *  CRC32:          0x02568996
  *  
  *  Description:
  *      Runtime FTP user model, shaped to match how the stores/loaders construct it.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -59,6 +61,8 @@ namespace amFTPd.Config.Ftpd
 
         public bool IsAdmin { get; init; }
 
+        public bool IsSiteop { get; init; }
+
         public bool AllowFxp { get; init; }
         public bool AllowUpload { get; init; } = true;
         public bool AllowDownload { get; init; } = true;
@@ -84,6 +88,21 @@ namespace amFTPd.Config.Ftpd
         public bool IsNoRatio { get; init; }
 
         public string FlagsRaw { get; init; } = string.Empty;
+
+        /// <summary>
+        /// Optional override for global MaxConnectionsPerIp.
+        /// </summary>
+        public int? MaxConnectionsPerIpOverride { get; init; }
+
+        /// <summary>
+        /// Optional override for global MaxCommandsPerMinute.
+        /// </summary>
+        public int? MaxCommandsPerMinuteOverride { get; init; }
+
+        /// <summary>
+        /// Optional override for global MaxFailedLoginsPerIp.
+        /// </summary>
+        public int? MaxFailedLoginsPerIpOverride { get; init; }
 
         public IReadOnlyList<string> AllGroups
         {

@@ -3,8 +3,8 @@
  *  File:           FtpAuthorization.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-17 05:27:55
- *  Last Modified:  2025-12-10 04:29:32
- *  CRC32:          0xB15D46B7
+ *  Last Modified:  2025-12-11 04:25:07
+ *  CRC32:          0x7D155751
  *  
  *  Description:
  *      Per-user, per-command authorization based on FtpUser flags. This is a coarse gate; individual handlers and AMScript m...
@@ -21,7 +21,10 @@
 
 
 
+
+
 using amFTPd.Config.Ftpd;
+using amFTPd.Core.Site;
 
 namespace amFTPd.Security
 {
@@ -87,7 +90,9 @@ namespace amFTPd.Security
                 "PASV" or "EPSV" =>
                     true,
 
-                // --- Admin-only commands ---
+                // --- SITE commands ---
+                // Coarse gate: SITE is allowed once logged in.
+                // Fine-grained gating is done in CanUseSiteCommand per SITE sub-verb.
                 "SITE" =>
                     true,
 
@@ -100,28 +105,76 @@ namespace amFTPd.Security
         /// Non-whitelisted commands should get a "530 Please login with USER and PASS." response.
         /// </summary>
         public static bool IsCommandAllowedUnauthenticated(string command)
-            => command.ToUpperInvariant() switch
+            => !CommandRequiresLogin(command);
+
+        /// <summary>
+        /// Returns true if the command is meant to require login.
+        /// This is the single source of truth for "530 Please login..." gating.
+        /// </summary>
+        public static bool CommandRequiresLogin(string command)
+        {
+            var upper = command.ToUpperInvariant();
+            return upper switch
             {
                 // Auth / TLS negotiation
-                "USER" => true,
-                "PASS" => true,
-                "AUTH" => true,
-                "PBSZ" => true,
-                "PROT" => true,
+                "USER" => false,
+                "PASS" => false,
+                "AUTH" => false,
+                "PBSZ" => false,
+                "PROT" => false,
 
                 // Informational / harmless
-                "FEAT" => true,
-                "SYST" => true,
-                "NOOP" => true,
-                "OPTS" => true,
-                "HELP" => true,
-                "STAT" => true,
+                "FEAT" => false,
+                "SYST" => false,
+                "NOOP" => false,
+                "OPTS" => false,
+                "HELP" => false,
+                "STAT" => false,
 
                 // Session shutdown
-                "QUIT" => true,
+                "QUIT" => false,
 
                 // Everything else requires login
-                _ => false
+                _ => true
             };
+        }
+
+        /// <summary>
+        /// Fine-grained permissions for SITE sub-commands.
+        /// The coarse "SITE" gate is in IsCommandAllowedForUser; this decides per-verb.
+        /// </summary>
+        public static bool CanUseSiteCommand(FtpUser user, string siteVerb, SiteCommandContext ctx)
+        {
+            switch (siteVerb.ToUpperInvariant())
+            {
+                // Hard admin-only stuff
+                case "KICK":
+                case "BAN":
+                case "UNBAN":
+                case "RELOAD":
+                case "SHUTDOWN":
+                case "SECURITY":
+                    return user.IsAdmin;
+
+                // Semi-admin / staff
+                case "CHGRP":
+                case "CHUSER":
+                case "FLAG":
+                case "GIVE":
+                case "TAKE":
+                    return user.IsAdmin || user.IsSiteop; // adjust to your model
+
+                // Read-only / info
+                case "WHO":
+                case "UPTIME":
+                case "HELP":
+                case "RULES":
+                    return true;
+
+                default:
+                    // Unknown SITE verb → deny by default
+                    return false;
+            }
+        }
     }
 }

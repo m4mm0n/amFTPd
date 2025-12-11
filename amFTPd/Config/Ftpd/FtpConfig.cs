@@ -3,8 +3,8 @@
  *  File:           FtpConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0x7D9E2EAA
+ *  Last Modified:  2025-12-11 04:18:03
+ *  CRC32:          0x8B8192F3
  *  
  *  Description:
  *      Top-level FTP configuration.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -97,6 +99,53 @@ namespace amFTPd.Config.Ftpd
 
         /// <summary>Welcome message on successful login.</summary>
         public string? WelcomeMessage { get; init; }
+
+        /// <summary>
+        /// Maximum concurrent connections across the whole daemon.
+        /// 0 or negative means "unlimited".
+        /// </summary>
+        public int MaxConnectionsGlobal { get; init; } = 0;
+
+        /// <summary>
+        /// Maximum concurrent connections per client IP.
+        /// 0 or negative means "unlimited".
+        /// </summary>
+        public int MaxConnectionsPerIp { get; init; } = 0;
+
+        /// <summary>
+        /// Maximum number of failed login attempts per IP before the IP is considered abusive.
+        /// </summary>
+        public int MaxFailedLoginsPerIp { get; init; } = 10;
+
+        /// <summary>
+        /// Maximum number of commands per minute per session before it is rate-limited.
+        /// </summary>
+        public int MaxCommandsPerMinute { get; init; } = 240;
+
+        /// <summary>
+        /// Failed login count in a single session after which the session is considered "suspect".
+        /// 0 or negative disables this downgrade.
+        /// </summary>
+        public int FailedLoginSuspectThreshold { get; init; } = 3;
+
+        /// <summary>
+        /// Failed login count in a single session after which the session is considered "blocked".
+        /// 0 or negative disables this downgrade.
+        /// </summary>
+        public int FailedLoginBlockThreshold { get; init; } = 6;
+
+        /// <summary>
+        /// Aborted transfer count in a single session after which the session is considered "suspect".
+        /// 0 or negative disables this downgrade.
+        /// </summary>
+        public int AbortedTransferSuspectThreshold { get; init; } = 5;
+
+        /// <summary>
+        /// Aborted transfer count in a single session after which the session is considered "blocked".
+        /// 0 or negative disables this downgrade.
+        /// </summary>
+        public int AbortedTransferBlockThreshold { get; init; } = 10;
+
 
         public FtpConfig()
         {

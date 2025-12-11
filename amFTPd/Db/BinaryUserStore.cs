@@ -3,8 +3,8 @@
  *  File:           BinaryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:24:23
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x8099A496
+ *  Last Modified:  2025-12-11 04:26:20
+ *  CRC32:          0x08E781B2
  *  
  *  Description:
  *      Provides a binary-based implementation of the <see cref="IUserStore"/> interface for managing FTP users.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -369,7 +371,7 @@ namespace amFTPd.Db
             var count = br.ReadUInt32();
             var dict = new Dictionary<string, FtpUser>();
 
-            for (int i = 0; i < count; i++)
+            for (var i = 0; i < count; i++)
             {
                 var len = br.ReadUInt32();
                 var rec = br.ReadBytes((int)len);
