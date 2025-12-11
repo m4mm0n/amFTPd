@@ -198,7 +198,7 @@ if ($newFiles.Count -gt 0) {
 
 if ($modifiedFiles.Count -gt 0) {
     foreach ($f in $modifiedFiles) {
-        $sectionLines.Add("$f:")
+        $sectionLines.Add("$($f):")
 
         if ($f.ToLower().EndsWith(".cs")) {
             $methods = Get-ChangedMethodNames -Range $range -File $f -CurrentTag $currentTag -PreviousTag $previousTag
