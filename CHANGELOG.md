@@ -1,14 +1,11 @@
-[ v0.4.1.2 - 11.12.2025 ]
-^^^^^^^^^^^^^^^^^^^^^^^^^
+[ v0.4.1.2_fixed - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
-* Minor code cleanup...
-* Fixed AesGcm implementation being obsolete...
+* Automated changelog based on git diff between v0.4.1.2..v0.4.1.2_fixed...
 
-[ v0.4.1.1 - 11.12.2025 ]
-^^^^^^^^^^^^^^^^^^^^^^^^^
-Whats new?
-* Just fixed the GitHub release tagging...
-* No code changes, except the version number...
+.github/scripts/update-changelog.ps1:
+* changed...
+
 
 [ v0.4.1.0 - 11.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
