@@ -3,8 +3,8 @@
  *  File:           SiteNoratioCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 10:51:59
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xC753F818
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xA98507BD
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -47,7 +49,7 @@ public sealed class SiteNoratioCommand : SiteCommandBase
 
         var parts = argument?
                         .Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    ?? Array.Empty<string>();
+                    ?? [];
 
         if (parts.Length == 0)
         {

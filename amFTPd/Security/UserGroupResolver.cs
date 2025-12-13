@@ -3,8 +3,8 @@
  *  File:           UserGroupResolver.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x84D73D8E
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0xF95D4582
  *  
  *  Description:
  *      Resolves user-group-related authorization decisions. glFTPd-style OR stacking: - If any group allows, permission is g...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -42,7 +44,7 @@ namespace amFTPd.Security
         /// <returns>true if the user belongs to the specified group; otherwise, false.</returns>
         public static bool BelongsToGroup(FtpUser user, string group) =>
             !string.IsNullOrEmpty(group) && user.AllGroups.Any(g =>
-                g.Equals(group, StringComparison.OrdinalIgnoreCase));
+                g != null && g.Equals(group, StringComparison.OrdinalIgnoreCase));
 
         /// <summary>
         /// If ANY group grants a permission → allowed.

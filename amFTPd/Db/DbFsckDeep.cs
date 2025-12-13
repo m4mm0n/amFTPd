@@ -3,8 +3,8 @@
  *  File:           DbFsckDeep.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:22:05
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF3734F7C
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x772C0B60
  *  
  *  Description:
  *      Provides functionality to perform a comprehensive integrity check across users, groups, and sections in a database-li...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -70,7 +72,7 @@ namespace amFTPd.Db
             ISectionStore sections
         )
         {
-            var res = new DeepFsckResult(new(), new());
+            var res = new DeepFsckResult([], []);
 
             DebugLog?.Invoke("[FSCK-DEEP] Starting deep validation…");
 

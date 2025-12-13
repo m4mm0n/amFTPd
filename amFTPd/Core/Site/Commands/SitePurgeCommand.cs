@@ -3,8 +3,8 @@
  *  File:           SitePurgeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:52:30
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x0D08CE4F
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x2BD15E4F
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -46,7 +48,7 @@ namespace amFTPd.Core.Site.Commands
 
             var virt = FtpPath.Normalize(s.Cwd, argument);
 
-            string phys;
+            string? phys;
             try
             {
                 phys = context.Router.FileSystem.MapToPhysical(virt);

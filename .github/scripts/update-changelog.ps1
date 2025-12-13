@@ -228,10 +228,19 @@ $newSection = ($sectionLines -join "`n") + "`n`n"
 
 if (Test-Path $ChangelogPath) {
     $existing = Get-Content $ChangelogPath -Raw
-    $combined = $newSection + $existing   # prepend new section
-    Set-Content -Path $ChangelogPath -Value $combined -NoNewline
+
+    # Ensure there's a clean break between new section and old content
+    if ([string]::IsNullOrWhiteSpace($existing)) {
+        $combined = $newSection
+    } else {
+        $trimmedExisting = $existing.TrimStart("`r", "`n")
+        $combined = $newSection + $trimmedExisting
+    }
+
+    Set-Content -Path $ChangelogPath -Value $combined
     Write-Host "Prepended new changelog section to $ChangelogPath"
-} else {
-    Set-Content -Path $ChangelogPath -Value $newSection -NoNewline
+}
+else {
+    Set-Content -Path $ChangelogPath -Value $newSection
     Write-Host "Created new $ChangelogPath"
 }

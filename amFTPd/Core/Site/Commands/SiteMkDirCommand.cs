@@ -3,8 +3,8 @@
  *  File:           SiteMkDirCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:51:25
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x5282FD6B
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x789BC9AB
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -46,7 +48,7 @@ namespace amFTPd.Core.Site.Commands
             // Reuse the same virtual-path normalization as MKD/STOR/DELE etc.
             var virt = FtpPath.Normalize(s.Cwd, argument);
 
-            string phys;
+            string? phys;
             try
             {
                 phys = context.Router.FileSystem.MapToPhysical(virt);
@@ -59,7 +61,7 @@ namespace amFTPd.Core.Site.Commands
 
             try
             {
-                Directory.CreateDirectory(phys);
+                if (phys != null) Directory.CreateDirectory(phys);
             }
             catch
             {

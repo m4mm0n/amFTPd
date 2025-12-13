@@ -3,8 +3,8 @@
  *  File:           CertificateHelper.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x516E5D0C
+ *  Last Modified:  2025-12-13 03:56:15
+ *  CRC32:          0x529E447B
  *  
  *  Description:
  *      Creates a self-signed X.509 certificate asynchronously.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -64,7 +66,16 @@ internal static class CertificateHelper
         var notAfter = notBefore.AddYears(3);
 
         var cert = req.CreateSelfSigned(notBefore, notAfter);
-        return Task.FromResult(new X509Certificate2(cert.Export(X509ContentType.Pfx, pfxPassword), pfxPassword,
-            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet));
+
+        // Export as PKCS#12/PFX and re-load via X509CertificateLoader
+        var pfxBytes = cert.Export(X509ContentType.Pfx, pfxPassword);
+
+        var loaded = X509CertificateLoader.LoadPkcs12(
+            pfxBytes,
+            pfxPassword,
+            X509KeyStorageFlags.Exportable | X509KeyStorageFlags.EphemeralKeySet
+        );
+
+        return Task.FromResult(loaded);
     }
 }

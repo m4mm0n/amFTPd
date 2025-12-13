@@ -3,8 +3,8 @@
  *  File:           ConsoleBanner.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x02A70CFF
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x440EA573
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -21,6 +21,8 @@
 
 
 
+
+
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -32,19 +34,19 @@ namespace amFTPd.Utils
             new Regex(@"\x1B\[[0-9;]*[A-Za-z]", RegexOptions.Compiled);
 
         private static readonly string[] Hellfire =
-        {
-        "\x1b[30m",    // black
+        [
+            "\x1b[30m",    // black
         "\x1b[31;2m",  // dark red
         "\x1b[31m",    // red
         "\x1b[91m",    // bright red
-        "\x1b[33m",    // yellow
-    };
+        "\x1b[33m" // yellow
+        ];
 
         private static readonly string[] BorderCycle =
-        {
-        "\x1b[31m","\x1b[91m","\x1b[33m","\x1b[93m",
+        [
+            "\x1b[31m","\x1b[91m","\x1b[33m","\x1b[93m",
         "\x1b[92m","\x1b[96m","\x1b[94m","\x1b[95m"
-    };
+        ];
 
         public static void RunHellfireHeader(string[] lines)
         {

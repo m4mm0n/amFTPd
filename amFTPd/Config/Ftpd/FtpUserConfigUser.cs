@@ -3,8 +3,8 @@
  *  File:           FtpUserConfigUser.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 02:49:55
- *  CRC32:          0x7D28BD4D
+ *  Last Modified:  2025-12-13 04:39:15
+ *  CRC32:          0xAFD61C13
  *  
  *  Description:
  *      Raw config entry for a single user (as stored in DB / config).
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -35,7 +37,7 @@ namespace amFTPd.Config.Ftpd
         public bool Disabled { get; init; }
 
         /// <summary>Physical home directory.</summary>
-        public string HomeDir { get; init; } = string.Empty;
+        public string? HomeDir { get; init; } = string.Empty;
 
         public int MaxConcurrentLogins { get; init; }
 
@@ -43,8 +45,8 @@ namespace amFTPd.Config.Ftpd
         public string GroupName { get; init; } = string.Empty;
 
         /// <summary>Additional group names.</summary>
-        public IReadOnlyList<string> SecondaryGroups { get; init; }
-            = Array.Empty<string>();
+        public IReadOnlyList<string?> SecondaryGroups { get; init; }
+            = [];
 
         public bool IsAdmin { get; init; }
 
@@ -93,9 +95,9 @@ namespace amFTPd.Config.Ftpd
             string UserName,
             string PasswordHash,
             bool Disabled = false,
-            string HomeDir = "",
+            string? HomeDir = "",
             string GroupName = "",
-            IReadOnlyList<string>? SecondaryGroups = null,
+            IReadOnlyList<string?>? SecondaryGroups = null,
             bool IsAdmin = false,
             bool IsAdministrator = false,
             bool AllowFxp = false,
@@ -116,7 +118,7 @@ namespace amFTPd.Config.Ftpd
             this.Disabled = Disabled;
             this.HomeDir = HomeDir;
             this.GroupName = GroupName;
-            this.SecondaryGroups = SecondaryGroups ?? Array.Empty<string>();
+            this.SecondaryGroups = SecondaryGroups ?? [];
             this.IsAdmin = IsAdmin;
             this.IsAdministrator = IsAdministrator;
             this.AllowFxp = AllowFxp;

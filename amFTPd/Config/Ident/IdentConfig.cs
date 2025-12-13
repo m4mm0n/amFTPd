@@ -3,8 +3,8 @@
  *  File:           IdentConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x7931066C
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xE7F2C110
  *  
  *  Description:
  *      Represents the configuration settings for IDENT-based authentication and authorization.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -46,7 +48,7 @@ public sealed record IdentConfig
     public int CacheTtlSeconds { get; init; } = 300;
 
     /// <summary>Optional group mappings based on IDENT username.</summary>
-    public List<IdentGroupMapping> GroupMappings { get; init; } = new();
+    public List<IdentGroupMapping> GroupMappings { get; init; } = [];
 
     /// <summary>If true and strict match fails, deny login immediately.</summary>
     public bool DenyOnStrictMismatch { get; init; } = true;

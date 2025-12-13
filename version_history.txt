@@ -5,6 +5,14 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.4.2.0 - 13.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Minor code cleanup... (Removed all warnings!)
+* Minor optimizations...
+* Fixed all obsolete AesGcm usages...
+* Fixed all obsolete X509Certificate2 usages...
+
 [ v0.4.1.2 - 11.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

@@ -3,8 +3,8 @@
  *  File:           DatabaseManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:34:22
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x20B70E2D
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xF9B5F4E0
  *  
  *  Description:
  *      Provides a centralized manager for handling user, group, and section data stores, as well as performing database main...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -170,7 +172,7 @@ namespace amFTPd.Db
                     new FtpGroup(
                         GroupName: "admins",
                         Description: "Administrators",
-                        Users: new List<string> { "admin" },
+                        Users: ["admin"],
                         SectionCredits: new Dictionary<string, long>()
                     ),
                     out _
@@ -250,7 +252,7 @@ namespace amFTPd.Db
                     new FtpGroup(
                         GroupName: "admins",
                         Description: "Administrators",
-                        Users: new List<string> { "admin" },
+                        Users: ["admin"],
                         SectionCredits: new Dictionary<string, long>()
                     ),
                     out _

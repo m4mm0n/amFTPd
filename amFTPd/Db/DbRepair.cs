@@ -3,8 +3,8 @@
  *  File:           DbRepair.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:33:29
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xFF944003
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x5D964D03
  *  
  *  Description:
  *      Provides functionality to repair and maintain the integrity of user, group, and section data stores.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -67,7 +69,7 @@ public static class DbRepair
         string masterPassword
     )
     {
-        var rep = new RepairReport(new(), new());
+        var rep = new RepairReport([], []);
 
         DebugLog?.Invoke("[REPAIR] Starting auto-repair.");
 

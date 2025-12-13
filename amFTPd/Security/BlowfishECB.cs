@@ -3,8 +3,8 @@
  *  File:           BlowfishECB.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-01 05:20:57
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x838261C5
+ *  Last Modified:  2025-12-13 04:42:16
+ *  CRC32:          0x083E4762
  *  
  *  Description:
  *      Provides an implementation of the Blowfish encryption algorithm in Electronic Codebook (ECB) mode.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -46,7 +48,7 @@ namespace amFTPd.Security
         private readonly uint[] _s2 = new uint[256];
         private readonly uint[] _s3 = new uint[256];
 
-        private readonly IFtpLogger _logger;
+        private readonly IFtpLogger? _logger;
 
         private bool _disposed;
 
@@ -209,9 +211,10 @@ namespace amFTPd.Security
 
         public BlowfishECB(ReadOnlySpan<byte> key, IFtpLogger? logger = null)
         {
+            _logger = logger;
             if (key.IsEmpty)
                 if(_logger != null)
-                    _logger.Log(FtpLogLevel.Error, $"Key must not be empty: {nameof(key)}");
+                    _logger?.Log(FtpLogLevel.Error, $"Key must not be empty: {nameof(key)}");
                 else
                     throw new ArgumentException("Key must not be empty.", nameof(key));
 

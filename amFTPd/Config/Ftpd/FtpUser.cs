@@ -3,8 +3,8 @@
  *  File:           FtpUser.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 03:18:27
- *  CRC32:          0x02568996
+ *  Last Modified:  2025-12-13 04:39:15
+ *  CRC32:          0x90403351
  *  
  *  Description:
  *      Runtime FTP user model, shaped to match how the stores/loaders construct it.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -43,21 +45,21 @@ namespace amFTPd.Config.Ftpd
         public bool Disabled { get; init; }
 
         /// <summary>Physical home directory for this user.</summary>
-        public string HomeDir { get; init; } = string.Empty;
+        public string? HomeDir { get; init; } = string.Empty;
 
         /// <summary>Primary group name.</summary>
-        public string PrimaryGroup { get; init; } = string.Empty;
+        public string? PrimaryGroup { get; init; } = string.Empty;
 
         /// <summary>Compatibility alias for older code using GroupName.</summary>
-        public string GroupName
+        public string? GroupName
         {
             get => PrimaryGroup;
             init => PrimaryGroup = value;
         }
 
         /// <summary>Secondary groups.</summary>
-        public IReadOnlyList<string> SecondaryGroups { get; init; }
-            = Array.Empty<string>();
+        public IReadOnlyList<string?> SecondaryGroups { get; init; }
+            = [];
 
         public bool IsAdmin { get; init; }
 
@@ -104,20 +106,20 @@ namespace amFTPd.Config.Ftpd
         /// </summary>
         public int? MaxFailedLoginsPerIpOverride { get; init; }
 
-        public IReadOnlyList<string> AllGroups
+        public IReadOnlyList<string?> AllGroups
         {
             get
             {
                 if (string.IsNullOrEmpty(PrimaryGroup) && (SecondaryGroups == null || SecondaryGroups.Count == 0))
-                    return Array.Empty<string>();
+                    return [];
 
                 if (SecondaryGroups == null || SecondaryGroups.Count == 0)
-                    return new[] { PrimaryGroup };
+                    return [PrimaryGroup];
 
                 var all = new List<string>(1 + SecondaryGroups.Count);
                 if (!string.IsNullOrEmpty(PrimaryGroup))
                     all.Add(PrimaryGroup);
-                all.AddRange(SecondaryGroups);
+                all.AddRange(SecondaryGroups!);
                 return all;
             }
         }
@@ -128,7 +130,7 @@ namespace amFTPd.Config.Ftpd
         /// but the type is what the stores already pass in.
         /// </summary>
         public IReadOnlyList<FtpSection> Sections { get; init; }
-            = Array.Empty<FtpSection>();
+            = [];
 
         public FtpUser()
         {
@@ -142,9 +144,9 @@ namespace amFTPd.Config.Ftpd
             string UserName,
             string PasswordHash,
             bool Disabled,
-            string HomeDir,
-            string PrimaryGroup,
-            IReadOnlyList<string> SecondaryGroups,
+            string? HomeDir,
+            string? PrimaryGroup,
+            IReadOnlyList<string?> SecondaryGroups,
             bool IsAdmin,
             bool AllowFxp,
             bool AllowUpload,
@@ -167,7 +169,7 @@ namespace amFTPd.Config.Ftpd
             this.Disabled = Disabled;
             this.HomeDir = HomeDir;
             this.PrimaryGroup = PrimaryGroup;
-            this.SecondaryGroups = SecondaryGroups ?? Array.Empty<string>();
+            this.SecondaryGroups = SecondaryGroups ?? [];
             this.IsAdmin = IsAdmin;
             this.AllowFxp = AllowFxp;
             this.AllowUpload = AllowUpload;
@@ -180,7 +182,7 @@ namespace amFTPd.Config.Ftpd
             this.MaxUploadKbps = MaxUploadKbps;
             this.MaxDownloadKbps = MaxDownloadKbps;
             this.CreditsKb = CreditsKb;
-            this.Sections = Sections ?? Array.Empty<FtpSection>();
+            this.Sections = Sections ?? [];
             this.MaxConcurrentLogins = MaxConcurrentLogins;
             this.IsNoRatio = IsNoRatio;
             this.FlagsRaw = FlagsRaw ?? string.Empty;
@@ -190,7 +192,7 @@ namespace amFTPd.Config.Ftpd
             string UserName,
             string PasswordHash,
             string HomeDir,
-            string PrimaryGroup,
+            string? PrimaryGroup,
             IReadOnlyList<string> SecondaryGroups,
             bool IsAdmin,
             bool AllowFxp,
@@ -226,7 +228,7 @@ namespace amFTPd.Config.Ftpd
                 MaxUploadKbps: MaxUploadKbps,
                 MaxDownloadKbps: MaxDownloadKbps,
                 CreditsKb: CreditsKb,
-                Sections: Array.Empty<FtpSection>(),        // default: no sections
+                Sections: [],        // default: no sections
                 MaxConcurrentLogins: MaxConcurrentLogins,
                 IsNoRatio: IsNoRatio,
                 FlagsRaw: FlagsRaw)

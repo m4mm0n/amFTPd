@@ -3,8 +3,8 @@
  *  File:           SiteChgrpCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xE74CC6EC
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x87CAD79F
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -62,7 +64,7 @@ public sealed class SiteChgrpCommand : SiteCommandBase
         IReadOnlyList<string> secondaryGroups;
         if (string.IsNullOrWhiteSpace(secondaryRaw))
         {
-            secondaryGroups = Array.Empty<string>();
+            secondaryGroups = [];
         }
         else
         {

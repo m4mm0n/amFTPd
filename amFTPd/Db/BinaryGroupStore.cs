@@ -3,8 +3,8 @@
  *  File:           BinaryGroupStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:08:55
- *  Last Modified:  2025-12-11 04:26:20
- *  CRC32:          0x7B042C27
+ *  Last Modified:  2025-12-13 04:34:46
+ *  CRC32:          0x78970648
  *  
  *  Description:
  *      Provides a secure, binary-based storage mechanism for managing FTP groups,  with support for write-ahead logging (WAL...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -102,7 +104,7 @@ public sealed class BinaryGroupStore : IGroupStore
         _groups["admins"] = new FtpGroup(
             GroupName: "admins",
             Description: "Administrators group",
-            Users: new List<string> { "admin" },
+            Users: ["admin"],
             SectionCredits: new Dictionary<string, long>()
         );
     }
@@ -373,8 +375,8 @@ public sealed class BinaryGroupStore : IGroupStore
         var cipher = new byte[plain.Length];
         var tag = new byte[16];
 
-        using var gcm = new AesGcm(_masterKey);
-        gcm.Encrypt(nonce, plain, cipher, tag);
+        using (var gcm = new AesGcm(_masterKey, 16))
+            gcm.Encrypt(nonce, plain, cipher, tag);
 
         var res = new byte[12 + cipher.Length + 16];
         Buffer.BlockCopy(nonce, 0, res, 0, 12);
@@ -391,8 +393,8 @@ public sealed class BinaryGroupStore : IGroupStore
 
         var plain = new byte[cipher.Length];
 
-        using var gcm = new AesGcm(_masterKey);
-        gcm.Decrypt(nonce, cipher, tag, plain);
+        using (var gcm = new AesGcm(_masterKey, 16))
+            gcm.Decrypt(nonce, cipher, tag, plain);
 
         return plain;
     }

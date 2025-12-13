@@ -3,8 +3,8 @@
  *  File:           BinaryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:24:23
- *  Last Modified:  2025-12-11 08:12:32
- *  CRC32:          0x81BB9354
+ *  Last Modified:  2025-12-13 04:40:48
+ *  CRC32:          0x872135DB
  *  
  *  Description:
  *      Provides a binary-based implementation of the <see cref="IUserStore"/> interface for managing FTP users.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -396,18 +398,20 @@ namespace amFTPd.Db
         // ========================================================
         // RECORD FORMAT (same as Mmap version)
         // ========================================================
-        private byte[] BuildRecord(FtpUser u)
+        private byte[] BuildRecord(FtpUser? u)
         {
+            u?.ValidateRequired_BUS_BuildRecord();
+
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
 
-            var nameLen = (ushort)Encoding.UTF8.GetByteCount(u.UserName);
-            var passLen = (ushort)Encoding.UTF8.GetByteCount(u.PasswordHash);
-            var homeLen = (ushort)Encoding.UTF8.GetByteCount(u.HomeDir);
-            var groupLen = (ushort)(u.GroupName == null ? 0 : Encoding.UTF8.GetByteCount(u.GroupName));
+            var nameLen = (ushort)Encoding.UTF8.GetByteCount(u?.UserName!);
+            var passLen = (ushort)Encoding.UTF8.GetByteCount(u?.PasswordHash!);
+            var homeLen = (ushort)Encoding.UTF8.GetByteCount(u?.HomeDir!);
+            var groupLen = (ushort)(u?.GroupName == null ? 0 : Encoding.UTF8.GetByteCount(u.GroupName));
 
-            var ip = u.AllowedIpMask == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.AllowedIpMask);
-            var ident = u.RequiredIdent == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.RequiredIdent);
+            var ip = u?.AllowedIpMask == null ? [] : Encoding.UTF8.GetBytes(u.AllowedIpMask);
+            var ident = u?.RequiredIdent == null ? [] : Encoding.UTF8.GetBytes(u.RequiredIdent);
 
             bw.Write(nameLen);
             bw.Write(passLen);
@@ -415,7 +419,7 @@ namespace amFTPd.Db
             bw.Write(groupLen);
 
             var flags =
-                (u.IsAdmin ? 1 : 0) |
+                (u!.IsAdmin ? 1 : 0) |
                 (u.AllowFxp ? 2 : 0) |
                 (u.AllowUpload ? 4 : 0) |
                 (u.AllowDownload ? 8 : 0) |
@@ -434,7 +438,7 @@ namespace amFTPd.Db
 
             bw.Write(Encoding.UTF8.GetBytes(u.UserName));
             bw.Write(Encoding.UTF8.GetBytes(u.PasswordHash));
-            bw.Write(Encoding.UTF8.GetBytes(u.HomeDir));
+            bw.Write(Encoding.UTF8.GetBytes(u.HomeDir!));
 
             if (groupLen > 0) bw.Write(Encoding.UTF8.GetBytes(u.GroupName!));
             if (ip.Length > 0) bw.Write(ip);

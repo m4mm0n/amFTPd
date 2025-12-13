@@ -3,8 +3,8 @@
  *  File:           VfsManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x305244CE
+ *  Last Modified:  2025-12-13 04:40:48
+ *  CRC32:          0x4E47346E
  *  
  *  Description:
  *      Manages a virtual file system (VFS) by resolving virtual paths to physical file system paths, handling user-specific...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -47,8 +49,8 @@ public sealed class VfsManager
         IEnumerable<VfsUserMount> userMounts,
         SectionResolver sectionResolver)
     {
-        _mounts = mounts?.ToList() ?? new();
-        _userMounts = userMounts?.ToList() ?? new();
+        _mounts = mounts?.ToList() ?? [];
+        _userMounts = userMounts?.ToList() ?? [];
         _sectionResolver = sectionResolver ?? throw new ArgumentNullException(nameof(sectionResolver));
 
         // your real class requires a TimeSpan TTL
@@ -58,7 +60,7 @@ public sealed class VfsManager
     // ---------------------------------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------------------------------
-    public VfsResolveResult Resolve(string virtualPath, FtpUser user)
+    public VfsResolveResult? Resolve(string virtualPath, FtpUser? user)
     {
         if (string.IsNullOrWhiteSpace(virtualPath))
             return VfsResolveResult.NotFound("No path provided.");
@@ -111,13 +113,16 @@ public sealed class VfsManager
                 : string.Empty;
 
             // Auto-mount into the user's home directory
-            var physical = Path.Combine(
-                user.HomeDir,
-                vr.TrimStart('/'),
-                relative
-            );
+            if (user?.HomeDir != null)
+            {
+                var physical = Path.Combine(
+                    user.HomeDir,
+                    vr.TrimStart('/'),
+                    relative
+                );
 
-            return BuildPhysicalDirResult(virtualPath, physical, user, section);
+                return BuildPhysicalDirResult(virtualPath, physical, user, section);
+            }
         }
 
         // ----------------------------
@@ -125,10 +130,15 @@ public sealed class VfsManager
         // ----------------------------
         {
             var relative = virtualPath.TrimStart('/');
-            var physical = Path.Combine(user.HomeDir, relative);
+            if (user?.HomeDir != null)
+            {
+                var physical = Path.Combine(user.HomeDir, relative);
 
-            return BuildPhysicalDirResult(virtualPath, physical, user, null);
+                return BuildPhysicalDirResult(virtualPath, physical, user, null);
+            }
         }
+
+        return null;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -145,7 +155,7 @@ public sealed class VfsManager
     private VfsResolveResult BuildPhysicalDirResult(
         string virtualPath,
         string physicalPath,
-        FtpUser user,
+        FtpUser? user,
         FtpSection? section)
     {
         FileSystemInfo? fsi = null;

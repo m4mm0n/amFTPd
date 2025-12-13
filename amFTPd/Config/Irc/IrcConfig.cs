@@ -3,8 +3,8 @@
  *  File:           IrcConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:52:31
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF5E1D061
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x8A092B32
  *  
  *  Description:
  *      Enable FiSH (Blowfish) encryption. If enabled, any target (channel or nick) found in FishKeys will have messages sent...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -81,10 +83,10 @@ namespace amFTPd.Config.Irc
         public string[] GetChannelList()
         {
             if (string.IsNullOrWhiteSpace(Channels))
-                return Array.Empty<string>();
+                return [];
 
             return Channels
-                .Split(new[] { ' ', ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                .Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         }
     }
 }

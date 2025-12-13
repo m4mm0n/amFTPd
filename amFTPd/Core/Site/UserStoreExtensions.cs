@@ -3,8 +3,8 @@
  *  File:           UserStoreExtensions.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 09:35:51
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xC8D4120A
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x1B95014B
  *  
  *  Description:
  *      Best-effort enumeration of all users from an <see cref="IUserStore"/>. Works with InMemoryUserStore / BinaryUserStore...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -68,7 +70,7 @@ namespace amFTPd.Core.Site
             }
 
             // Last resort – we just can't see users in this backend.
-            return Enumerable.Empty<FtpUser>();
+            return [];
         }
     }
 }

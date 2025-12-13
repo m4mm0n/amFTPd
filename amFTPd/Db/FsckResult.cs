@@ -3,8 +3,8 @@
  *  File:           FsckResult.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:20:07
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF36A38B7
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x202759AC
  *  
  *  Description:
  *      Represents the result of a file system consistency check (FSCK), including any errors or warnings encountered during...
@@ -21,6 +21,8 @@
 
 
 
+
+
 namespace amFTPd.Db;
 
 /// <summary>
@@ -32,8 +34,8 @@ namespace amFTPd.Db;
 /// checking the <see cref="Success"/> property.</remarks>
 public sealed class FsckResult
 {
-    public List<string> Errors { get; } = new();
-    public List<string> Warnings { get; } = new();
+    public List<string> Errors { get; } = [];
+    public List<string> Warnings { get; } = [];
 
     public bool Success => Errors.Count == 0;
 

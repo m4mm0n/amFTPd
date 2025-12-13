@@ -3,8 +3,8 @@
  *  File:           ZipscriptEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 04:39:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x7A5DCBDC
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x20BE063A
  *  
  *  Description:
  *      Simple in-memory zipscript engine: - Watches uploads of .sfv and listed files. - Computes CRC32 for uploaded files. -...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -174,7 +176,7 @@ namespace amFTPd.Core.Zipscript
                         continue;
 
                     // Basic "filename CRC" format (separated by whitespace)
-                    var parts = line.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                    var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length < 2)
                         continue;
 

@@ -3,8 +3,8 @@
  *  File:           SiteFlagsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:46:09
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x661B29F6
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x77E7CB01
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -47,7 +49,7 @@ namespace amFTPd.Core.Site.Commands
 
             var parts = argument?
                 .Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                ?? Array.Empty<string>();
+                ?? [];
 
             if (parts.Length == 0)
             {

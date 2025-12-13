@@ -3,8 +3,8 @@
  *  File:           FtpUserConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x231A325E
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xB0DC912D
  *  
  *  Description:
  *      Container for configured users + helper to build runtime FtpUser objects.
@@ -21,6 +21,8 @@
 
 
 
+
+
 namespace amFTPd.Config.Ftpd;
 
 /// <summary>
@@ -31,7 +33,7 @@ public sealed record FtpUserConfig
     public static FtpUserConfig Empty { get; } = new();
 
     public IReadOnlyList<FtpUserConfigUser> Users { get; init; }
-        = Array.Empty<FtpUserConfigUser>();
+        = [];
 
     public FtpUserConfig()
     {
@@ -39,7 +41,7 @@ public sealed record FtpUserConfig
 
     public FtpUserConfig(IReadOnlyList<FtpUserConfigUser> users)
     {
-        Users = users ?? Array.Empty<FtpUserConfigUser>();
+        Users = users ?? [];
     }
 
     public FtpUserConfigUser? FindConfigUser(string username)
@@ -72,7 +74,7 @@ public sealed record FtpUserConfig
             Disabled: cfg.Disabled,
             HomeDir: homeDir,
             PrimaryGroup: cfg.GroupName,
-            SecondaryGroups: cfg.SecondaryGroups ?? Array.Empty<string>(),
+            SecondaryGroups: cfg.SecondaryGroups ?? [],
             IsAdmin: cfg.IsAdmin || cfg.IsAdministrator,
             AllowFxp: cfg.AllowFxp,
             AllowUpload: cfg.AllowUpload,

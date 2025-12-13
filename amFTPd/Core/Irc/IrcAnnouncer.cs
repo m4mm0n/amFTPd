@@ -3,8 +3,8 @@
  *  File:           IrcAnnouncer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:51:58
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x720C7FC8
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xA4A1B6B3
  *  
  *  Description:
  *      IRC announcer that subscribes to the EventBus and formats scene-style lines. For now, it only logs what it *would* se...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -430,7 +432,7 @@ public sealed class IrcAnnouncer : IAsyncDisposable
             if (idx >= 0)
             {
                 var rest = ev.Extra[(idx + key.Length)..].Trim();
-                var sep = rest.IndexOfAny(new[] { ' ', ';', ',' });
+                var sep = rest.IndexOfAny([' ', ';', ',']);
                 var mult = sep >= 0 ? rest[..sep] : rest;
                 multText = $" x{mult}";
             }

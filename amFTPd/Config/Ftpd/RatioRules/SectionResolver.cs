@@ -3,8 +3,8 @@
  *  File:           SectionResolver.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-28 21:15:25
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xAF03E1EB
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xC30AD8EE
  *  
  *  Description:
  *      Resolves which ratio rule applies for a given path.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -37,9 +39,9 @@ namespace amFTPd.Config.Ftpd.RatioRules
             IReadOnlyList<SectionRule> sectionRules,
             IReadOnlyList<RatioRule> ratioRules)
         {
-            DirectoryRules = directoryRules ?? Array.Empty<DirectoryRule>();
-            SectionRules = sectionRules ?? Array.Empty<SectionRule>();
-            RatioRules = ratioRules ?? Array.Empty<RatioRule>();
+            DirectoryRules = directoryRules ?? [];
+            SectionRules = sectionRules ?? [];
+            RatioRules = ratioRules ?? [];
         }
 
         /// <summary>
@@ -48,7 +50,7 @@ namespace amFTPd.Config.Ftpd.RatioRules
         public SectionResolver(
             IReadOnlyList<DirectoryRule> directoryRules,
             IReadOnlyList<RatioRule> ratioRules)
-            : this(directoryRules, Array.Empty<SectionRule>(), ratioRules)
+            : this(directoryRules, [], ratioRules)
         {
         }
 
@@ -56,7 +58,7 @@ namespace amFTPd.Config.Ftpd.RatioRules
         /// Backwards-compatible ctor for dictionary of section rules.
         /// </summary>
         public SectionResolver(IDictionary<string, SectionRule> sectionRules)
-            : this(Array.Empty<DirectoryRule>(), sectionRules.Values.ToList(), Array.Empty<RatioRule>())
+            : this([], sectionRules.Values.ToList(), [])
         {
         }
 
@@ -64,7 +66,7 @@ namespace amFTPd.Config.Ftpd.RatioRules
         /// Resolve the effective ratio rule for a given path.
         /// </summary>
         /// <returns>The rule, or null if none.</returns>
-        public RatioRule? Resolve(string virtualPath)
+        public RatioRule? Resolve(string? virtualPath)
         {
             string? section = null;
 

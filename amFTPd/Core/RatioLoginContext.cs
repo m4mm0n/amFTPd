@@ -3,8 +3,8 @@
  *  File:           RatioLoginContext.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-05 22:23:14
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xD42DEF23
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0x85CB53FC
  *  
  *  Description:
  *      Context passed to ratio/login rule resolution when a user logs in. Extend this as needed with more info (groups, flag...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -37,10 +39,10 @@ namespace amFTPd.Core
         /// Username the client is logging in as.
         /// </summary>
         public string UserName { get; init; } = string.Empty;
-        public string GroupName { get; init; } = string.Empty;
-        public string RealName { get; init; } = string.Empty;
+        public string? GroupName { get; init; } = string.Empty;
+        public string? RealName { get; init; } = string.Empty;
         public DateTime NowUtc { get; init; }
-        public string RemoteHost { get; init; } = string.Empty;
+        public string? RemoteHost { get; init; } = string.Empty;
         /// <summary>
         /// Remote IP/host as a string (if you want IP-based rules).
         /// </summary>

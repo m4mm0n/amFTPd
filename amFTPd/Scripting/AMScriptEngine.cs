@@ -3,8 +3,8 @@
  *  File:           AMScriptEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-16 06:46:16
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xB5934043
+ *  Last Modified:  2025-12-13 04:39:15
+ *  CRC32:          0xD2AE6FEB
  *  
  *  Description:
  *      Represents a script engine for processing and evaluating rules defined in a custom AMScript file.
@@ -21,6 +21,8 @@
 
 
 
+
+
 namespace amFTPd.Scripting;
 
 /// <summary>
@@ -32,7 +34,7 @@ namespace amFTPd.Scripting;
 /// detected.</remarks>
 public sealed class AMScriptEngine
 {
-    private readonly List<AMRule> _rules = new();
+    private readonly List<AMRule> _rules = [];
     private readonly string _filePath;
     private FileSystemWatcher? _watcher;
 
@@ -152,13 +154,13 @@ public sealed class AMScriptEngine
         if (cond.Length == 0) return false;
 
         // OR
-        var orParts = cond.Split(new[] { "||" }, StringSplitOptions.RemoveEmptyEntries);
+        var orParts = cond.Split(["||"], StringSplitOptions.RemoveEmptyEntries);
         return orParts.Any(or => EvaluateAndPart(ctx, or));
     }
 
     private bool EvaluateAndPart(AMScriptContext ctx, string cond)
     {
-        var andParts = cond.Split(new[] { "&&" }, StringSplitOptions.RemoveEmptyEntries);
+        var andParts = cond.Split(["&&"], StringSplitOptions.RemoveEmptyEntries);
         return andParts.All(part => EvaluateAtomic(ctx, part.Trim()));
     }
 
@@ -193,7 +195,7 @@ public sealed class AMScriptEngine
         {
             case "==":
             {
-                var parts = atom.Split(new[] { "==" }, 2, StringSplitOptions.None);
+                var parts = atom.Split(["=="], 2, StringSplitOptions.None);
                 left = parts[0].Trim();
                 right = parts[1].Trim();
                 return GetValue(ctx, left) == GetValue(ctx, right);
@@ -201,7 +203,7 @@ public sealed class AMScriptEngine
 
             case "!=":
             {
-                var parts = atom.Split(new[] { "!=" }, 2, StringSplitOptions.None);
+                var parts = atom.Split(["!="], 2, StringSplitOptions.None);
                 left = parts[0].Trim();
                 right = parts[1].Trim();
                 return GetValue(ctx, left) != GetValue(ctx, right);
@@ -211,11 +213,11 @@ public sealed class AMScriptEngine
             default:
                 // Treat variable token as boolean
                 var v = GetValue(ctx, atom);
-                return v.Equals("true", StringComparison.OrdinalIgnoreCase);
+                return v != null && v.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
     }
 
-    private string GetValue(AMScriptContext ctx, string token)
+    private string? GetValue(AMScriptContext ctx, string token)
     {
         token = token.Trim();
 
@@ -361,7 +363,7 @@ public sealed class AMScriptEngine
 
         if (expr.Contains("*="))
         {
-            var parts = expr.Split(new[] { "*=" }, 2, StringSplitOptions.None);
+            var parts = expr.Split(["*="], 2, StringSplitOptions.None);
             if (long.TryParse(parts[1].Trim(), out var mul))
                 value *= mul;
         }

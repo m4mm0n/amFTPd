@@ -3,8 +3,8 @@
  *  File:           AMScriptContext.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-16 06:46:15
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF95BBF3A
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0x0B63C25B
  *  
  *  Description:
  *      Represents the context for an AMScript operation, providing details about the user, section, and file transfer parame...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -52,7 +54,7 @@ public sealed record AMScriptContext(
     long EarnedUpload,
 
     // Added for section-routing, SITE scripting, user rules
-    string VirtualPath = "",
-    string PhysicalPath = "",
+    string? VirtualPath = "",
+    string? PhysicalPath = "",
     string Event = ""
 );

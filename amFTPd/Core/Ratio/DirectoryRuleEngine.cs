@@ -3,8 +3,8 @@
  *  File:           DirectoryRuleEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-28 21:43:55
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4E3B5DCA
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xDAAA263F
  *  
  *  Description:
  *      Provides functionality to resolve a directory rule based on a given path.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -35,29 +37,20 @@ namespace amFTPd.Core.Ratio
     {
         private readonly IReadOnlyDictionary<string, DirectoryRule> _rules;
 
-        public DirectoryRuleEngine(IReadOnlyDictionary<string, DirectoryRule> rules)
-        {
-            _rules = rules ?? throw new ArgumentNullException(nameof(rules));
-        }
+        public DirectoryRuleEngine(IReadOnlyDictionary<string, DirectoryRule> rules) => _rules = rules ?? throw new ArgumentNullException(nameof(rules));
 
-        public DirectoryRule? Resolve(string path)
+        public DirectoryRule? Resolve(string? path)
         {
             path = Normalize(path);
 
-            foreach (var r in _rules.Values
-                         .OrderByDescending(r => r.VirtualPath.Length))
-            {
-                if (path.StartsWith(r.VirtualPath, StringComparison.OrdinalIgnoreCase))
-                    return r;
-            }
-
-            return null;
+            return _rules.Values.OrderByDescending(r => r.VirtualPath.Length).FirstOrDefault(r =>
+                path != null && path.StartsWith(r.VirtualPath, StringComparison.OrdinalIgnoreCase));
         }
 
-        private static string Normalize(string p)
+        private static string? Normalize(string? p)
         {
-            p = p.Replace('\\', '/');
-            if (!p.StartsWith('/'))
+            p = p?.Replace('\\', '/');
+            if (p != null && !p.StartsWith('/'))
                 p = "/" + p;
             return p;
         }

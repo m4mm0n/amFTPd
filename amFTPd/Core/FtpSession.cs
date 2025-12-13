@@ -3,8 +3,8 @@
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 07:30:17
- *  CRC32:          0xD6068EC3
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0x237995A5
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -517,7 +519,7 @@ public sealed class FtpSession : IAsyncDisposable
     /// <returns></returns>
     public async Task RunAsync(FtpCommandRouter router, CancellationToken ct)
     {
-        await WriteAsync(FtpResponses.Banner(_cfg.WelcomeMessage), ct);
+        if (_cfg.WelcomeMessage != null) await WriteAsync(FtpResponses.Banner(_cfg.WelcomeMessage), ct);
 
         var buffer = new byte[8192];
         var sb = new StringBuilder();
@@ -627,8 +629,8 @@ public sealed class FtpSession : IAsyncDisposable
         var query = Encoding.ASCII.GetBytes($"{serverPort} , {clientPort}\r\n");
         try
         {
-            await stream?.WriteAsync(query, 0, query.Length, ct);
-            await stream?.FlushAsync(ct);
+            await stream?.WriteAsync(query, 0, query.Length, ct)!;
+            await stream?.FlushAsync(ct)!;
         }
         catch
         {
@@ -639,7 +641,7 @@ public sealed class FtpSession : IAsyncDisposable
         int read;
         try
         {
-            read = await stream?.ReadAsync(buffer, 0, buffer.Length, ct);
+            read = await stream?.ReadAsync(buffer, 0, buffer.Length, ct)!;
         }
         catch
         {

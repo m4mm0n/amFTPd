@@ -3,8 +3,8 @@
  *  File:           SiteGroupmembersCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 09:46:26
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4B6464A2
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0xB57904E3
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -50,8 +52,8 @@ public sealed class SiteGroupmembersCommand : SiteCommandBase
         var allUsers = context.Users.GetAllUsers();
 
         var members = allUsers
-            .Where(u => u.PrimaryGroup.Equals(group, StringComparison.OrdinalIgnoreCase) ||
-                        u.SecondaryGroups.Any(g => g.Equals(group, StringComparison.OrdinalIgnoreCase)))
+            .Where(u => u.PrimaryGroup != null && (u.PrimaryGroup.Equals(group, StringComparison.OrdinalIgnoreCase) ||
+                                                   u.SecondaryGroups.Any(g => g != null && g.Equals(group, StringComparison.OrdinalIgnoreCase))))
             .OrderBy(u => u.UserName)
             .ToList();
 

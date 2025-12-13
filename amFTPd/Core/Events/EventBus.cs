@@ -3,8 +3,8 @@
  *  File:           EventBus.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:48:28
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xF3289256
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x90D44948
  *  
  *  Description:
  *      Simple in-process pub/sub bus for FTP events. Thread-safe, low overhead.
@@ -21,6 +21,8 @@
 
 
 
+
+
 using System.Collections.Concurrent;
 
 namespace amFTPd.Core.Events;
@@ -32,7 +34,7 @@ namespace amFTPd.Core.Events;
 public sealed class EventBus
 {
     private readonly Lock _lock = new();
-    private readonly List<Action<FtpEvent>> _handlers = new();
+    private readonly List<Action<FtpEvent>> _handlers = [];
 
     /// <summary>Subscribe to all future events.</summary>
     public void Subscribe(Action<FtpEvent> handler)

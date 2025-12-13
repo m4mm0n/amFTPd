@@ -3,8 +3,8 @@
  *  File:           RaceEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xBF72F6AC
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xC3FA62B7
  *  
  *  Description:
  *      Tracks race stats per release directory. Thread-safe, in-memory only.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -60,7 +62,7 @@ public sealed class RaceEngine
     private readonly Lock _sync = new();
     private readonly Dictionary<string, RaceState> _races = new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly LinkedList<string> _recentKeys = new();
+    private readonly LinkedList<string> _recentKeys = [];
     private readonly HashSet<string> _recentSet = new(StringComparer.OrdinalIgnoreCase);
 
     private void TouchKey(string key)

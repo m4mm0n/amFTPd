@@ -1,3 +1,15 @@
+[ v0.4.1.2 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Minor code cleanup...
+* Fixed AesGcm implementation being obsolete...
+
+[ v0.4.1.1 - 11.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Just fixed the GitHub release tagging...
+* No code changes, except the version number...
+
 [ v0.4.1.0 - 11.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

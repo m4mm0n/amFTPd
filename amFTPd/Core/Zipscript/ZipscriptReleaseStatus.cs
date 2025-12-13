@@ -3,8 +3,8 @@
  *  File:           ZipscriptReleaseStatus.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 04:38:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x35A4DF62
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xDC7DDD66
  *  
  *  Description:
  *      Represents the status of a release in a zipscript system, including its path, section, and associated files.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -36,5 +38,5 @@ public sealed class ZipscriptReleaseStatus
     public bool HasSfv { get; init; }
     public bool IsComplete { get; init; }
 
-    public IReadOnlyList<ZipscriptFileInfo> Files { get; init; } = Array.Empty<ZipscriptFileInfo>();
+    public IReadOnlyList<ZipscriptFileInfo> Files { get; init; } = [];
 }

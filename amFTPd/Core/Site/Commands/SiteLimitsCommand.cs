@@ -3,8 +3,8 @@
  *  File:           SiteLimitsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 10:53:01
- *  Last Modified:  2025-12-11 04:26:20
- *  CRC32:          0x41585A52
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x55B2D77B
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -52,7 +54,7 @@ public sealed class SiteLimitsCommand : SiteCommandBase
 
         var parts = argument?
                         .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                    ?? Array.Empty<string>();
+                    ?? [];
 
         if (parts.Length == 0)
         {

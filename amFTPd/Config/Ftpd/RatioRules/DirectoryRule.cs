@@ -3,8 +3,8 @@
  *  File:           DirectoryRule.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0x25628194
+ *  Last Modified:  2025-12-13 04:31:25
+ *  CRC32:          0x8BF1CECC
  *  
  *  Description:
  *      Maps a path prefix to a logical ratio section with additional flags.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -66,7 +68,7 @@ namespace amFTPd.Config.Ftpd.RatioRules
         /// <summary>Additional upload bonus multiplier.</summary>
         public double UploadBonus { get; init; } = 0.0;
 
-        public bool IsMatch(string virtualPath)
+        public bool IsMatch(string? virtualPath)
         {
             if (!Enabled)
                 return false;

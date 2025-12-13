@@ -3,8 +3,8 @@
  *  File:           RatioResolutionPipeline.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-28 21:28:55
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0x4ADABB13
+ *  Last Modified:  2025-12-13 04:27:59
+ *  CRC32:          0xC6CEDCA2
  *  
  *  Description:
  *      Provides a pipeline for resolving the effective ratio rule for a given virtual path, using directory overrides, secti...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -56,7 +58,7 @@ namespace amFTPd.Core.Ratio
         ///     2. SectionRule
         ///     3. RatioRule (lowest priority)
         /// </summary>
-        public RatioRule Resolve(string virtPath, string? group)
+        public RatioRule Resolve(string? virtPath, string? group)
         {
             virtPath = Normalize(virtPath);
 
@@ -103,10 +105,10 @@ namespace amFTPd.Core.Ratio
             );
         }
 
-        private static string Normalize(string p)
+        private static string? Normalize(string? p)
         {
-            p = p.Replace('\\', '/');
-            if (!p.StartsWith('/'))
+            p = p?.Replace('\\', '/');
+            if (p != null && !p.StartsWith('/'))
                 p = "/" + p;
             return p;
         }

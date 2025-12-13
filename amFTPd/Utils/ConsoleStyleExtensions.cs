@@ -3,8 +3,8 @@
  *  File:           ConsoleStyleExtensions.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x31F50840
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0x1E33AF9D
  *  
  *  Description:
  *      Converts a raw log line ([ts] LEVEL: msg) into an ANSI-styled one.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -130,20 +132,20 @@ namespace amFTPd.Utils
 
         // HELLFIRE palette (16-color terminal-safe)
         private static readonly string[] HellfireColors =
-        {
-    "\x1b[30m",     // black
+        [
+            "\x1b[30m",     // black
     "\x1b[31;2m",   // dark red
     "\x1b[31m",     // red
     "\x1b[91m",     // bright red
-    "\x1b[33m",     // yellow
-};
+    "\x1b[33m" // yellow
+        ];
 
         // Cracktro-style cycling border colors
         private static readonly string[] DemoBorderColors =
-        {
-    "\x1b[31m", "\x1b[91m", "\x1b[33m", "\x1b[93m",
+        [
+            "\x1b[31m", "\x1b[91m", "\x1b[33m", "\x1b[93m",
     "\x1b[92m", "\x1b[96m", "\x1b[94m", "\x1b[95m"
-};
+        ];
 
 
         /// <summary>

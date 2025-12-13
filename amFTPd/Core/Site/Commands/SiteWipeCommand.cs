@@ -3,8 +3,8 @@
  *  File:           SiteWipeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0x6B695E4D
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x429C9D22
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -43,7 +45,7 @@ public sealed class SiteWipeCommand : SiteCommandBase
 
         var virt = FtpPath.Normalize(s.Cwd, argument);
 
-        string phys;
+        string? phys;
         try
         {
             phys = context.Router.FileSystem.MapToPhysical(virt);

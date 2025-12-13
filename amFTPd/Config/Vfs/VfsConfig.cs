@@ -3,8 +3,8 @@
  *  File:           VfsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xADF0D75F
+ *  Last Modified:  2025-12-13 04:35:52
+ *  CRC32:          0x9E7195FA
  *  
  *  Description:
  *      Configuration for the virtual file system.
@@ -20,6 +20,8 @@
 
 
 
+
+
 namespace amFTPd.Config.Vfs;
 
 /// <summary>
@@ -31,13 +33,13 @@ public sealed record VfsConfig
     /// Old style: all mounts in one list.
     /// </summary>
     public IReadOnlyList<VfsMount> Mounts { get; init; } =
-        Array.Empty<VfsMount>();
+        [];
 
     /// <summary>
     /// User-specific mounts. These are considered before global mounts.
     /// </summary>
     public IReadOnlyList<VfsUserMount> UserMounts { get; init; } =
-        Array.Empty<VfsUserMount>();
+        [];
 
     /// <summary>
     /// Helper view of global mounts (same as <see cref="Mounts"/>).
@@ -61,8 +63,8 @@ public sealed record VfsConfig
         var userMount = UserMounts
             .Where(um => string.Equals(um.Username, userNameNorm, StringComparison.OrdinalIgnoreCase))
             .Select(um => um.Mount)
-            .OrderByDescending(m => m.VirtualRoot.Length)
-            .FirstOrDefault(m => IsPrefix(m.VirtualRoot, virtualPath));
+            .OrderByDescending(m => m?.VirtualRoot.Length)
+            .FirstOrDefault(m => IsPrefix(m?.VirtualRoot, virtualPath));
 
         if (userMount is not null)
         {
@@ -85,19 +87,20 @@ public sealed record VfsConfig
         return null;
     }
 
-    private static bool IsPrefix(string root, string path)
+    private static bool IsPrefix(string? root, string path)
     {
-        if (!root.StartsWith("/"))
+        if (root != null && !root.StartsWith("/"))
             root = "/" + root;
 
-        if (!root.EndsWith("/"))
+        if (root != null && !root.EndsWith("/"))
             root += "/";
 
         if (!path.StartsWith("/"))
             path = "/" + path;
-
-        return path.Equals(root.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
+        if(root != null)
+            return path.Equals(root.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
                || path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static string GetRelativePath(string root, string path)

@@ -3,8 +3,8 @@
  *  File:           TlsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x207594C8
+ *  Last Modified:  2025-12-13 03:59:07
+ *  CRC32:          0xBBF8AC88
  *  
  *  Description:
  *      Represents the configuration for Transport Layer Security (TLS), including the server certificate and supported SSL/T...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -82,7 +84,12 @@ namespace amFTPd.Security
                 try
                 {
                     logger.Log(FtpLogLevel.Info, $"Loading certificate: {pfxPath}");
-                    var cert = new X509Certificate2(pfxPath, pfxPassword, Flags);
+
+                    var cert = X509CertificateLoader.LoadPkcs12FromFile(
+                        pfxPath,
+                        pfxPassword,
+                        Flags
+                    );
                     return new TlsConfig(cert);
                 }
                 catch (CryptographicException ex)
@@ -153,22 +160,23 @@ namespace amFTPd.Security
 
             // Not a CA
             req.CertificateExtensions.Add(
-                new X509BasicConstraintsExtension(false, false, 0, false));
+                new X509BasicConstraintsExtension(
+                    certificateAuthority: false,
+                    hasPathLengthConstraint: false,
+                    pathLengthConstraint: 0,
+                    critical: true));
 
-            // Typical server key usage
+            // Key usage: digital signature + key encipherment
             req.CertificateExtensions.Add(
                 new X509KeyUsageExtension(
                     X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
-                    false));
+                    critical: true));
 
-            // EKU: ServerAuth (+ ClientAuth optional)
-            var eku = new OidCollection
-            {
-                new Oid("1.3.6.1.5.5.7.3.1"), // Server Authentication
-                new Oid("1.3.6.1.5.5.7.3.2")  // Client Authentication
-            };
+            // Subject key identifier
             req.CertificateExtensions.Add(
-                new X509EnhancedKeyUsageExtension(eku, false));
+                new X509SubjectKeyIdentifierExtension(
+                    req.PublicKey,
+                    critical: false));
 
             var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
             var notAfter = notBefore.AddYears(5);
@@ -178,7 +186,7 @@ namespace amFTPd.Security
             // Export as PFX and re-import with *user* key store, persisted
             var pfxBytes = generated.Export(X509ContentType.Pfx, pfxPassword);
 
-            return new X509Certificate2(
+            return X509CertificateLoader.LoadPkcs12(
                 pfxBytes,
                 pfxPassword,
                 X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable

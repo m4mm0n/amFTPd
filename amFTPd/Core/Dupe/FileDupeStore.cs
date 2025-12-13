@@ -3,8 +3,8 @@
  *  File:           FileDupeStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 04:35:27
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x35390D07
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xB5302D1A
  *  
  *  Description:
  *      File-backed dupe store. Keeps everything in memory and saves to a JSON file on each change. Good enough for typical s...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -147,7 +149,7 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         try
         {
             var json = File.ReadAllText(_filePath);
-            var entries = JsonSerializer.Deserialize<List<DupeEntry>>(json) ?? new List<DupeEntry>();
+            var entries = JsonSerializer.Deserialize<List<DupeEntry>>(json) ?? [];
 
             foreach (var e in entries)
             {

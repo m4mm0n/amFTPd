@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.Commands.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 07:30:49
- *  CRC32:          0xC4D9F238
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0x1485CC36
  *  
  *  Description:
  *      Partial class for handling FTP commands within the FtpCommandRouter.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -68,7 +70,7 @@ namespace amFTPd.Core
             var userGroup = account?.GroupName ?? string.Empty;
 
             var virt = _s.Cwd;
-            string phys;
+            string? phys;
             try
             {
                 phys = _fs.MapToPhysical(virt);
@@ -96,7 +98,7 @@ namespace amFTPd.Core
             );
         }
 
-        private AMScriptContext BuildSectionRoutingContext(string virtualPath, string physicalPath, Config.Ftpd.FtpSection section)
+        private AMScriptContext BuildSectionRoutingContext(string? virtualPath, string? physicalPath, Config.Ftpd.FtpSection section)
         {
             var account = _s.Account!;
 
@@ -124,7 +126,7 @@ namespace amFTPd.Core
             var virtPath = _s.Cwd;
 
             // Resolve physical path (safe fallback)
-            string physicalPath;
+            string? physicalPath;
             try
             {
                 physicalPath = _fs.MapToPhysical(virtPath);
@@ -159,7 +161,7 @@ namespace amFTPd.Core
 
             var virt = _s.Cwd;
 
-            string phys;
+            string? phys;
             try
             {
                 phys = _fs.MapToPhysical(virt);
@@ -663,7 +665,7 @@ namespace amFTPd.Core
             }
 
             var newV = FtpPath.Normalize(_s.Cwd, arg);
-            string phys;
+            string? phys;
             try
             {
                 phys = _fs.MapToPhysical(newV);
@@ -694,7 +696,7 @@ namespace amFTPd.Core
             }
 
             var newV = FtpPath.Normalize(_s.Cwd, "..");
-            string phys;
+            string? phys;
             try
             {
                 phys = _fs.MapToPhysical(newV);
@@ -995,66 +997,75 @@ namespace amFTPd.Core
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
-            var vfsResult = _s.VfsManager.Resolve(target, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
-
-            var access = _directoryAccess.Evaluate(node.VirtualPath);
-            if (!access.CanList)
+            if (vfsResult != null)
             {
-                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
-                return;
-            }
+                var node = vfsResult.Node;
 
-            await _s.WriteAsync(FtpResponses.FileOk, ct);
-
-            await _s.WithDataAsync(async stream =>
-            {
-                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
-
-                switch (node.Type)
+                if (node != null)
                 {
-                    case VfsNodeType.PhysicalDirectory:
-                        {
-                            var dirPath = node.PhysicalPath!;
-                            foreach (var dir in Directory.EnumerateDirectories(dirPath))
-                                await wr.WriteLineAsync(_fs.ToUnixListLine(new DirectoryInfo(dir)));
-
-                            foreach (var file in Directory.EnumerateFiles(dirPath))
-                                await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(file)));
-                            break;
-                        }
-
-                    case VfsNodeType.PhysicalFile:
-                        {
-                            await wr.WriteLineAsync(_fs.ToUnixListLine((FileInfo)node.FileSystemInfo!));
-                            break;
-                        }
-
-                    case VfsNodeType.VirtualDirectory:
-                        {
-                            var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                            if (string.IsNullOrEmpty(name))
-                                name = "/";
-                            // Simple synthetic directory listing line
-                            await wr.WriteLineAsync($"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}");
-                            break;
-                        }
-
-                    case VfsNodeType.VirtualFile:
-                        {
-                            var name = Path.GetFileName(node.VirtualPath);
-                            var size = node.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
-                            await wr.WriteLineAsync($"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}");
-                            break;
-                        }
+                    var access = _directoryAccess.Evaluate(node.VirtualPath);
+                    if (!access.CanList)
+                    {
+                        await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                        return;
+                    }
                 }
-            }, ct);
+
+                await _s.WriteAsync(FtpResponses.FileOk, ct);
+
+                await _s.WithDataAsync(async stream =>
+                {
+                    await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+
+                    if (node != null)
+                        switch (node.Type)
+                        {
+                            case VfsNodeType.PhysicalDirectory:
+                            {
+                                var dirPath = node.PhysicalPath!;
+                                foreach (var dir in Directory.EnumerateDirectories(dirPath))
+                                    await wr.WriteLineAsync(_fs.ToUnixListLine(new DirectoryInfo(dir)));
+
+                                foreach (var file in Directory.EnumerateFiles(dirPath))
+                                    await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(file)));
+                                break;
+                            }
+
+                            case VfsNodeType.PhysicalFile:
+                            {
+                                await wr.WriteLineAsync(_fs.ToUnixListLine((FileInfo)node.FileSystemInfo!));
+                                break;
+                            }
+
+                            case VfsNodeType.VirtualDirectory:
+                            {
+                                var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                                if (string.IsNullOrEmpty(name))
+                                    name = "/";
+                                // Simple synthetic directory listing line
+                                await wr.WriteLineAsync($"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}");
+                                break;
+                            }
+
+                            case VfsNodeType.VirtualFile:
+                            {
+                                var name = Path.GetFileName(node.VirtualPath);
+                                var size = node.VirtualContent is null
+                                    ? 0
+                                    : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                                await wr.WriteLineAsync($"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}");
+                                break;
+                            }
+                        }
+                }, ct);
+            }
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1084,53 +1095,60 @@ namespace amFTPd.Core
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
-            var vfsResult = _s.VfsManager.Resolve(target, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
-
-            var access = _directoryAccess.Evaluate(node.VirtualPath);
-            if (!access.CanList)
+            if (vfsResult != null)
             {
-                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
-                return;
-            }
+                var node = vfsResult.Node;
 
-            await _s.WriteAsync(FtpResponses.FileOk, ct);
-
-            await _s.WithDataAsync(async stream =>
-            {
-                await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
-
-                switch (node.Type)
+                if (node != null)
                 {
-                    case VfsNodeType.PhysicalDirectory:
-                        {
-                            var dirPath = node.PhysicalPath!;
-                            foreach (var dir in Directory.EnumerateDirectories(dirPath))
-                                await wr.WriteLineAsync(Path.GetFileName(dir));
-
-                            foreach (var file in Directory.EnumerateFiles(dirPath))
-                                await wr.WriteLineAsync(Path.GetFileName(file));
-                            break;
-                        }
-
-                    case VfsNodeType.PhysicalFile:
-                    case VfsNodeType.VirtualFile:
-                    case VfsNodeType.VirtualDirectory:
-                        {
-                            var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                            if (string.IsNullOrEmpty(name))
-                                name = "/";
-                            await wr.WriteLineAsync(name);
-                            break;
-                        }
+                    var access = _directoryAccess.Evaluate(node.VirtualPath);
+                    if (!access.CanList)
+                    {
+                        await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                        return;
+                    }
                 }
-            }, ct);
+
+                await _s.WriteAsync(FtpResponses.FileOk, ct);
+
+                await _s.WithDataAsync(async stream =>
+                {
+                    await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
+
+                    if (node != null)
+                        switch (node.Type)
+                        {
+                            case VfsNodeType.PhysicalDirectory:
+                            {
+                                var dirPath = node.PhysicalPath!;
+                                foreach (var dir in Directory.EnumerateDirectories(dirPath))
+                                    await wr.WriteLineAsync(Path.GetFileName(dir));
+
+                                foreach (var file in Directory.EnumerateFiles(dirPath))
+                                    await wr.WriteLineAsync(Path.GetFileName(file));
+                                break;
+                            }
+
+                            case VfsNodeType.PhysicalFile:
+                            case VfsNodeType.VirtualFile:
+                            case VfsNodeType.VirtualDirectory:
+                            {
+                                var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                                if (string.IsNullOrEmpty(name))
+                                    name = "/";
+                                await wr.WriteLineAsync(name);
+                                break;
+                            }
+                        }
+                }, ct);
+            }
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1160,20 +1178,23 @@ namespace amFTPd.Core
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
-            var vfsResult = _s.VfsManager.Resolve(target, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 MLSD failed.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
-            var access = _directoryAccess.Evaluate(node.VirtualPath);
-            if (!access.CanList)
+            if (node?.VirtualPath != null)
             {
-                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
-                return;
+                var access = _directoryAccess.Evaluate(node?.VirtualPath);
+                if (!access.CanList)
+                {
+                    await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                    return;
+                }
             }
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
@@ -1182,7 +1203,7 @@ namespace amFTPd.Core
             {
                 await using var wr = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true);
 
-                switch (node.Type)
+                switch (node?.Type)
                 {
                     case VfsNodeType.PhysicalDirectory:
                         {
@@ -1248,16 +1269,16 @@ namespace amFTPd.Core
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
-            var vfsResult = _s.VfsManager.Resolve(target, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 MLST failed.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
-            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            var access = _directoryAccess.Evaluate(node?.VirtualPath);
             if (!access.CanList)
             {
                 await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
@@ -1265,7 +1286,7 @@ namespace amFTPd.Core
             }
 
             string facts;
-            switch (node.Type)
+            switch (node?.Type)
             {
                 case VfsNodeType.PhysicalDirectory:
                 case VfsNodeType.PhysicalFile:
@@ -1284,8 +1305,8 @@ namespace amFTPd.Core
                 case VfsNodeType.VirtualFile:
                 default:
                     {
-                        var name = Path.GetFileName(node.VirtualPath);
-                        var size = node.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                        var name = Path.GetFileName(node?.VirtualPath);
+                        var size = node?.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
                         facts = $"type=file;size={size};perm=rl; {name}";
                         break;
                     }
@@ -1335,22 +1356,22 @@ namespace amFTPd.Core
                 return;
             }
 
-            var vfsResult = _s.VfsManager.Resolve(arg, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(arg, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
-            if (node.Type != VfsNodeType.PhysicalFile && node.Type != VfsNodeType.VirtualFile)
+            if (node != null && node.Type != VfsNodeType.PhysicalFile && node.Type != VfsNodeType.VirtualFile)
             {
                 await _s.WriteAsync("550 File not found.\r\n", ct);
                 return;
             }
 
-            var virtTarget = node.VirtualPath;
+            var virtTarget = node?.VirtualPath;
 
             var access = _directoryAccess.Evaluate(virtTarget);
             if (!access.CanDownload)
@@ -1363,7 +1384,7 @@ namespace amFTPd.Core
             Stream sourceStream;
             try
             {
-                if (node.Type == VfsNodeType.PhysicalFile)
+                if (node != null && node.Type == VfsNodeType.PhysicalFile)
                 {
                     var phys = node.PhysicalPath!;
                     if (!File.Exists(phys))
@@ -1378,7 +1399,7 @@ namespace amFTPd.Core
                 }
                 else
                 {
-                    var content = node.VirtualContent ?? string.Empty;
+                    var content = node?.VirtualContent ?? string.Empty;
                     var buffer = Encoding.UTF8.GetBytes(content);
                     length = buffer.LongLength;
                     sourceStream = new MemoryStream(buffer, writable: false);
@@ -1479,8 +1500,8 @@ namespace amFTPd.Core
             string physDir;
             try
             {
-                var dirResult = _s.VfsManager.Resolve(dirVirt, _s.Account);
-                if (dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
+                var dirResult = _s.VfsManager?.Resolve(dirVirt, _s.Account);
+                if (dirResult != null && dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
                 {
                     physDir = node.PhysicalPath!;
                 }
@@ -1618,8 +1639,8 @@ namespace amFTPd.Core
             string physDir;
             try
             {
-                var dirResult = _s.VfsManager.Resolve(dirVirt, _s.Account);
-                if (dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
+                var dirResult = _s.VfsManager?.Resolve(dirVirt, _s.Account);
+                if (dirResult != null && dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
                 {
                     physDir = node.PhysicalPath!;
                 }
@@ -1759,39 +1780,39 @@ namespace amFTPd.Core
 
             var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
 
-            var vfsResult = _s.VfsManager.Resolve(virtTarget, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
             // Only allow deleting physical files for now
-            if (node.Type != VfsNodeType.PhysicalFile)
+            if (node != null && node.Type != VfsNodeType.PhysicalFile)
             {
                 await _s.WriteAsync("550 File not found.\r\n", ct);
                 return;
             }
 
             // Directory flags: treat delete as a “modify” operation -> CanUpload
-            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            var access = _directoryAccess.Evaluate(node?.VirtualPath);
             if (!access.CanUpload)
             {
                 await _s.WriteAsync("550 Delete not allowed in this directory.\r\n", ct);
                 return;
             }
 
-            var section = GetSectionForVirtual(node.VirtualPath);
-            var phys = node.PhysicalPath!;
+            var section = GetSectionForVirtual(node?.VirtualPath);
+            var phys = node?.PhysicalPath!;
 
             try
             {
                 if (File.Exists(phys))
                 {
                     File.Delete(phys);
-                    FireSiteEvent("onDelete", node.VirtualPath, section, _s.Account?.UserName);
+                    FireSiteEvent("onDelete", node?.VirtualPath, section, _s.Account?.UserName);
                     await _s.WriteAsync(FtpResponses.ActionOk, ct);
                 }
                 else
@@ -1848,8 +1869,8 @@ namespace amFTPd.Core
             string physDir;
             try
             {
-                var dirResult = _s.VfsManager.Resolve(dirVirt, _s.Account);
-                if (dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
+                var dirResult = _s.VfsManager?.Resolve(dirVirt, _s.Account);
+                if (dirResult != null && dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
                 {
                     physDir = node.PhysicalPath!;
                 }
@@ -1906,36 +1927,36 @@ namespace amFTPd.Core
             var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
             var section = GetSectionForVirtual(virtTarget);
 
-            var vfsResult = _s.VfsManager.Resolve(virtTarget, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Directory not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
-            if (node.Type != VfsNodeType.PhysicalDirectory)
+            if (node != null && node.Type != VfsNodeType.PhysicalDirectory)
             {
                 await _s.WriteAsync("550 Directory not found.\r\n", ct);
                 return;
             }
 
-            var access = _directoryAccess.Evaluate(node.VirtualPath);
+            var access = _directoryAccess.Evaluate(node?.VirtualPath);
             if (!access.CanUpload)
             {
                 await _s.WriteAsync("550 RMD not allowed in this directory.\r\n", ct);
                 return;
             }
 
-            var phys = node.PhysicalPath!;
+            var phys = node?.PhysicalPath!;
 
             try
             {
                 if (Directory.Exists(phys))
                 {
                     Directory.Delete(phys, recursive: true);
-                    FireSiteEvent("onRmdir", node.VirtualPath, section, _s.Account?.UserName);
+                    FireSiteEvent("onRmdir", node?.VirtualPath, section, _s.Account?.UserName);
                     await _s.WriteAsync(FtpResponses.ActionOk, ct);
                 }
                 else
@@ -1976,22 +1997,23 @@ namespace amFTPd.Core
             var toVirt = FtpPath.Normalize(_s.Cwd, arg);
 
             // Resolve source via VFS
-            var fromResult = _s.VfsManager.Resolve(fromVirt, _s.Account);
-            if (!fromResult.Success || fromResult.Node is null)
+            var fromResult = _s.VfsManager?.Resolve(fromVirt, _s.Account);
+            if (fromResult != null && (!fromResult.Success || fromResult.Node is null))
             {
                 await _s.WriteAsync(fromResult.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            var fromNode = fromResult.Node;
-            if (fromNode.Type != VfsNodeType.PhysicalFile &&
+            var fromNode = fromResult?.Node;
+            if (fromNode != null &&
+                fromNode.Type != VfsNodeType.PhysicalFile &&
                 fromNode.Type != VfsNodeType.PhysicalDirectory)
             {
                 await _s.WriteAsync("550 Not found.\r\n", ct);
                 return;
             }
 
-            var fromPhys = fromNode.PhysicalPath!;
+            var fromPhys = fromNode?.PhysicalPath!;
 
             // Destination: resolve target directory via VFS
             var toDirVirtRaw = Path.GetDirectoryName(toVirt);
@@ -2007,11 +2029,11 @@ namespace amFTPd.Core
                 return;
             }
 
-            string toPhys;
+            string? toPhys;
             try
             {
-                var toDirResult = _s.VfsManager.Resolve(toDirVirt, _s.Account);
-                if (toDirResult.Success && toDirResult.Node is { Type: VfsNodeType.PhysicalDirectory } toDirNode)
+                var toDirResult = _s.VfsManager?.Resolve(toDirVirt, _s.Account);
+                if (toDirResult != null && toDirResult.Success && toDirResult.Node is { Type: VfsNodeType.PhysicalDirectory } toDirNode)
                 {
                     var physDir = toDirNode.PhysicalPath!;
                     toPhys = Path.Combine(physDir, toName);
@@ -2034,11 +2056,11 @@ namespace amFTPd.Core
 
                 if (File.Exists(fromPhys))
                 {
-                    File.Move(fromPhys, toPhys, overwrite: true);
+                    if (toPhys != null) File.Move(fromPhys, toPhys, overwrite: true);
                 }
                 else if (Directory.Exists(fromPhys))
                 {
-                    Directory.Move(fromPhys, toPhys);
+                    if (toPhys != null) Directory.Move(fromPhys, toPhys);
                 }
                 else
                 {
@@ -2094,16 +2116,16 @@ namespace amFTPd.Core
                 return;
             }
 
-            var vfsResult = _s.VfsManager.Resolve(virtTarget, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
-            if (node.Type != VfsNodeType.PhysicalFile)
+            if (node?.Type != VfsNodeType.PhysicalFile)
             {
                 await _s.WriteAsync("550 File not found.\r\n", ct);
                 return;
@@ -2158,16 +2180,16 @@ namespace amFTPd.Core
                 return;
             }
 
-            var vfsResult = _s.VfsManager.Resolve(virtTarget, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
+            var node = vfsResult?.Node;
 
-            if (node.Type != VfsNodeType.PhysicalFile)
+            if (node?.Type != VfsNodeType.PhysicalFile)
             {
                 await _s.WriteAsync("550 File not found.\r\n", ct);
                 return;
@@ -2224,15 +2246,16 @@ namespace amFTPd.Core
                 return;
             }
 
-            var vfsResult = _s.VfsManager.Resolve(virtPath, _s.Account);
-            if (!vfsResult.Success || vfsResult.Node is null)
+            var vfsResult = _s.VfsManager?.Resolve(virtPath, _s.Account);
+            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
                 await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult.Node;
-            if (node.Type != VfsNodeType.PhysicalFile &&
+            var node = vfsResult?.Node;
+            if (node != null &&
+                node.Type != VfsNodeType.PhysicalFile &&
                 node.Type != VfsNodeType.PhysicalDirectory)
             {
                 await _s.WriteAsync("550 RNFR only supported for physical files/directories.\r\n", ct);
@@ -4245,7 +4268,7 @@ namespace amFTPd.Core
         /// </summary>
         internal void FireSiteEvent(
             string eventName,
-            string releaseVirtPath,
+            string? releaseVirtPath,
             Config.Ftpd.FtpSection? section,
             string? userName)
         {
@@ -4253,7 +4276,7 @@ namespace amFTPd.Core
                 return;
 
             // Resolve physical path if possible
-            string phys;
+            string? phys;
             try
             {
                 phys = _fs.MapToPhysical(releaseVirtPath);

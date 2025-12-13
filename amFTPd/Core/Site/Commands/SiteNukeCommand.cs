@@ -3,8 +3,8 @@
  *  File:           SiteNukeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x138865DE
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x62D4E798
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -69,7 +71,7 @@ public sealed class SiteNukeCommand : SiteCommandBase
         var reason = parts[1];
 
         var virt = FtpPath.Normalize(context.Session.Cwd, pathArg);
-        string phys;
+        string? phys;
         try
         {
             phys = context.Router.FileSystem.MapToPhysical(virt);
@@ -143,27 +145,30 @@ public sealed class SiteNukeCommand : SiteCommandBase
             var parent = Path.GetDirectoryName(phys) ?? phys;
             var name = Path.GetFileName(phys);
             var baseNukedName = name + ".NUKED";
-            var target = Path.Combine(parent, baseNukedName);
-
-            if (Directory.Exists(target) || File.Exists(target))
+            if (parent != null)
             {
-                var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
-                target = Path.Combine(parent, $"{name}.NUKED-{stamp}");
-            }
+                var target = Path.Combine(parent, baseNukedName);
 
-            if (isDir)
-            {
-                Directory.Move(phys, target);
-            }
-            else
-            {
-                File.Move(phys, target);
-            }
+                if (Directory.Exists(target) || File.Exists(target))
+                {
+                    var stamp = DateTime.UtcNow.ToString("yyyyMMddHHmmss");
+                    target = Path.Combine(parent, $"{name}.NUKED-{stamp}");
+                }
 
-            // Log to main log
-            context.Log.Log(
-                FtpLogLevel.Warn,
-                $"SITE NUKE by {nuker}: {virt} => {target} (Reason: {reason}, Penalties: {penalties.Count})");
+                if (isDir)
+                {
+                    if (phys != null) Directory.Move(phys, target);
+                }
+                else
+                {
+                    if (phys != null) File.Move(phys, target);
+                }
+
+                // Log to main log
+                context.Log.Log(
+                    FtpLogLevel.Warn,
+                    $"SITE NUKE by {nuker}: {virt} => {target} (Reason: {reason}, Penalties: {penalties.Count})");
+            }
 
             // Append to nukes.log (scene-style nuke log stub)
             try

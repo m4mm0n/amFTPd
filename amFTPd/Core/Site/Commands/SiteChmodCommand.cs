@@ -3,8 +3,8 @@
  *  File:           SiteChmodCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4CF90431
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x55B8A09C
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -64,7 +66,7 @@ public sealed class SiteChmodCommand : SiteCommandBase
         }
 
         var virt = FtpPath.Normalize(context.Session.Cwd, pathArg);
-        string phys;
+        string? phys;
         try
         {
             phys = context.Router.FileSystem.MapToPhysical(virt);

@@ -3,8 +3,8 @@
  *  File:           AnsiConsoleImage.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 05:07:13
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x04944936
+ *  Last Modified:  2025-12-13 04:46:22
+ *  CRC32:          0xD956CD5C
  *  
  *  Description:
  *      Enables ANSI/VT on Windows; no-op on other OSes. Safe to call multiple times.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -111,7 +113,9 @@ namespace amFTPd.Utils
 
         public static void WriteImage(Bitmap image, int? maxWidth = null)
         {
+#pragma warning disable CA1416
             using var img = Image.Load<Rgba32>(BitmapToBytes(image, ImageFormat.Png));
+#pragma warning restore CA1416
             WriteImage(img, maxWidth);
         }
 
@@ -121,7 +125,9 @@ namespace amFTPd.Utils
             if (format == null) throw new ArgumentNullException(nameof(format));
 
             using var ms = new MemoryStream();
+#pragma warning disable CA1416
             bitmap.Save(ms, format);
+#pragma warning restore CA1416
             return ms.ToArray();
         }
 

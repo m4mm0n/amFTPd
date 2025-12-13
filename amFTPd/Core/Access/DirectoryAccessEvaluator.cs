@@ -3,8 +3,8 @@
  *  File:           DirectoryAccessEvaluator.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x42871F14
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0x7E5CC174
  *  
  *  Description:
  *      Evaluates directory access flags based on configured <see cref="DirectoryRule"/> entries. Uses longest-prefix match o...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -46,7 +48,7 @@ public sealed class DirectoryAccessEvaluator
     /// Evaluates the effective access flags for the given virtual path.
     /// </summary>
     /// <param name="virtualPath">A virtual path such as "/0DAY/dir/file.rar".</param>
-    public DirectoryAccess Evaluate(string virtualPath)
+    public DirectoryAccess Evaluate(string? virtualPath)
     {
         if (string.IsNullOrWhiteSpace(virtualPath))
             virtualPath = "/";

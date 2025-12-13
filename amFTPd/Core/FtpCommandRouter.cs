@@ -3,8 +3,8 @@
  *  File:           FtpCommandRouter.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 07:31:16
- *  CRC32:          0x5005C9CC
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0xA1883E8B
  *  
  *  Description:
  *      Routes and handles FTP commands received from a client session.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -474,7 +476,7 @@ public sealed partial class FtpCommandRouter
         return true;
     }
 
-    internal FtpSection GetSectionForVirtual(string virtPath)
+    internal FtpSection GetSectionForVirtual(string? virtPath)
     {
         // Normal routing first
         var section = _sections.GetSectionForPath(virtPath);
@@ -484,7 +486,7 @@ public sealed partial class FtpCommandRouter
             return section;
 
         // physical path may fail → ignore
-        string physPath;
+        string? physPath;
         try
         {
             physPath = _fs.MapToPhysical(virtPath);
@@ -575,7 +577,7 @@ public sealed partial class FtpCommandRouter
         return total;
     }
 
-    private async Task<bool> CheckDownloadCreditsAsync(string virtPath, FtpSection section, long bytes, CancellationToken ct)
+    private async Task<bool> CheckDownloadCreditsAsync(string? virtPath, FtpSection section, long bytes, CancellationToken ct)
     {
         var account = _s.Account;
         if (account is null) return true;
@@ -639,7 +641,7 @@ public sealed partial class FtpCommandRouter
         return true;
     }
 
-    private void ApplyDownloadCredits(string virtPath, FtpSection section, long bytes)
+    private void ApplyDownloadCredits(string? virtPath, FtpSection section, long bytes)
     {
         var account = _s.Account;
         if (account is null) return;

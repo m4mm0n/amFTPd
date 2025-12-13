@@ -3,8 +3,8 @@
  *  File:           SectionManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xC5AB776C
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xBF29CBB7
  *  
  *  Description:
  *      Holds the runtime collection of <see cref="FtpSection"/> objects and provides helpers for loading them from JSON / DB.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -36,7 +38,7 @@ public sealed class SectionManager
 
     public SectionManager(IEnumerable<FtpSection> sections)
     {
-        _sections = (sections ?? Array.Empty<FtpSection>())
+        _sections = (sections ?? [])
             .Select(s => s.Normalize())
             .OrderByDescending(s => s.VirtualRoot.Length)
             .ToArray();
@@ -63,7 +65,7 @@ public sealed class SectionManager
     /// Uses longest-prefix match on the section's VirtualRoot.
     /// Never returns null – if nothing matches, a fallback section is returned.
     /// </summary>
-    public FtpSection GetSectionForPath(string virtualPath)
+    public FtpSection GetSectionForPath(string? virtualPath)
     {
         if (string.IsNullOrWhiteSpace(virtualPath))
             virtualPath = "/";
@@ -115,7 +117,7 @@ public sealed class SectionManager
 
         var json = File.ReadAllText(path);
         var sections = JsonSerializer.Deserialize<List<FtpSection>>(json)
-                       ?? new List<FtpSection>();
+                       ?? [];
 
         return new SectionManager(sections);
     }

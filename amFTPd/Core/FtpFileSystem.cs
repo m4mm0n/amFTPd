@@ -3,8 +3,8 @@
  *  File:           FtpFileSystem.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xB99CBE47
+ *  Last Modified:  2025-12-13 04:18:09
+ *  CRC32:          0x2A3DB81F
  *  
  *  Description:
  *      Represents a virtual file system backed by a physical directory, providing methods to map virtual paths to physical p...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -51,11 +53,16 @@ public sealed class FtpFileSystem
     /// <param name="virtualPath">The virtual path to be mapped. The path should start with a forward slash ('/').</param>
     /// <returns>The physical file system path corresponding to the specified virtual path.</returns>
     /// <exception cref="UnauthorizedAccessException">Thrown if the resolved physical path is outside the root file system directory.</exception>
-    public string MapToPhysical(string virtualPath)
+    public string? MapToPhysical(string? virtualPath)
     {
-        var rel = virtualPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-        var full = Path.GetFullPath(Path.Combine(_rootFs, rel));
-        return !full.StartsWith(_rootFs, StringComparison.Ordinal) ? throw new UnauthorizedAccessException() : full;
+        var rel = virtualPath?.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        if (rel != null)
+        {
+            var full = Path.GetFullPath(Path.Combine(_rootFs, rel));
+            return !full.StartsWith(_rootFs, StringComparison.Ordinal) ? throw new UnauthorizedAccessException() : full;
+        }
+
+        return null;
     }
     /// <summary>
     /// Converts the specified <see cref="FileSystemInfo"/> object into a Unix-style file listing line.

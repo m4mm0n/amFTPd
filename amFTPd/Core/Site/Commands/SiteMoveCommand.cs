@@ -3,8 +3,8 @@
  *  File:           SiteMoveCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x242D4ABB
+ *  Last Modified:  2025-12-13 04:45:42
+ *  CRC32:          0x75419C07
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -69,8 +71,8 @@ public sealed class SiteMoveCommand : SiteCommandBase
         var srcVirt = FtpPath.Normalize(context.Session.Cwd, srcArg);
         var dstVirt = FtpPath.Normalize(context.Session.Cwd, dstArg);
 
-        string srcPhys;
-        string dstPhys;
+        string? srcPhys;
+        string? dstPhys;
         try
         {
             srcPhys = context.Router.FileSystem.MapToPhysical(srcVirt);
@@ -109,11 +111,15 @@ public sealed class SiteMoveCommand : SiteCommandBase
 
             if (isDir)
             {
-                Directory.Move(srcPhys, dstPhys);
+                if (dstPhys != null)
+                    if (srcPhys != null)
+                        Directory.Move(srcPhys, dstPhys);
             }
             else
             {
-                File.Move(srcPhys, dstPhys);
+                if (srcPhys != null)
+                    if (dstPhys != null)
+                        File.Move(srcPhys, dstPhys);
             }
 
             context.Log.Log(

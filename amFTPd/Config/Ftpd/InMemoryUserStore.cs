@@ -3,8 +3,8 @@
  *  File:           InMemoryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xE3EE8133
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xE7396AFC
  *  
  *  Description:
  *      Represents an in-memory user store for managing FTP user accounts.
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -79,7 +81,7 @@ namespace amFTPd.Config.Ftpd
             {
                 var json = File.ReadAllText(path);
                 var cfgUsers = JsonSerializer.Deserialize<List<FtpUserConfigUser>>(json, JsonOptions)
-                               ?? new List<FtpUserConfigUser>();
+                               ?? [];
 
                 var users = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase);
 
@@ -269,7 +271,7 @@ namespace amFTPd.Config.Ftpd
                 cu.Disabled,                                      // disabled
                 cu.HomeDir,                                       // homeDir
                 cu.GroupName,                                     // primary group (by position)
-                cu.SecondaryGroups ?? Array.Empty<string>(),      // secondary groups
+                cu.SecondaryGroups ?? [],      // secondary groups
                 cu.IsAdmin || cu.IsAdministrator,                 // isAdmin
                 cu.AllowFxp,                                      // allowFxp
                 cu.AllowUpload,                                   // allowUpload
@@ -282,7 +284,7 @@ namespace amFTPd.Config.Ftpd
                 cu.MaxUploadKbps,                                 // maxUploadKbps
                 cu.MaxDownloadKbps,                               // maxDownloadKbps
                 cu.CreditsKb,                                     // creditsKb
-                Array.Empty<FtpSection>(),                        // sections (none from JSON)
+                [],                        // sections (none from JSON)
                 cu.MaxConcurrentLogins,                           // maxConcurrentLogins
                 IsNoRatio: false,                                 // isNoRatio
                 FlagsRaw: string.Empty                            // flagsRaw (for SITE FLAGS etc.)
@@ -297,7 +299,7 @@ namespace amFTPd.Config.Ftpd
                 Disabled: u.Disabled,
                 HomeDir: u.HomeDir,
                 GroupName: u.GroupName ?? string.Empty,
-                SecondaryGroups: u.SecondaryGroups ?? Array.Empty<string>(),
+                SecondaryGroups: u.SecondaryGroups ?? [],
                 IsAdmin: u.IsAdmin,
                 IsAdministrator: u.IsAdmin,
                 AllowFxp: u.AllowFxp,
@@ -325,7 +327,7 @@ namespace amFTPd.Config.Ftpd
                 Disabled: false,
                 HomeDir: "/",
                 "admins",                                 // primary group (by position)
-                Array.Empty<string>(),                    // secondary groups
+                [],                    // secondary groups
                 IsAdmin: true,
                 AllowFxp: false,
                 AllowUpload: true,
@@ -338,7 +340,7 @@ namespace amFTPd.Config.Ftpd
                 MaxUploadKbps: 0,
                 MaxDownloadKbps: 0,
                 CreditsKb: 1024 * 1024,                   // 1 GB
-                Sections: Array.Empty<FtpSection>(),
+                Sections: [],
                 MaxConcurrentLogins: 5,
                 IsNoRatio: false,
                 FlagsRaw: string.Empty

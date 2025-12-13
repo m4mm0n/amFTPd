@@ -3,8 +3,8 @@
  *  File:           BinaryUserStoreMmap.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 20:12:17
- *  Last Modified:  2025-12-11 08:13:19
- *  CRC32:          0xD8BD3573
+ *  Last Modified:  2025-12-13 04:32:33
+ *  CRC32:          0x93FDFBE6
  *  
  *  Description:
  *      Represents a memory-mapped binary user store that provides secure and efficient storage and retrieval of FTP user dat...
@@ -16,6 +16,8 @@
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
+
+
 
 
 
@@ -332,6 +334,11 @@ namespace amFTPd.Db
 
         private byte[] BuildRecord(FtpUser u)
         {
+            if (u == null) throw new ArgumentNullException(nameof(u));
+            if (u.UserName == null) throw new ArgumentNullException(nameof(u.UserName));
+            if(u.PasswordHash == null) throw new ArgumentNullException(nameof(u.PasswordHash));
+            if(u.HomeDir == null) throw new ArgumentNullException(nameof(u.HomeDir));
+
             using var ms = new MemoryStream();
             using var bw = new BinaryWriter(ms);
 
@@ -340,8 +347,8 @@ namespace amFTPd.Db
             var homeLen = (ushort)Encoding.UTF8.GetByteCount(u.HomeDir);
             var groupLen = (ushort)(u.GroupName == null ? 0 : Encoding.UTF8.GetByteCount(u.GroupName));
 
-            var ipBytes = u.AllowedIpMask == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.AllowedIpMask);
-            var identBytes = u.RequiredIdent == null ? Array.Empty<byte>() : Encoding.UTF8.GetBytes(u.RequiredIdent);
+            var ipBytes = u.AllowedIpMask == null ? [] : Encoding.UTF8.GetBytes(u.AllowedIpMask);
+            var identBytes = u.RequiredIdent == null ? [] : Encoding.UTF8.GetBytes(u.RequiredIdent);
 
             bw.Write(nameLen);
             bw.Write(passLen);

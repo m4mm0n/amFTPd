@@ -3,8 +3,8 @@
  *  File:           FtpSectionConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x34E5DA79
+ *  Last Modified:  2025-12-13 04:32:32
+ *  CRC32:          0xBCE7D91F
  *  
  *  Description:
  *      Aggregates all configured sections and provides helpers for lookups.
@@ -21,6 +21,8 @@
 
 
 
+
+
 namespace amFTPd.Config.Ftpd;
 
 /// <summary>
@@ -30,7 +32,7 @@ public sealed record FtpSectionConfig
 {
     public static FtpSectionConfig Empty { get; } = new();
 
-    public List<FtpSection> Sections { get; init; } = new();
+    public List<FtpSection> Sections { get; init; } = [];
 
     // (Optional) convenience view
     public IReadOnlyList<FtpSection> SectionsReadonly => Sections;
