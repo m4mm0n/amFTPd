@@ -201,8 +201,10 @@ if ($modifiedFiles.Count -gt 0) {
         $sectionLines.Add("$($f):")
 
         if ($f.ToLower().EndsWith(".cs")) {
-            $methods = Get-ChangedMethodNames -Range $range -File $f -CurrentTag $currentTag -PreviousTag $previousTag
-            if ($methods.Count -gt 0) {
+            # Force result to an array so .Count is always valid
+            $methods = @(Get-ChangedMethodNames -Range $range -File $f -CurrentTag $currentTag -PreviousTag $previousTag)
+
+            if ($methods -and $methods.Count -gt 0) {
                 foreach ($m in $methods) {
                     if ($m.Status -eq "added") {
                         $sectionLines.Add("+ $($m.Name) added...")
