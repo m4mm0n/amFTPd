@@ -4,8 +4,8 @@
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-14 00:21:18
- *  CRC32:          0xD0CF7704
+ *  Last Modified:  2025-12-14 21:17:52
+ *  CRC32:          0xDA4B6E6A
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -25,6 +25,7 @@ using amFTPd.Config.Ident;
 using amFTPd.Config.Vfs;
 using amFTPd.Core.Ident;
 using amFTPd.Core.Sections;
+using amFTPd.Core.Stats;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Security;
@@ -213,6 +214,10 @@ public sealed class FtpSession : IAsyncDisposable
     /// Gets the remote network endpoint to which the socket is connected.
     /// </summary>
     public IPEndPoint? RemoteEndPoint { get; }
+    /// <summary>
+    /// Gets the FTP server associated with the current connection.
+    /// </summary>
+    public FtpServer? Server { get; }
     #endregion
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpSession"/> class, representing an FTP session with the specified
@@ -230,6 +235,7 @@ public sealed class FtpSession : IAsyncDisposable
     /// <param name="identCfg">The <see cref="IdentConfig"/> object used to configure the Ident protocol for the session.</param>
     /// <param name="vfsCfg">The <see cref="VfsConfig"/> object used to configure the virtual file system for the session.</param>
     /// <param name="sectionResolver">The <see cref="SectionResolver"/> used to resolve sections for the VFS manager.</param>
+    /// <param name="server">The <see cref="FtpServer"/> instance associated with this session.</param>
     public FtpSession(
         TcpClient control,
         IFtpLogger log,
@@ -240,7 +246,8 @@ public sealed class FtpSession : IAsyncDisposable
         TlsConfig tls,
         IdentConfig identCfg,
         VfsConfig vfsCfg,
-        SectionResolver sectionResolver)
+        SectionResolver sectionResolver,
+        FtpServer server)
     {
         Control = control;
         _log = log;
@@ -261,6 +268,7 @@ public sealed class FtpSession : IAsyncDisposable
         SessionId = Interlocked.Increment(ref _nextSessionId);
         _sessions[SessionId] = this;
         RemoteEndPoint = control.Client.RemoteEndPoint as IPEndPoint;
+        Server = server;
     }
     /// <summary>
     /// Marks the current operation as requesting to quit.
@@ -346,7 +354,7 @@ public sealed class FtpSession : IAsyncDisposable
         catch (Exception ex)
         {
             _log.Log(FtpLogLevel.Error, "TLS handshake failed on control connection.", ex);
-            ssl.Dispose();
+            await ssl.DisposeAsync();
             throw;
         }
     }
@@ -690,6 +698,9 @@ public sealed class FtpSession : IAsyncDisposable
             _commandTimestamps.Enqueue(DateTime.UtcNow);
             TrimOldCommandTimestamps();
         }
+
+        // Global perf counters for monitoring
+        PerfCounters.CommandExecuted();
     }
     /// <summary>
     /// Attempts to cancel the currently active data transfer (LIST/RETR/STOR/etc.).
@@ -728,6 +739,9 @@ public sealed class FtpSession : IAsyncDisposable
     {
         var newValue = Interlocked.Increment(ref _failedLoginAttempts);
         EvaluateReputationAfterLoginFailure(newValue);
+
+        // Global failed-login counter
+        PerfCounters.FailedLogin();
     }
 
     /// <summary>
@@ -737,6 +751,9 @@ public sealed class FtpSession : IAsyncDisposable
     {
         var newValue = Interlocked.Increment(ref _abortedTransfers);
         EvaluateReputationAfterTransferAbort(newValue);
+
+        // Track aborted transfers globally as well
+        PerfCounters.TransferAborted();
     }
 
     private void EvaluateReputationAfterLoginFailure(int failedCount)

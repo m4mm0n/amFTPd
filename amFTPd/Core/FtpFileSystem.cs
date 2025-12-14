@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpFileSystem.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 04:18:09
- *  CRC32:          0x2A3DB81F
+ *  Last Modified:  2025-12-14 00:59:03
+ *  CRC32:          0xB13EA84D
  *  
  *  Description:
  *      Represents a virtual file system backed by a physical directory, providing methods to map virtual paths to physical p...
@@ -15,14 +16,11 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
 
 
-
-
-
-
-
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 
@@ -39,6 +37,8 @@ namespace amFTPd.Core;
 public sealed class FtpFileSystem
 {
     private readonly string _rootFs; // physical root (full path)
+    private readonly ConcurrentDictionary<string, string> _pathCache = new(StringComparer.Ordinal);
+    
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpFileSystem"/> class with the specified root file system path.
     /// </summary>
@@ -55,14 +55,21 @@ public sealed class FtpFileSystem
     /// <exception cref="UnauthorizedAccessException">Thrown if the resolved physical path is outside the root file system directory.</exception>
     public string? MapToPhysical(string? virtualPath)
     {
-        var rel = virtualPath?.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-        if (rel != null)
-        {
-            var full = Path.GetFullPath(Path.Combine(_rootFs, rel));
-            return !full.StartsWith(_rootFs, StringComparison.Ordinal) ? throw new UnauthorizedAccessException() : full;
-        }
+        if (string.IsNullOrEmpty(virtualPath))
+            return null;
 
-        return null;
+        if (_pathCache.TryGetValue(virtualPath, out var cached))
+            return cached;
+
+        var rel = virtualPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        var full = Path.GetFullPath(Path.Combine(_rootFs, rel));
+
+        if (!full.StartsWith(_rootFs, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException();
+
+        // Best-effort cache; if there is a race, last writer wins.
+        _pathCache[virtualPath] = full;
+        return full;
     }
     /// <summary>
     /// Converts the specified <see cref="FileSystemInfo"/> object into a Unix-style file listing line.
@@ -137,4 +144,8 @@ public sealed class FtpFileSystem
 
         return sb.ToString();
     }
+    /// <summary>
+    /// Clears the internal path cache. Call this if the underlying root moves or mounts change.
+    /// </summary>
+    public void ClearPathCache() => _pathCache.Clear();
 }

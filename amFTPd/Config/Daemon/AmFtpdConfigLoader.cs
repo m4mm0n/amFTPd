@@ -4,8 +4,8 @@
  *  File:           AmFtpdConfigLoader.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 20:20:24
- *  CRC32:          0x6C510396
+ *  Last Modified:  2025-12-14 20:49:51
+ *  CRC32:          0x4DC65B5E
  *  
  *  Description:
  *      Asynchronously loads the runtime configuration for the FTP server from the specified configuration file.
@@ -18,12 +18,6 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ====================================================================================================
  */
-
-
-
-
-
-
 
 
 using amFTPd.Config.Ftpd;
@@ -113,7 +107,7 @@ public static class AmFtpdConfigLoader
                 {
                     UsersDbPath = defaultUsersDbPath,
                     SectionsPath = defaultSectionsPath,
-                    UserStoreBackend = "json",
+                    UserStoreBackend = "binary",
                     MasterPassword = "changeme",
                     GroupsDbPath = defaultGroupsDbPath,
                     SectionsDbPath = defaultSectionsDbPath,
@@ -144,7 +138,32 @@ public static class AmFtpdConfigLoader
                 RatioRules = new { },  // Dictionary<string, RatioRule>
                 Groups = new { },  // Dictionary<string, GroupConfig>
                 FxpPolicy = (object?)null,
-                Irc = (object?)null
+                Irc = (object?)null,
+                
+                Zipscript = new
+                {
+                    Enabled = true,
+                    DatabasePath = string.Empty,
+                    OffloadHeavyChecks = false,
+                    StrictSfv = false,
+                    IncludeSubdirsOnRescan = false
+                },
+                Status = new
+                {
+                    Enabled = false,
+                    BindAddress = "127.0.0.1",
+                    Port = 8080,
+                    Path = "/amftpd-status/"
+                },
+                Compatibility = new
+                {
+                    Profile = "none",              // "none", "gl", "io", "raiden", ...
+                    EnableCommandAliases = true,
+                    GlStyleSiteStat = false,
+                    IoStyleSiteWho = false,
+                    IrcGlStyleMessages = false,
+                    SiteCommandAliases = new { }   // reserved for future use
+                }
             };
 
             var jsonOptions = new JsonSerializerOptions
@@ -163,16 +182,24 @@ public static class AmFtpdConfigLoader
         // ------------------------------------------
         // Load JSON config (file now exists)
         // ------------------------------------------
-
         var json = await File.ReadAllTextAsync(configPath).ConfigureAwait(false);
 
         var root = JsonSerializer.Deserialize<AmFtpdConfigRoot>(json)
                    ?? throw new InvalidOperationException("Invalid configuration format.");
 
+        // ------------------------------------------------------------------
+        // Status / monitoring config (optional)
+        // ------------------------------------------------------------------
+        var statusConfig = root.Status ?? new AmFtpdStatusConfig(
+            Enabled: false,
+            BindAddress: "127.0.0.1",
+            Port: 8080,
+            Path: "/amftpd-status/"
+        );
+
         // ------------------------------------------
         // Build FtpConfig
         // ------------------------------------------
-
         var ftpRoot = Path.GetFullPath(root.Server.RootPath);
         Directory.CreateDirectory(ftpRoot);
 
@@ -181,10 +208,8 @@ public static class AmFtpdConfigLoader
 
         // Passive ports as tuple (Start, End)
         string? passivePorts = null; 
-        if (root.Server.PassivePortStart > 0 && root.Server.PassivePortEnd >= root.Server.PassivePortStart) 
-        { 
-            passivePorts = $"{root.Server.PassivePortStart}-{root.Server.PassivePortEnd}"; 
-        }
+        if (root.Server.PassivePortStart > 0 && root.Server.PassivePortEnd >= root.Server.PassivePortStart)
+            passivePorts = $"{root.Server.PassivePortStart}-{root.Server.PassivePortEnd}";
 
         // Parse data channel protection mode from string into enum.
         // Accept both enum names (Clear, Private, ...) and RFC short codes (C, S, E, P).
@@ -224,10 +249,15 @@ public static class AmFtpdConfigLoader
             AllowFxp: root.Server.AllowFxp
         );
 
+        // Apply compatibility profile if present in the root config.
+        if (root.Compatibility is not null)
+        {
+            ftpCfg = ftpCfg with { Compatibility = root.Compatibility };
+        }
+
         // ------------------------------------------
         // DatabaseManager (Users, Groups, Sections)
         // ------------------------------------------
-
         DatabaseManager? db = null;
         IUserStore userStore;
         IGroupStore? groupStore = null;
@@ -238,7 +268,6 @@ public static class AmFtpdConfigLoader
             backend.Equals("binary", StringComparison.OrdinalIgnoreCase);
 
         if (useBinary)
-        {
             try
             {
                 var dbBaseDir = Path.GetDirectoryName(root.Storage.UsersDbPath)
@@ -260,7 +289,6 @@ public static class AmFtpdConfigLoader
                     $"Failed to initialize binary database backend: {ex.Message}");
                 throw;
             }
-        }
         else
         {
             logger.Log(FtpLogLevel.Info,
@@ -287,7 +315,6 @@ public static class AmFtpdConfigLoader
         // ------------------------------------------
         // SectionManager (runtime FtpSection model)
         // ------------------------------------------
-
         var sections =
             sectionStore is not null
                 ? SectionManager.FromSectionStore(sectionStore, "db")
@@ -296,7 +323,6 @@ public static class AmFtpdConfigLoader
         // ------------------------------------------
         // TLS
         // ------------------------------------------
-
         var tlsCfg = await TlsConfig.CreateOrLoadAsync(
             root.Tls.PfxPath,
             root.Tls.PfxPassword,
@@ -306,7 +332,6 @@ public static class AmFtpdConfigLoader
         // ======================================================================
         // RATIO SYSTEM (SectionRule-based)
         // ======================================================================
-
         var dirEngine = new DirectoryRuleEngine(root.DirectoryRules);
 
         var ratioSectionResolver =
@@ -326,11 +351,48 @@ public static class AmFtpdConfigLoader
         );
 
         var raceEngine = new RaceEngine();
-        var zipscript = new ZipscriptEngine();
+
+        ZipscriptEngine? zipscript = null;
+        var zCfg = root.Zipscript ?? new ZipscriptConfig();
+
+        if (!zCfg.Enabled)
+        {
+            logger.Log(FtpLogLevel.Info, "Zipscript engine disabled via configuration.");
+        }
+        else
+        {
+            try
+            {
+                // Place zipscript DB next to the user DB by default.
+                var dbBaseDir = Path.GetDirectoryName(root.Storage.UsersDbPath);
+                if (string.IsNullOrWhiteSpace(dbBaseDir))
+                    dbBaseDir = AppContext.BaseDirectory;
+
+                var dbPath = string.IsNullOrWhiteSpace(zCfg.DatabasePath)
+                    ? Path.Combine(dbBaseDir!, "amftpd-zipscript.db")
+                    : Path.GetFullPath(zCfg.DatabasePath);
+
+                var zDb = new ZipscriptDbContext(dbPath);
+                zipscript = new ZipscriptEngine(zDb, logger, zCfg);
+
+                logger.Log(FtpLogLevel.Info, $"Zipscript engine enabled. DB path: {dbPath}");
+            }
+            catch (Exception ex)
+            {
+                logger.Log(
+                    FtpLogLevel.Warn,
+                    $"Failed to initialize zipscript engine; running without it. {ex.Message}",
+                    ex);
+
+                // Fall back to in-memory-only engine (no persistence).
+                zipscript = new ZipscriptEngine(null, logger, zCfg);
+            }
+        }
 
         FxpPolicyEngine? fxpPolicy = null;
         if (root.FxpPolicy is not null)
             fxpPolicy = new FxpPolicyEngine(root.FxpPolicy, tlsCfg);
+
 
         // ======================================================================
         // VFS SYSTEM (FtpSection-based)
@@ -345,12 +407,10 @@ public static class AmFtpdConfigLoader
         CreditEngine? creditEngine = null;
 
         if (groupStore is not null && sectionStore is not null)
-        {
             creditEngine = new CreditEngine(userStore, groupStore, sectionStore)
             {
                 DebugLog = msg => logger.Log(FtpLogLevel.Debug, msg)
             };
-        }
 
         // ======================================================================
         // Return combined runtime configuration
@@ -386,8 +446,82 @@ public static class AmFtpdConfigLoader
             FxpPolicy = fxpPolicy,
             IrcConfig = root.Irc,
 
-            CreditEngine = creditEngine
+            CreditEngine = creditEngine,
+
+            ConfigFilePath = configPath,
+            RawJson = json,
+            LoadedAtUtc = DateTimeOffset.UtcNow,
+            StatusConfig = statusConfig
         };
+    }
+
+    public sealed record AmFtpdConfigReloadResult(
+    AmFtpdRuntimeConfig Runtime,
+    IReadOnlyList<string> ChangedSections);
+
+    public static async Task<AmFtpdConfigReloadResult> ReloadAsync(
+        string configPath,
+        AmFtpdRuntimeConfig current,
+        IFtpLogger logger,
+        CancellationToken cancellationToken = default)
+    {
+        if (configPath is null) throw new ArgumentNullException(nameof(configPath));
+        if (current is null) throw new ArgumentNullException(nameof(current));
+        if (logger is null) throw new ArgumentNullException(nameof(logger));
+
+        logger.Log(FtpLogLevel.Info, $"Reloading configuration from '{configPath}'...");
+
+        // Reuse existing loader to fully validate and build a new runtime snapshot.
+        var newRuntime = await LoadAsync(configPath, logger).ConfigureAwait(false);
+
+        var changedSections = new List<string>();
+
+        try
+        {
+            using var oldDoc = JsonDocument.Parse(current.RawJson);
+            using var newDoc = JsonDocument.Parse(newRuntime.RawJson);
+
+            var oldRoot = oldDoc.RootElement;
+            var newRoot = newDoc.RootElement;
+
+            void Check(string jsonPropName, string humanName)
+            {
+                if (oldRoot.TryGetProperty(jsonPropName, out var o) &&
+                    newRoot.TryGetProperty(jsonPropName, out var n))
+                {
+                    if (!o.Equals(n))
+                        changedSections.Add(humanName);
+                }
+                else if (oldRoot.TryGetProperty(jsonPropName, out _) ||
+                         newRoot.TryGetProperty(jsonPropName, out _))
+                {
+                    // Exists only in one document → treat as changed.
+                    changedSections.Add(humanName);
+                }
+            }
+
+            Check("Server", "server");
+            Check("Tls", "tls");
+            Check("Storage", "storage");
+            Check("Ident", "ident");
+            Check("Vfs", "vfs");
+            Check("Sections", "sections");
+            Check("DirectoryRules", "directory rules");
+            Check("RatioRules", "ratio rules");
+            Check("Groups", "groups");
+            Check("FxpPolicy", "fxp policy");
+            Check("Irc", "irc");
+            Check("Zipscript", "zipscript");
+        }
+        catch (Exception ex)
+        {
+            logger.Log(
+                FtpLogLevel.Warn,
+                "Config reload diffing failed; configuration was reloaded but change summary may be incomplete.",
+                ex);
+        }
+
+        return new AmFtpdConfigReloadResult(newRuntime, changedSections);
     }
 
     private static async Task EnsureDefaultConfigExistsAsync(
@@ -469,7 +603,32 @@ public static class AmFtpdConfigLoader
             Groups = new { },
 
             FxpPolicy = (object?)null,
-            Irc = (object?)null
+            Irc = (object?)null,
+
+            Zipscript = new
+            {
+                Enabled = true,
+                DatabasePath = string.Empty,       // use default path next to user DB
+                OffloadHeavyChecks = false,
+                StrictSfv = false,
+                IncludeSubdirsOnRescan = false
+            },
+            Status = new
+            {
+                Enabled = false,
+                BindAddress = "127.0.0.1",
+                Port = 8080,
+                Path = "/amftpd-status/"
+            },
+            Compatibility = new
+            {
+                Profile = "none",              // "none", "gl", "io", "raiden", ...
+                EnableCommandAliases = true,
+                GlStyleSiteStat = false,
+                IoStyleSiteWho = false,
+                IrcGlStyleMessages = false,
+                SiteCommandAliases = new { }   // reserved for future use
+            }
         };
 
         var json = JsonSerializer.Serialize(

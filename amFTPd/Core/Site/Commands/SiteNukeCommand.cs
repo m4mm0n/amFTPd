@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteNukeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-13 04:45:42
- *  CRC32:          0x62D4E798
+ *  Last Modified:  2025-12-14 21:33:13
+ *  CRC32:          0x339492A2
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Core.Events;
@@ -35,7 +30,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteNukeCommand : SiteCommandBase
 {
     public override string Name => "NUKE";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "NUKE";
 
     public override async Task ExecuteAsync(
@@ -139,6 +135,17 @@ public sealed class SiteNukeCommand : SiteCommandBase
             race = r;
         }
 
+        if (context.Runtime.Zipscript is not null)
+        {
+            var secName = section?.Name ?? string.Empty;
+            context.Runtime.Zipscript.MarkReleaseNuked(
+                releaseVirt,
+                secName,
+                nuker,
+                reason,
+                nukeMultiplier);
+        }
+
         // Perform the actual physical NUKE (rename)
         try
         {
@@ -237,6 +244,7 @@ public sealed class SiteNukeCommand : SiteCommandBase
             {
                 Type = FtpEventType.Nuke,
                 Timestamp = DateTimeOffset.UtcNow,
+                SessionId = context.Session.SessionId,
                 User = nuker,
                 Group = context.Session.Account?.GroupName,
                 Section = section?.Name,

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SitePreCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 05:02:06
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xEADC0118
+ *  Last Modified:  2025-12-14 21:33:24
+ *  CRC32:          0x7CBB4AE9
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,16 +16,13 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
+using amFTPd.Core.Sections;
 
 namespace amFTPd.Core.Site.Commands
 {
@@ -33,7 +31,8 @@ namespace amFTPd.Core.Site.Commands
         public override string Name => "PRE";
 
         // Often restricted to admins / prebot – tweak if you want
-        public override bool RequiresAdmin => true;
+        public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
 
         public override string HelpText => "PRE <section> <release>  - register a pre in DUPE DB";
 
@@ -62,7 +61,7 @@ namespace amFTPd.Core.Site.Commands
                 return;
             }
 
-            var sectionName = parts[0];
+            var sectionName = context.Sections.NormalizeSectionName(parts[0]);
             var releaseName = parts[1];
 
             // Build a virtual path hint: "/SECTION/release"
@@ -106,6 +105,7 @@ namespace amFTPd.Core.Site.Commands
             {
                 Type = FtpEventType.Pre,
                 Timestamp = DateTimeOffset.UtcNow,
+                SessionId = context.Session.SessionId,
                 User = context.Session.Account?.UserName,
                 Group = context.Session.Account?.GroupName,
                 Section = sectionName,

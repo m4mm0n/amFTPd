@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSectionsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xE5207612
+ *  Last Modified:  2025-12-14 21:37:22
+ *  CRC32:          0x90E23849
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Text;
@@ -30,7 +27,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteSectionsCommand : SiteCommandBase
 {
     public override string Name => "SECTIONS";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "SECTIONS - list configured sections";
 
     public override async Task ExecuteAsync(
@@ -42,7 +40,7 @@ public sealed class SiteSectionsCommand : SiteCommandBase
         if (acc is not { IsAdmin: true })
         {
             await context.Session.WriteAsync(
-                "550 SITE SECTIONS requires admin privileges.\r\n",
+                "550 SITE SECTIONS requires admin/siteop privileges.\r\n",
                 cancellationToken);
             return;
         }

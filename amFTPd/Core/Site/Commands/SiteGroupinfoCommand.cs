@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteGroupinfoCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:48:23
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4A47EB4F
+ *  Last Modified:  2025-12-14 21:30:55
+ *  CRC32:          0x9FB8A06E
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Text;
@@ -30,7 +27,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteGroupinfoCommand : SiteCommandBase
 {
     public override string Name => "GROUPINFO";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "GROUPINFO <group> - show details for a group";
 
     public override async Task ExecuteAsync(

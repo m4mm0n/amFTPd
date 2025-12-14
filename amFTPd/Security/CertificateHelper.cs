@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           CertificateHelper.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 03:56:15
- *  CRC32:          0x529E447B
+ *  Last Modified:  2025-12-14 20:52:43
+ *  CRC32:          0x6D51D761
  *  
  *  Description:
  *      Creates a self-signed X.509 certificate asynchronously.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Security.Cryptography;

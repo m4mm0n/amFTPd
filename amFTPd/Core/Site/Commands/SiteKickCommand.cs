@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteKickCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:50:00
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x8520A9F2
+ *  Last Modified:  2025-12-14 21:31:46
+ *  CRC32:          0xB2AD5941
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands
@@ -28,7 +25,8 @@ namespace amFTPd.Core.Site.Commands
     public sealed class SiteKickCommand : SiteCommandBase
     {
         public override string Name => "KICK";
-        public override bool RequiresAdmin => true;
+        public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
         public override string HelpText => "KICK <user>  - disconnect all sessions of user";
 
         public override async Task ExecuteAsync(

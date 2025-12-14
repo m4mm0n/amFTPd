@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AMScriptResult.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-16 06:36:37
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x722388CD
+ *  Last Modified:  2025-12-14 18:10:56
+ *  CRC32:          0x27D83D1B
  *  
  *  Description:
  *      Represents the result of an action performed by an AMScript, including the action type, associated costs, and optiona...
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Scripting
@@ -42,6 +41,9 @@ namespace amFTPd.Scripting
     /// <param name="NewUploadLimit">An optional new upload limit, in bytes, to be applied as part of the result.</param>
     /// <param name="NewDownloadLimit">An optional new download limit, in bytes, to be applied as part of the result.</param>
     /// <param name="CreditDelta">An optional credit adjustment, in bytes, to be applied to the user's account.</param>
+    /// <param name="IsError">Indicates whether the result represents an error condition.</param>
+    /// <param name="ErrorCode">An optional error code associated with the result, if applicable.</param>
+    /// <param name="ErrorMessage">An optional error message providing details about the error condition, if applicable.</param>
     public sealed partial record AMScriptResult(
         AMRuleAction Action,
         long CostDownload,
@@ -57,7 +59,10 @@ namespace amFTPd.Scripting
         string? DenyReason = null,
         int? NewUploadLimit = null,
         int? NewDownloadLimit = null,
-        long? CreditDelta = null
+        long? CreditDelta = null,
+        bool IsError = false,
+        string? ErrorCode = null,
+        string? ErrorMessage = null
     )
     {
         /// <summary>
@@ -135,6 +140,32 @@ namespace amFTPd.Scripting
                 0,
                 0,
                 Message: "SITE_OVERRIDE"
+            );
+        /// <summary>
+        /// Creates an <see cref="AMScriptResult"/> that represents an error condition with the specified error code and
+        /// message.
+        /// </summary>
+        /// <remarks>Use this method to generate a standardized error result when an operation fails and
+        /// you need to communicate the error details to the caller.</remarks>
+        /// <param name="ctx">The current <see cref="AMScriptContext"/> associated with the operation. Cannot be <see langword="null"/>.</param>
+        /// <param name="errorCode">A string that identifies the type or category of the error. Cannot be <see langword="null"/>.</param>
+        /// <param name="errorMessage">A descriptive message providing details about the error. Cannot be <see langword="null"/>.</param>
+        /// <returns>An <see cref="AMScriptResult"/> instance indicating an error, with the specified error code and message set.
+        /// Other result fields are set to their default or context-derived values.</returns>
+        public static AMScriptResult Error(AMScriptContext ctx, string errorCode, string errorMessage)
+            => new(
+                AMRuleAction.None,
+                ctx.CostDownload,
+                ctx.EarnedUpload,
+                Message: null,
+                SiteOutput: null,
+                DenyReason: null,
+                NewUploadLimit: null,
+                NewDownloadLimit: null,
+                CreditDelta: null,
+                IsError: true,
+                ErrorCode: errorCode,
+                ErrorMessage: errorMessage
             );
 
         /// <summary>

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpAuthorization.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-17 05:27:55
- *  Last Modified:  2025-12-11 04:25:07
- *  CRC32:          0x7D155751
+ *  Last Modified:  2025-12-14 21:38:24
+ *  CRC32:          0xA07A858F
  *  
  *  Description:
  *      Per-user, per-command authorization based on FtpUser flags. This is a coarse gate; individual handlers and AMScript m...
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Ftpd;
@@ -145,35 +142,48 @@ namespace amFTPd.Security
         /// </summary>
         public static bool CanUseSiteCommand(FtpUser user, string siteVerb, SiteCommandContext ctx)
         {
-            switch (siteVerb.ToUpperInvariant())
+            if (user is null)
+                return false;
+
+            var verb = (siteVerb ?? string.Empty).Trim().ToUpperInvariant();
+            if (verb.Length == 0)
+                return false;
+
+            switch (verb)
             {
                 // Hard admin-only stuff
                 case "KICK":
                 case "BAN":
                 case "UNBAN":
                 case "RELOAD":
+                case "REHASH":
                 case "SHUTDOWN":
                 case "SECURITY":
                     return user.IsAdmin;
 
-                // Semi-admin / staff
+                // Semi-admin / staff (SiteOp + Admin)
                 case "CHGRP":
                 case "CHUSER":
                 case "FLAG":
                 case "GIVE":
                 case "TAKE":
-                    return user.IsAdmin || user.IsSiteop; // adjust to your model
+                case "ADDIP":
+                    return user.IsAdmin || user.IsSiteop;
 
-                // Read-only / info
+                // Read-only / info (safe for everyone)
                 case "WHO":
                 case "UPTIME":
                 case "HELP":
                 case "RULES":
+                case "VERS":
+                case "VERSION":
                     return true;
 
                 default:
-                    // Unknown SITE verb → deny by default
-                    return false;
+                    // For any other verb:
+                    // - Admin: allowed (per-command logic can still deny)
+                    // - Non-admin: blocked
+                    return user.IsAdmin;
             }
         }
     }

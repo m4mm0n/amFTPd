@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDbsummaryCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:28:48
- *  Last Modified:  2025-12-10 03:30:22
- *  CRC32:          0x1D9DB44D
+ *  Last Modified:  2025-12-14 21:28:47
+ *  CRC32:          0x9C6FFBA5
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,9 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Logging;
@@ -27,7 +27,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteDbsummaryCommand : SiteCommandBase
 {
     public override string Name => "DBSUMMARY";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "DBSUMMARY";
     public override async Task ExecuteAsync(
         SiteCommandContext context,

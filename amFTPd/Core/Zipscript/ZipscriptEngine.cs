@@ -1,13 +1,14 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           ZipscriptEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 04:39:40
- *  Last Modified:  2025-12-13 04:45:42
- *  CRC32:          0x20BE063A
+ *  Last Modified:  2025-12-14 13:59:23
+ *  CRC32:          0x8B26F2C1
  *  
  *  Description:
- *      Simple in-memory zipscript engine: - Watches uploads of .sfv and listed files. - Computes CRC32 for uploaded files. -...
+ *      Zipscript engine: - Watches uploads of .sfv and listed files. - Computes CRC32 for uploaded files. - Tracks per-relea...
  * 
  *  License:
  *      MIT License
@@ -15,24 +16,23 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
 
 
-
-
-
-
-
-using System.Globalization;
+using amFTPd.Db;
+using amFTPd.Logging;
 using amFTPd.Utils;
+using System.Globalization;
 
 namespace amFTPd.Core.Zipscript
 {
     /// <summary>
-    /// Simple in-memory zipscript engine:
+    /// Zipscript engine:
     /// - Watches uploads of .sfv and listed files.
     /// - Computes CRC32 for uploaded files.
-    /// - Tracks per-release status (OK / BAD / MISSING).
+    /// - Tracks per-release status (OK / BAD / MISSING / NUKED).
+    /// - Persists state to a small JSON DB for fast lookups on restart.
     /// </summary>
     public sealed class ZipscriptEngine
     {
@@ -53,6 +53,13 @@ namespace amFTPd.Core.Zipscript
             public DateTimeOffset Started { get; set; } = DateTimeOffset.UtcNow;
             public DateTimeOffset LastUpdated { get; set; } = DateTimeOffset.UtcNow;
 
+            public bool IsNuked { get; set; }
+            public bool WasNuked { get; set; }
+            public string? NukeReason { get; set; }
+            public string? NukedBy { get; set; }
+            public double? NukeMultiplier { get; set; }
+            public DateTimeOffset? NukedAt { get; set; }
+
             public Dictionary<string, SfvEntry> SfvEntries { get; } =
                 new(StringComparer.OrdinalIgnoreCase);
 
@@ -64,9 +71,58 @@ namespace amFTPd.Core.Zipscript
         private readonly Dictionary<string, ReleaseState> _releases =
             new(StringComparer.OrdinalIgnoreCase);
 
+        private readonly ZipscriptDbContext? _db;
+        private readonly ZipscriptConfig _config;
+        private readonly IFtpLogger? _log;
+
+        private int _pendingDbWrites;
+        private const int DbFlushThreshold = 32;
+
+        // ---------------------------------------------------------------------
+        // Constructors
+        // ---------------------------------------------------------------------
+
+        public ZipscriptEngine()
+            : this(null, null, null)
+        {
+        }
+
+        public ZipscriptEngine(
+            ZipscriptDbContext? db,
+            IFtpLogger? log,
+            ZipscriptConfig? config)
+        {
+            _db = db;
+            _log = log;
+            _config = config ?? new ZipscriptConfig();
+
+            if (_db is not null)
+            {
+                try
+                {
+                    ZipscriptDbMigrations.EnsureSchema(_db, msg =>
+                        _log?.Log(FtpLogLevel.Warn, msg));
+
+                    var (_, files) = _db.Load();
+                    RebuildFromDb(files);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Log(
+                        FtpLogLevel.Warn,
+                        $"ZipscriptEngine: failed to initialize from DB '{_db.DbFilePath}': {ex.Message}",
+                        ex);
+                }
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Public API
+        // ---------------------------------------------------------------------
+
         /// <summary>
-        /// Notify the engine that a file has been uploaded.
-        /// Call this from STOR/APPE handlers after successful upload.
+        /// Legacy API kept for compatibility: wraps into <see cref="ZipscriptUploadContext"/>.
+        /// Call this from STOR/APPE handlers if you don't want to build the context manually.
         /// </summary>
         public void OnFileUploaded(
             string virtualFilePath,
@@ -74,20 +130,48 @@ namespace amFTPd.Core.Zipscript
             string sectionName,
             long sizeBytes)
         {
-            if (string.IsNullOrWhiteSpace(virtualFilePath))
+            var ctx = new ZipscriptUploadContext(
+                sectionName,
+                virtualFilePath,
+                physicalFilePath,
+                sizeBytes,
+                UserName: null,
+                CompletedAt: DateTimeOffset.UtcNow);
+
+            OnUploadComplete(ctx);
+        }
+
+        /// <summary>
+        /// Notify the engine that an upload has completed successfully.
+        /// This is the main entry point from STOR/APPE.
+        /// </summary>
+        public void OnUploadComplete(ZipscriptUploadContext ctx)
+        {
+            if (ctx is null) throw new ArgumentNullException(nameof(ctx));
+            if (string.IsNullOrWhiteSpace(ctx.VirtualFilePath))
                 return;
 
-            // Normalize and derive release directory + file name
-            var normalizedVirt = NormalizeVirtualPath(virtualFilePath);
+            var normalizedVirt = NormalizeVirtualPath(ctx.VirtualFilePath);
             var releasePath = GetReleasePath(normalizedVirt);
             var fileName = Path.GetFileName(normalizedVirt);
 
             // Compute CRC32 for non-SFV files *before* taking the lock to avoid holding it while doing IO.
             uint? crc = null;
             var isSfv = fileName.EndsWith(".sfv", StringComparison.OrdinalIgnoreCase);
+
             if (!isSfv)
             {
-                crc = Crc32.Compute(physicalFilePath);
+                try
+                {
+                    crc = Crc32.Compute(ctx.PhysicalFilePath);
+                }
+                catch (Exception ex)
+                {
+                    _log?.Log(
+                        FtpLogLevel.Warn,
+                        $"Zipscript: failed to compute CRC32 for '{ctx.PhysicalFilePath}'.",
+                        ex);
+                }
             }
 
             lock (_lock)
@@ -97,28 +181,283 @@ namespace amFTPd.Core.Zipscript
                     state = new ReleaseState
                     {
                         ReleasePath = releasePath,
-                        SectionName = sectionName,
-                        Started = DateTimeOffset.UtcNow,
-                        LastUpdated = DateTimeOffset.UtcNow
+                        SectionName = ctx.SectionName,
+                        Started = ctx.CompletedAt,
+                        LastUpdated = ctx.CompletedAt
                     };
                     _releases[releasePath] = state;
                 }
                 else
                 {
-                    state.LastUpdated = DateTimeOffset.UtcNow;
+                    state.LastUpdated = ctx.CompletedAt;
                 }
 
                 if (isSfv)
                 {
                     state.SfvVirtualPath = normalizedVirt;
-                    state.SfvPhysicalPath = physicalFilePath;
+                    state.SfvPhysicalPath = ctx.PhysicalFilePath;
                     LoadSfvIntoState(state);
                 }
                 else
                 {
-                    UpdateFileInState(state, fileName, sizeBytes, crc);
+                    UpdateFileInState(
+                        state,
+                        fileName,
+                        ctx.SizeBytes,
+                        crc,
+                        ctx.CompletedAt);
                 }
             }
+
+            PersistSnapshotIfNeeded();
+        }
+
+        /// <summary>
+        /// Notify the engine that a file or directory has been deleted.
+        /// Call this from DELE/RMD/SITE WIPE handlers.
+        /// </summary>
+        public void OnDelete(ZipscriptDeleteContext ctx)
+        {
+            if (ctx is null) throw new ArgumentNullException(nameof(ctx));
+
+            var virt = NormalizeVirtualPath(ctx.VirtualPath);
+
+            if (ctx.IsDirectory)
+            {
+                lock (_lock)
+                {
+                    _releases.Remove(virt);
+                }
+
+                PersistSnapshotIfNeeded(force: true);
+                return;
+            }
+
+            var releasePath = GetReleasePath(virt);
+            var fileName = Path.GetFileName(virt);
+
+            lock (_lock)
+            {
+                if (!_releases.TryGetValue(releasePath, out var state))
+                    return;
+
+                if (!state.Files.TryGetValue(fileName, out var info))
+                    return;
+
+                info.SizeBytes = 0;
+                info.ActualCrc = null;
+                info.State = ZipscriptFileState.Deleted;
+                info.LastUpdatedAt = ctx.DeletedAt;
+            }
+
+            PersistSnapshotIfNeeded();
+        }
+
+        /// <summary>
+        /// Rescan a directory from disk and rebuild its zipscript state.
+        /// </summary>
+        public ZipscriptReleaseStatus? OnRescanDir(ZipscriptRescanContext ctx)
+        {
+            if (ctx is null) throw new ArgumentNullException(nameof(ctx));
+
+            var virtRelease = NormalizeVirtualPath(ctx.VirtualReleasePath);
+
+            if (!Directory.Exists(ctx.PhysicalReleasePath))
+                return null;
+
+            var searchOption = ctx.IncludeSubdirs || _config.IncludeSubdirsOnRescan
+                ? SearchOption.AllDirectories
+                : SearchOption.TopDirectoryOnly;
+
+            var state = new ReleaseState
+            {
+                ReleasePath = virtRelease,
+                SectionName = ctx.SectionName,
+                Started = ctx.RequestedAt,
+                LastUpdated = ctx.RequestedAt
+            };
+
+            // If we already had state for this release, carry over nuke metadata.
+            lock (_lock)
+            {
+                if (_releases.TryGetValue(virtRelease, out var existing))
+                {
+                    state.IsNuked = existing.IsNuked;
+                    state.WasNuked = existing.WasNuked;
+                    state.NukeReason = existing.NukeReason;
+                    state.NukedBy = existing.NukedBy;
+                    state.NukeMultiplier = existing.NukeMultiplier;
+                    state.NukedAt = existing.NukedAt;
+                }
+            }
+
+            string? sfvPath = null;
+            string? sfvVirtPath = null;
+
+            try
+            {
+                // Find the first SFV file in this release.
+                foreach (var file in Directory.EnumerateFiles(ctx.PhysicalReleasePath, "*.sfv", searchOption))
+                {
+                    sfvPath = file;
+                    var relative = Path.GetRelativePath(ctx.PhysicalReleasePath, file)
+                        .Replace('\\', '/');
+                    sfvVirtPath = virtRelease.TrimEnd('/') + "/" + relative;
+                    break;
+                }
+
+                if (!string.IsNullOrEmpty(sfvPath))
+                {
+                    state.SfvPhysicalPath = sfvPath;
+                    state.SfvVirtualPath = sfvVirtPath;
+                    LoadSfvIntoState(state);
+                }
+
+                // Walk all files and update state.
+                foreach (var file in Directory.EnumerateFiles(ctx.PhysicalReleasePath, "*.*", searchOption))
+                {
+                    var relative = Path.GetRelativePath(ctx.PhysicalReleasePath, file)
+                        .Replace('\\', '/');
+                    var fileVirt = virtRelease.TrimEnd('/') + "/" + relative;
+                    var fileName = Path.GetFileName(fileVirt);
+
+                    var fi = new FileInfo(file);
+                    uint? crc = null;
+
+                    var isSfv = fileName.EndsWith(".sfv", StringComparison.OrdinalIgnoreCase);
+                    if (!isSfv)
+                    {
+                        try
+                        {
+                            crc = Crc32.Compute(file);
+                        }
+                        catch (Exception ex)
+                        {
+                            _log?.Log(
+                                FtpLogLevel.Warn,
+                                $"Zipscript RESCAN: failed to compute CRC32 for '{file}'.",
+                                ex);
+                        }
+                    }
+
+                    UpdateFileInState(
+                        state,
+                        fileName,
+                        fi.Length,
+                        crc,
+                        ctx.RequestedAt);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Log(
+                    FtpLogLevel.Warn,
+                    $"Zipscript RESCAN failed for '{ctx.PhysicalReleasePath}': {ex.Message}",
+                    ex);
+                return null;
+            }
+
+            lock (_lock)
+            {
+                _releases[virtRelease] = state;
+            }
+
+            PersistSnapshotIfNeeded(force: true);
+            return BuildStatus(state);
+        }
+
+        /// <summary>
+        /// Mark a release as nuked and propagate that information to all files.
+        /// </summary>
+        public void MarkReleaseNuked(
+            string virtualReleasePath,
+            string? sectionName,
+            string nuker,
+            string reason,
+            double nukeMultiplier)
+        {
+            if (string.IsNullOrWhiteSpace(virtualReleasePath))
+                return;
+
+            var virt = NormalizeVirtualPath(virtualReleasePath);
+
+            lock (_lock)
+            {
+                if (!_releases.TryGetValue(virt, out var state))
+                {
+                    state = new ReleaseState
+                    {
+                        ReleasePath = virt,
+                        SectionName = sectionName,
+                        Started = DateTimeOffset.UtcNow
+                    };
+                    _releases[virt] = state;
+                }
+
+                state.IsNuked = true;
+                state.WasNuked = true;
+                state.NukeReason = reason;
+                state.NukedBy = nuker;
+                state.NukeMultiplier = nukeMultiplier;
+                state.NukedAt = DateTimeOffset.UtcNow;
+                state.LastUpdated = DateTimeOffset.UtcNow;
+
+                foreach (var fi in state.Files.Values)
+                {
+                    fi.IsNuked = true;
+                    fi.NukeReason = reason;
+                    fi.NukedBy = nuker;
+                    fi.NukedAt = state.NukedAt;
+                    if (fi.State == ZipscriptFileState.Ok ||
+                        fi.State == ZipscriptFileState.BadCrc ||
+                        fi.State == ZipscriptFileState.Extra ||
+                        fi.State == ZipscriptFileState.Pending)
+                    {
+                        fi.State = ZipscriptFileState.Nuked;
+                    }
+                    fi.LastUpdatedAt = state.LastUpdated;
+                }
+            }
+
+            PersistSnapshotIfNeeded();
+        }
+
+        /// <summary>
+        /// Mark a release as unnuked (UNNUKE) while remembering that it was nuked before.
+        /// </summary>
+        public void MarkReleaseUnnuked(
+            string virtualReleasePath,
+            string unnuker)
+        {
+            if (string.IsNullOrWhiteSpace(virtualReleasePath))
+                return;
+
+            var virt = NormalizeVirtualPath(virtualReleasePath);
+
+            lock (_lock)
+            {
+                if (!_releases.TryGetValue(virt, out var state))
+                    return;
+
+                state.IsNuked = false;
+                state.LastUpdated = DateTimeOffset.UtcNow;
+                // keep WasNuked = true, keep reason/multiplier for history
+
+                foreach (var fi in state.Files.Values)
+                {
+                    fi.IsNuked = false;
+                    // Do not reset reason or NukedAt; they are historical.
+                    if (fi.State == ZipscriptFileState.Nuked)
+                    {
+                        // After UNNUKE we don't infer more; the next RESCAN or upload will re-evaluate.
+                        fi.State = ZipscriptFileState.Pending;
+                    }
+
+                    fi.LastUpdatedAt = state.LastUpdated;
+                }
+            }
+
+            PersistSnapshotIfNeeded();
         }
 
         /// <summary>
@@ -136,14 +475,22 @@ namespace amFTPd.Core.Zipscript
         }
 
         /// <summary>
-        /// Optional: clear all in-memory state (e.g. on config reload).
+        /// Clear all in-memory state (e.g. on config reload).
         /// </summary>
         public void Clear()
         {
-            lock (_lock) _releases.Clear();
+            lock (_lock)
+            {
+                _releases.Clear();
+            }
+
+            PersistSnapshotIfNeeded(force: true);
         }
 
-        #region Internals
+        // ---------------------------------------------------------------------
+        // Internals
+        // ---------------------------------------------------------------------
+
         private static string NormalizeVirtualPath(string virt)
         {
             var p = virt.Replace('\\', '/').Trim();
@@ -164,95 +511,94 @@ namespace amFTPd.Core.Zipscript
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
                 return;
 
-            state.SfvEntries.Clear();
+            try
+            {
+                var lines = File.ReadAllLines(path);
+                state.SfvEntries.Clear();
 
-            using (var sr = new StreamReader(path))
-                while (sr.ReadLine() is { } line)
+                foreach (var line in lines)
                 {
-                    line = line.Trim();
-                    if (line.Length == 0)
-                        continue;
-                    if (line.StartsWith(";") || line.StartsWith("#"))
+                    var trimmed = line.Trim();
+                    if (string.IsNullOrEmpty(trimmed) ||
+                        trimmed.StartsWith(";", StringComparison.Ordinal))
                         continue;
 
-                    // Basic "filename CRC" format (separated by whitespace)
-                    var parts = line.Split((char[])null!, StringSplitOptions.RemoveEmptyEntries);
+                    // Classic SFV line: "filename.ext CRC32"
+                    var parts = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length < 2)
                         continue;
 
-                    var fileName = parts[0].Trim();
-                    var crcStr = parts[1].Trim();
+                    var fileName = parts[0];
+                    var crcStr = parts[^1];
 
-                    if (crcStr.Length != 8)
-                        continue;
-
-                    if (!uint.TryParse(crcStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var crc))
-                        continue;
-
-                    state.SfvEntries[fileName] = new SfvEntry
+                    if (uint.TryParse(crcStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var crc))
                     {
-                        FileName = fileName,
-                        ExpectedCrc = crc
-                    };
+                        state.SfvEntries[fileName] = new SfvEntry
+                        {
+                            FileName = fileName,
+                            ExpectedCrc = crc
+                        };
+                    }
                 }
 
-            // Now re-evaluate statuses for all files in this release
-            foreach (var kvp in state.SfvEntries)
-            {
-                var fileName = kvp.Key;
-                var entry = kvp.Value;
-
-                if (!state.Files.TryGetValue(fileName, out var info))
+                // Mark MISSING entries for all SFV-listed files we haven't seen yet
+                foreach (var kvp in state.SfvEntries.Values)
                 {
-                    // Seen in SFV, not yet uploaded
-                    info = new ZipscriptFileInfo
+                    if (!state.Files.TryGetValue(kvp.FileName, out var info))
                     {
-                        FileName = fileName,
-                        ExpectedCrc = entry.ExpectedCrc,
-                        ActualCrc = null,
-                        SizeBytes = 0,
-                        State = ZipscriptFileState.Missing
-                    };
-                    state.Files[fileName] = info;
-                }
-                else
-                {
-                    info.ExpectedCrc = entry.ExpectedCrc;
-                    if (info.ActualCrc is null)
-                    {
-                        info.State = ZipscriptFileState.Missing;
+                        info = new ZipscriptFileInfo
+                        {
+                            FileName = kvp.FileName,
+                            ExpectedCrc = kvp.ExpectedCrc,
+                            State = ZipscriptFileState.Missing
+                        };
+                        state.Files[kvp.FileName] = info;
                     }
                     else
                     {
-                        info.State = info.ActualCrc == entry.ExpectedCrc
-                            ? ZipscriptFileState.Ok
-                            : ZipscriptFileState.BadCrc;
+                        info.ExpectedCrc = kvp.ExpectedCrc;
+                        if (info.ActualCrc is null)
+                            info.State = ZipscriptFileState.Missing;
                     }
                 }
-            }
 
-            // Mark extra files not in SFV
-            foreach (var kvp in state.Files.Values.Where(kvp => !state.SfvEntries.ContainsKey(kvp.FileName)))
-                kvp.State = ZipscriptFileState.Extra;
+                // Mark EXTRA for any files we have that do not appear in SFV
+                foreach (var info in state.Files.Values.Where(fi =>
+                             !state.SfvEntries.ContainsKey(fi.FileName) &&
+                             fi.State == ZipscriptFileState.Pending))
+                {
+                    info.State = ZipscriptFileState.Extra;
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Log(
+                    FtpLogLevel.Warn,
+                    $"Zipscript: failed to parse SFV '{path}': {ex.Message}",
+                    ex);
+            }
         }
 
         private static void UpdateFileInState(
             ReleaseState state,
             string fileName,
             long sizeBytes,
-            uint? crc)
+            uint? crc,
+            DateTimeOffset timestamp)
         {
             if (!state.Files.TryGetValue(fileName, out var info))
             {
                 info = new ZipscriptFileInfo
                 {
-                    FileName = fileName
+                    FileName = fileName,
+                    CreatedAt = timestamp
                 };
                 state.Files[fileName] = info;
             }
 
             info.SizeBytes = sizeBytes;
             info.ActualCrc = crc;
+            info.LastUpdatedAt = timestamp;
 
             if (state.SfvEntries.TryGetValue(fileName, out var entry))
             {
@@ -262,22 +608,181 @@ namespace amFTPd.Core.Zipscript
                     : ZipscriptFileState.BadCrc;
             }
             else
+            {
                 // We don't yet know what SFV says about this file
-                info.State = ZipscriptFileState.Pending;
+                if (info.State != ZipscriptFileState.Deleted &&
+                    info.State != ZipscriptFileState.Nuked)
+                {
+                    info.State = ZipscriptFileState.Pending;
+                }
+            }
+
+            // Propagate nuke flag from release-level state, if any
+            if (state.IsNuked)
+            {
+                info.IsNuked = true;
+                info.NukeReason = state.NukeReason;
+                info.NukedBy = state.NukedBy;
+                info.NukedAt = state.NukedAt;
+                if (info.State == ZipscriptFileState.Ok ||
+                    info.State == ZipscriptFileState.BadCrc ||
+                    info.State == ZipscriptFileState.Extra ||
+                    info.State == ZipscriptFileState.Pending)
+                {
+                    info.State = ZipscriptFileState.Nuked;
+                }
+            }
+        }
+
+        private void RebuildFromDb(IReadOnlyCollection<ZipscriptFileEntity> files)
+        {
+            lock (_lock)
+            {
+                _releases.Clear();
+
+                foreach (var group in files.GroupBy(
+                             f => NormalizeVirtualPath(f.ReleasePath),
+                             StringComparer.OrdinalIgnoreCase))
+                {
+                    var first = group.First();
+                    var releasePath = NormalizeVirtualPath(first.ReleasePath);
+
+                    var state = new ReleaseState
+                    {
+                        ReleasePath = releasePath,
+                        SectionName = first.SectionName,
+                        Started = group.Min(f => f.CreatedAt),
+                        LastUpdated = group.Max(f => f.LastUpdatedAt),
+                        IsNuked = group.Any(f => f.IsNuked),
+                        WasNuked = group.Any(f => f.IsNuked || f.NukeMultiplier.HasValue),
+                        NukeMultiplier = group.Select(f => f.NukeMultiplier)
+                                              .FirstOrDefault(m => m.HasValue),
+                        NukeReason = group.Select(f => f.NukeReason)
+                                          .FirstOrDefault(r => !string.IsNullOrEmpty(r)),
+                        NukedBy = group.Select(f => f.NukedBy)
+                                       .FirstOrDefault(u => !string.IsNullOrEmpty(u)),
+                        NukedAt = group.Select(f => f.NukedAt)
+                                       .FirstOrDefault(d => d.HasValue)
+                    };
+
+                    foreach (var row in group)
+                    {
+                        var info = new ZipscriptFileInfo
+                        {
+                            FileName = row.FileName,
+                            ExpectedCrc = row.ExpectedCrc,
+                            ActualCrc = row.ActualCrc,
+                            SizeBytes = row.SizeBytes,
+                            State = row.State,
+                            CreatedAt = row.CreatedAt,
+                            LastUpdatedAt = row.LastUpdatedAt,
+                            IsNuked = row.IsNuked,
+                            NukeReason = row.NukeReason,
+                            NukedBy = row.NukedBy,
+                            NukedAt = row.NukedAt
+                        };
+
+                        state.Files[row.FileName] = info;
+
+                        if (row.ExpectedCrc.HasValue &&
+                            !state.SfvEntries.ContainsKey(row.FileName))
+                        {
+                            state.SfvEntries[row.FileName] = new SfvEntry
+                            {
+                                FileName = row.FileName,
+                                ExpectedCrc = row.ExpectedCrc.Value
+                            };
+                        }
+                    }
+
+                    _releases[releasePath] = state;
+                }
+            }
+        }
+
+        private List<ZipscriptFileEntity> BuildDbSnapshotUnsafe()
+        {
+            var list = new List<ZipscriptFileEntity>();
+
+            foreach (var state in _releases.Values)
+            {
+                foreach (var fi in state.Files.Values)
+                {
+                    var entity = new ZipscriptFileEntity(
+                        ReleasePath: state.ReleasePath,
+                        SectionName: state.SectionName,
+                        FileName: fi.FileName,
+                        SizeBytes: fi.SizeBytes,
+                        ExpectedCrc: fi.ExpectedCrc,
+                        ActualCrc: fi.ActualCrc,
+                        State: fi.State,
+                        IsNuked: fi.IsNuked,
+                        NukeReason: fi.NukeReason,
+                        NukedBy: fi.NukedBy,
+                        CreatedAt: fi.CreatedAt,
+                        LastUpdatedAt: fi.LastUpdatedAt,
+                        NukedAt: fi.NukedAt,
+                        NukeMultiplier: state.NukeMultiplier);
+
+                    list.Add(entity);
+                }
+            }
+
+            return list;
+        }
+
+        private void PersistSnapshotIfNeeded(bool force = false)
+        {
+            if (_db is null)
+                return;
+
+            List<ZipscriptFileEntity> snapshot;
+
+            lock (_lock)
+            {
+                _pendingDbWrites++;
+
+                if (!force && _pendingDbWrites < DbFlushThreshold)
+                    return;
+
+                _pendingDbWrites = 0;
+                snapshot = BuildDbSnapshotUnsafe();
+            }
+
+            try
+            {
+                _db.Save(ZipscriptDbMigrations.CurrentVersion, snapshot);
+            }
+            catch (Exception ex)
+            {
+                _log?.Log(
+                    FtpLogLevel.Warn,
+                    $"ZipscriptEngine: failed to persist snapshot to '{_db.DbFilePath}': {ex.Message}",
+                    ex);
+            }
         }
 
         private static ZipscriptReleaseStatus BuildStatus(ReleaseState state)
         {
-            var hasSfv = state.SfvEntries.Count > 0;
-
             var files = state.Files.Values
                 .OrderBy(f => f.FileName, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
-            var isComplete = hasSfv &&
-                             files.Any() &&
-                             files.All(f => f.State == ZipscriptFileState.Ok ||
-                                            f.State == ZipscriptFileState.Extra);
+            var hasSfv = !string.IsNullOrEmpty(state.SfvVirtualPath);
+
+            var allSfvFiles = state.SfvEntries.Keys.ToHashSet(
+                StringComparer.OrdinalIgnoreCase);
+
+            var missing = files.Count(f => f.State == ZipscriptFileState.Missing);
+            var bad = files.Count(f => f.State == ZipscriptFileState.BadCrc);
+            var ok = files.Count(f => f.State == ZipscriptFileState.Ok);
+            var extra = files.Count(f => f.State == ZipscriptFileState.Extra);
+
+            var isComplete =
+                hasSfv &&
+                missing == 0 &&
+                bad == 0 &&
+                ok + extra > 0;
 
             return new ZipscriptReleaseStatus
             {
@@ -285,9 +790,16 @@ namespace amFTPd.Core.Zipscript
                 SectionName = state.SectionName,
                 HasSfv = hasSfv,
                 IsComplete = isComplete,
+                IsNuked = state.IsNuked,
+                WasNuked = state.WasNuked,
+                NukeReason = state.NukeReason,
+                NukedBy = state.NukedBy,
+                NukeMultiplier = state.NukeMultiplier,
+                NukedAt = state.NukedAt,
+                Started = state.Started,
+                LastUpdated = state.LastUpdated,
                 Files = files
             };
         }
-        #endregion
     }
 }

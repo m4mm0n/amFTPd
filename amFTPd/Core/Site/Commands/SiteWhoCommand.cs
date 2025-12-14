@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteWhoCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xC6978A93
+ *  Last Modified:  2025-12-14 18:54:52
+ *  CRC32:          0x0494B5B1
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,9 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Text;
@@ -43,16 +43,29 @@ public sealed class SiteWhoCommand : SiteCommandBase
             return;
         }
 
-        var sessions = bus.GetActiveSessions().OrderBy(sess => sess.Account?.UserName ?? "").ToList();
-
+        var sessions = bus.GetActiveSessions();
         if (sessions.Count == 0)
         {
             await s.WriteAsync("200 No active sessions.\r\n", cancellationToken);
             return;
         }
 
+        var compat = context.Runtime.FtpConfig.Compatibility;
         var sb = new StringBuilder();
-        sb.AppendLine("200-Active sessions:");
+
+        if (compat.IoStyleSiteWho)
+        {
+            // io-ish style header
+            sb.AppendLine("200-WHO");
+            sb.AppendLine(" ID  USER         HOST                   CWD");
+        }
+        else
+        {
+            // current default header
+            sb.AppendLine("200-Active sessions:");
+            sb.AppendLine(" ID  USER         HOST                   CWD");
+        }
+
         foreach (var sess in sessions)
         {
             var acc = sess.Account;
@@ -60,11 +73,13 @@ public sealed class SiteWhoCommand : SiteCommandBase
             var host = sess.Control.Client.RemoteEndPoint?.ToString() ?? "<unknown>";
             var cwd = sess.Cwd;
 
-            sb.Append(" ");
+            sb.Append(' ');
+            sb.Append(sess.SessionId.ToString().PadLeft(2));
+            sb.Append(' ');
             sb.Append(user.PadRight(12));
-            sb.Append(" ");
+            sb.Append(' ');
             sb.Append(host.PadRight(22));
-            sb.Append(" ");
+            sb.Append(' ');
             sb.Append(cwd);
             sb.AppendLine();
         }

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDelipCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:33
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xBA3C8967
+ *  Last Modified:  2025-12-14 21:29:20
+ *  CRC32:          0xAFE281CA
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands;
@@ -28,7 +25,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteDelipCommand : SiteCommandBase
 {
     public override string Name => "DELIP";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "DELIP <user> - clear allowed IP mask for user";
 
     public override async Task ExecuteAsync(

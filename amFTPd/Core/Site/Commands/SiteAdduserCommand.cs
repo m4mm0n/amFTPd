@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteAdduserCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x13B72DE5
+ *  Last Modified:  2025-12-14 21:27:10
+ *  CRC32:          0xDE221B86
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Ftpd;
@@ -30,7 +29,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteAdduserCommand : SiteCommandBase
 {
     public override string Name => "ADDUSER";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "ADDUSER <user> <password> [group] [homedir]";
 
     public override async Task ExecuteAsync(

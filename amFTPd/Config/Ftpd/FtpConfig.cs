@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 04:18:03
- *  CRC32:          0x8B8192F3
+ *  Last Modified:  2025-12-14 18:52:09
+ *  CRC32:          0xBF7F5BBD
  *  
  *  Description:
  *      Top-level FTP configuration.
@@ -15,11 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Config.Ftpd
@@ -146,6 +144,11 @@ namespace amFTPd.Config.Ftpd
         /// </summary>
         public int AbortedTransferBlockThreshold { get; init; } = 10;
 
+        /// <summary>
+        /// Compatibility settings for command syntax, human-facing output and IRC messages.
+        /// </summary>
+        public FtpCompatibilityConfig Compatibility { get; init; } = new();
+
 
         public FtpConfig()
         {
@@ -173,7 +176,8 @@ namespace amFTPd.Config.Ftpd
             int DefaultNukeMultiplier = 1,
             DataChannelProtectionLevel DataChannelProtectionDefault = DataChannelProtectionLevel.Clear,
             string? WelcomeMessage = null,
-            IReadOnlyDictionary<string, string>? HomeDirs = null)
+            IReadOnlyDictionary<string, string>? HomeDirs = null,
+            FtpCompatibilityConfig? Compatibility = null)
         {
             this.BindAddress = BindAddress;
             this.Port = Port;
@@ -193,6 +197,7 @@ namespace amFTPd.Config.Ftpd
             this.DataChannelProtectionDefault = DataChannelProtectionDefault;
             this.WelcomeMessage = WelcomeMessage;
             this.HomeDirs = HomeDirs ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            this.Compatibility = Compatibility ?? new FtpCompatibilityConfig();
         }
     }
 }

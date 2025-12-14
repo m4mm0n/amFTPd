@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           Program.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 04:44:38
- *  CRC32:          0xBAD5D4DA
+ *  Last Modified:  2025-12-14 21:55:50
+ *  CRC32:          0x68995DB6
  *  
  *  Description:
  *      Represents the entry point of the amFTPd application, a managed FTP daemon.
@@ -15,13 +16,14 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Daemon;
 using amFTPd.Core;
 using amFTPd.Core.Irc;
+using amFTPd.Core.Monitoring;
 using amFTPd.Logging;
 using amFTPd.Properties;
 using amFTPd.Utils;
@@ -72,6 +74,21 @@ namespace amFTPd
                 irc.Start();
             }
 
+            // Optional HTTP status endpoint (controlled by config)
+            StatusEndpoint? statusEndpoint = null;
+            if (runtime.StatusConfig is { Enabled: true } statusCfg)
+            {
+                try
+                {
+                    statusEndpoint = new StatusEndpoint(runtime, logger, statusCfg);
+                    statusEndpoint.Start();
+                }
+                catch (Exception ex)
+                {
+                    logger.Log(FtpLogLevel.Warn, "[amFTPd] Failed to start HTTP status endpoint.", ex);
+                }
+            }
+
             var serverTask = server.StartAsync();
 
 
@@ -80,6 +97,18 @@ namespace amFTPd
                 e.Cancel = true;
                 logger.Log(FtpLogLevel.Info, "[amFTPd] Shutdown requested, stopping server...");
                 server.Stop();
+
+                if (statusEndpoint is not null)
+                {
+                    try
+                    {
+                        await statusEndpoint.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.Log(FtpLogLevel.Warn, "[amFTPd] Failed to stop HTTP status endpoint cleanly.", ex);
+                    }
+                }
 
                 if (irc is not null)
                 {
@@ -113,6 +142,7 @@ namespace amFTPd
             var ver = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion;
             $"amFTPd - a managed FTP daemon v{ver}".WriteBoxedBanner();
+            Console.Title = $"amFTPd - a managed FTP daemon v{ver}";
             "Press Ctrl+C to stop.\n".WriteStyledLogLine();
         }
     }

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteCommandRegistry.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 00:28:50
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x9CE860CB
+ *  Last Modified:  2025-12-14 21:12:07
+ *  CRC32:          0x829E65F4
  *  
  *  Description:
  *      Builds and caches all SITE commands via reflection.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site;

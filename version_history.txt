@@ -5,6 +5,28 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.6.0.0 - 14.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Live config reload is now real: AmFtpdConfigLoader.ReloadAsync(...) +
+  AmFtpdConfigReloadResult, plus FtpServer.ReloadConfigurationAsync(...),
+  and a new SITE REHASH command to trigger it...
+* Monitoring/health endpoint: optional HTTP status endpoint
+  (Core/Monitoring/StatusEndpoint.cs) wired from Program.cs, backed by
+  a new AmFtpdStatusConfig...
+* Compatibility layer started: new FtpCompatibilityConfig +
+  SiteCommandRouterCompat for SITE verb aliasing (gl/io-ish), plus a
+  stubby Gl/Io import tool (Utils/Tools/GlIoImport.cs)...
+* Stats/audit plumbing: new Core/Stats subsystem (PerfCounters,
+  StatsSnapshot, AggregatedStats, SessionLogStatsService) and a
+  persistent session JSON log entry model (Db/SessionLogEntry.cs)...
+* New SITE commands for daily/weekly/monthly stats + uptime...
+* Zipscript foundations: ZipscriptConfig + a small JSON snapshot “DB” 
+  (ZipscriptDbContext, migrations, entities) + contexts for
+  upload/delete/rescan... 
+* New SITE helpers like RESCAN DUPE/NUKES/STATS and undo helpers
+  (UNDUPE, UNDO NUKE, etc.)...
+
 [ v0.5.0.0 - 14.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

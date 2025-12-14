@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteCommandContext.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-24 23:59:17
- *  Last Modified:  2025-12-11 04:10:15
- *  CRC32:          0xFF397B81
+ *  Last Modified:  2025-12-14 21:26:07
+ *  CRC32:          0x9E6F581D
  *  
  *  Description:
  *      Context passed to all SITE commands.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Daemon;
@@ -102,6 +99,11 @@ namespace amFTPd.Core.Site
         public string Arguments { get; }
 
         /// <summary>
+        /// Gets the FTP server hosting this session.
+        /// </summary>
+        public FtpServer Server => Router.Server;
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="SiteCommandContext"/> class with the specified FTP command
         /// router.
         /// </summary>
@@ -125,5 +127,4 @@ namespace amFTPd.Core.Site
             Arguments = arguments ?? string.Empty;
         }
     }
-
 }

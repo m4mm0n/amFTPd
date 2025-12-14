@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           Scheduler.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 04:03:29
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x2B8D3290
+ *  Last Modified:  2025-12-14 17:18:42
+ *  CRC32:          0xCABFF18E
  *  
  *  Description:
  *      Represents a scheduler that manages and executes a collection of scheduled tasks at specified intervals.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Logging;
@@ -143,7 +142,7 @@ public sealed class Scheduler : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
+        await _cts.CancelAsync();
         if (_loop is not null)
         {
             try

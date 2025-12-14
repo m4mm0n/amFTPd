@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdStorageConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x1E4FA85D
+ *  Last Modified:  2025-12-14 20:53:20
+ *  CRC32:          0x4E332AD2
  *  
  *  Description:
  *      Represents the configuration settings for the AmFtpd storage system.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Config.Daemon;

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdTlsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4D9B4A3B
+ *  Last Modified:  2025-12-14 20:53:31
+ *  CRC32:          0x8EE14FB8
  *  
  *  Description:
  *      Represents the configuration settings for TLS (Transport Layer Security) in an FTP server.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Config.Daemon;

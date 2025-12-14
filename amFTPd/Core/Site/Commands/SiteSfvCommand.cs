@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSfvCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 04:52:13
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x6229F162
+ *  Last Modified:  2025-12-14 21:40:16
+ *  CRC32:          0x6C4ED375
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Core.Events;
@@ -32,6 +29,7 @@ namespace amFTPd.Core.Site.Commands
         public override string Name => "SFV";
 
         public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
 
         public override string HelpText => "SFV <path>  - show zipscript status for release";
 
@@ -104,6 +102,7 @@ namespace amFTPd.Core.Site.Commands
             {
                 Type = FtpEventType.ZipscriptStatus,
                 Timestamp = DateTimeOffset.UtcNow,
+                SessionId = context.Session.SessionId,
                 User = context.Session.Account?.UserName,
                 Group = context.Session.Account?.GroupName,
                 Section = status.SectionName,

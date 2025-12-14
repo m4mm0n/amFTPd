@@ -1,13 +1,14 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IrcConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:52:31
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0x8A092B32
+ *  Last Modified:  2025-12-14 18:04:36
+ *  CRC32:          0xDA57AA5C
  *  
  *  Description:
- *      Enable FiSH (Blowfish) encryption. If enabled, any target (channel or nick) found in FishKeys will have messages sent...
+ *      Gets the nickname associated with the current instance.
  * 
  *  License:
  *      MIT License
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Config.Irc
@@ -42,9 +39,14 @@ namespace amFTPd.Config.Irc
 
         /// <summary>Optional server connection password (PASS).</summary>
         public string? ServerPassword { get; init; }
-
-        public string Nick { get; init; } = "amFTPd";
-        public string User { get; init; } = "amftpd";
+        /// <summary>
+        /// Gets the nickname associated with the current instance.
+        /// </summary>
+        public string Nick { get; init; } = "amFTPd-bot";
+        /// <summary>
+        /// Gets the user name associated with the current instance.
+        /// </summary>
+        public string User { get; init; } = "amftpd-bot";
         public string RealName { get; init; } = "amFTPd IRC announcer";
 
         /// <summary>Space- or comma-separated list of channels, e.g. "#pre #nukes".</summary>
@@ -72,6 +74,36 @@ namespace amFTPd.Config.Irc
 
         /// <summary>If true, the AMScript hook (if provided) will be used.</summary>
         public bool ScriptEnabled { get; init; } = false;
+
+        /// <summary>
+        /// Format template for PRE announces. Tokens: {release}, {section}, {user}, {mb}.
+        /// </summary>
+        public string? PreFormat { get; init; }
+
+        /// <summary>
+        /// Format template for NUKE announces. Tokens: {release}, {section}, {user}, {reason}, {mult}.
+        /// </summary>
+        public string? NukeFormat { get; init; }
+
+        /// <summary>
+        /// Format template for UNNUKE announces.
+        /// </summary>
+        public string? UnnukeFormat { get; init; }
+
+        /// <summary>
+        /// Format template for race-complete announces.
+        /// </summary>
+        public string? RaceCompleteFormat { get; init; }
+
+        /// <summary>
+        /// Format template for upload announces. Tokens: {release}, {section}, {user}, {mb}.
+        /// </summary>
+        public string? UploadFormat { get; init; }
+
+        /// <summary>
+        /// Format template for generic zipscript status announces.
+        /// </summary>
+        public string? ZipscriptFormat { get; init; }
 
         /// <summary>
         /// Retrieves a list of channel names by splitting the <see cref="Channels"/> string.

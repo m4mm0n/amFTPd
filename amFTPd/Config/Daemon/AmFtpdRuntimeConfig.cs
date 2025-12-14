@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdRuntimeConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-28 22:06:08
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xFF93F62D
+ *  Last Modified:  2025-12-14 17:15:14
+ *  CRC32:          0x8E76E041
  *  
  *  Description:
  *      Represents the runtime configuration for the amFTPd daemon.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Ftpd;
@@ -48,41 +47,128 @@ namespace amFTPd.Config.Daemon
     /// </remarks>
     public sealed class AmFtpdRuntimeConfig
     {
+        /// <summary>
+        /// Gets the FTP configuration settings required to connect to the FTP server.
+        /// </summary>
         public required FtpConfig FtpConfig { get; init; }
+        /// <summary>
+        /// Gets the user store configuration for the FTP daemon.
+        /// </summary>
+        /// <remarks>
+        /// This property provides access to the <see cref="IUserStore"/> implementation, 
+        /// which is responsible for managing user-related data and operations within the FTP server.
+        /// </remarks>
         public required IUserStore UserStore { get; init; }
+        /// <summary>
+        /// Gets the <see cref="SectionManager"/> instance responsible for managing
+        /// configuration sections within the FTP daemon runtime.
+        /// </summary>
+        /// <remarks>
+        /// This property is required and must be initialized during the creation of
+        /// the <see cref="AmFtpdRuntimeConfig"/> instance. It provides access to
+        /// the configuration sections used by the FTP server.
+        /// </remarks>
         public required SectionManager Sections { get; init; }
+        /// <summary>
+        /// Gets or sets the TLS configuration settings used for secure network communication.
+        /// </summary>
         public required TlsConfig TlsConfig { get; init; }
+        /// <summary>
+        /// Gets the identification configuration for the FTP daemon.
+        /// </summary>
         public required IdentConfig IdentConfig { get; init; }
+        /// <summary>
+        /// Gets the configuration settings for the virtual file system.
+        /// </summary>
         public required VfsConfig VfsConfig { get; init; }
-
+        /// <summary>
+        /// Gets the database manager associated with the current instance.
+        /// </summary>
         public DatabaseManager? Database { get; init; }
-
-        // Ratio system (SectionRule-based)
+        /// <summary>
+        /// Gets the collection of rules that apply to each section, keyed by section name.
+        /// </summary>
         public required Dictionary<string, SectionRule> SectionRules { get; init; }
+        /// <summary>
+        /// Gets the collection of directory rules, keyed by directory path.
+        /// </summary>
         public required Dictionary<string, DirectoryRule> DirectoryRules { get; init; }
+        /// <summary>
+        /// Gets the collection of ratio rules used to determine allocation or distribution logic.
+        /// </summary>
         public required Dictionary<string, RatioRule> RatioRules { get; init; }
+        /// <summary>
+        /// Gets the collection of group configurations, keyed by group name.
+        /// </summary>
         public required Dictionary<string, GroupConfig> Groups { get; init; }
-
+        /// <summary>
+        /// Gets the ratio engine responsible for managing user ratios.
+        /// </summary>
         public required RatioEngine RatioEngine { get; init; }
+        /// <summary>
+        /// Gets the ratio resolution pipeline used to process ratio calculations.
+        /// </summary>
         public required RatioResolutionPipeline RatioPipeline { get; init; }
+        /// <summary>
+        /// Gets the directory rule engine responsible for applying directory rules.
+        /// </summary>
         public required DirectoryRuleEngine DirectoryRuleEngine { get; init; }
+        /// <summary>
+        /// Gets the race engine used to manage and execute race logic.
+        /// </summary>
         public required RaceEngine RaceEngine { get; init; }
-
-        // VFS system (FtpSection-based) — CORRECT resolver
+        /// <summary>
+        /// Gets or sets the delegate used to resolve configuration sections.
+        /// </summary>
         public required SectionResolver SectionResolver { get; init; }
-
+        /// <summary>
+        /// Gets the group store used to manage and retrieve group-related data.
+        /// </summary>
         public IGroupStore? GroupStore { get; init; }
+        /// <summary>
+        /// Gets the section store used to manage configuration sections.
+        /// </summary>
         public ISectionStore? SectionStore { get; init; }
-
+        /// <summary>
+        /// Gets the dupe store used to manage duplicate file detection and handling.
+        /// </summary>
         public IDupeStore? DupeStore { get; init; }
+        /// <summary>
+        /// Gets the zipscript engine used for processing zipscript commands.
+        /// </summary>
         public ZipscriptEngine? Zipscript { get; init; }
-
+        /// <summary>
+        /// Gets the event bus for publishing and subscribing to events within the FTP daemon.
+        /// </summary>
         public EventBus EventBus { get; init; } = new();
-
+        /// <summary>
+        /// Gets the FXP policy engine used to manage FXP transfer policies.
+        /// </summary>
         public FxpPolicyEngine? FxpPolicy { get; init; }
-
+        /// <summary>
+        /// Gets the IRC configuration for the FTP daemon.
+        /// </summary>
         public IrcConfig? IrcConfig { get; init; }
-
+        /// <summary>
+        /// Gets the status/monitoring configuration for the HTTP status endpoint.
+        /// </summary>
+        public AmFtpdStatusConfig? StatusConfig { get; init; }
+        /// <summary>
+        /// Gets the credit engine used for managing user credits.
+        /// </summary>
         public CreditEngine? CreditEngine { get; init; }
+        /// <summary>
+        /// Full path to the JSON configuration file this runtime was built from.
+        /// </summary>
+        public required string ConfigFilePath { get; init; }
+        /// <summary>
+        /// Raw JSON payload that produced this runtime snapshot.
+        /// Used for coarse diffing on reload.
+        /// </summary>
+        public required string RawJson { get; init; }
+        /// <summary>
+        /// Timestamp (UTC) when this runtime snapshot was constructed.
+        /// </summary>
+        public DateTimeOffset LoadedAtUtc { get; init; } = DateTimeOffset.UtcNow;
     }
 }

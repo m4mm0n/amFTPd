@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteFlagsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:46:09
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0x77E7CB01
+ *  Last Modified:  2025-12-14 21:29:58
+ *  CRC32:          0xB37FC15F
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands
@@ -30,7 +25,8 @@ namespace amFTPd.Core.Site.Commands
     public sealed class SiteFlagsCommand : SiteCommandBase
     {
         public override string Name => "FLAGS";
-        public override bool RequiresAdmin => true;
+        public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
         public override string HelpText => "FLAGS <user> [flags] - show or set user flag string";
 
         public override async Task ExecuteAsync(

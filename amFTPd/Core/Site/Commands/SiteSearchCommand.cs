@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSearchCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 05:01:26
- *  Last Modified:  2025-12-11 04:26:20
- *  CRC32:          0x79A3AA35
+ *  Last Modified:  2025-12-14 21:36:58
+ *  CRC32:          0xC2245D96
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands

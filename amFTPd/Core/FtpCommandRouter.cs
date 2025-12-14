@@ -4,8 +4,8 @@
  *  File:           FtpCommandRouter.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-14 00:25:01
- *  CRC32:          0x36EBE5D5
+ *  Last Modified:  2025-12-14 16:30:09
+ *  CRC32:          0x39F24796
  *  
  *  Description:
  *      Routes and handles FTP commands received from a client session.
@@ -30,6 +30,7 @@ using amFTPd.Core.Fxp;
 using amFTPd.Core.Race;
 using amFTPd.Core.Ratio;
 using amFTPd.Core.Site;
+using amFTPd.Core.Stats;
 using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
@@ -89,18 +90,58 @@ public sealed partial class FtpCommandRouter
     private readonly SiteCommandContext _siteContext;
     #endregion
     #region Public Settings and Options
+    /// <summary>
+    /// Gets the FTP session associated with this command router.
+    /// </summary>
     public FtpSession Session => _s;
+    /// <summary>
+    /// Gets the logger used for logging FTP command activity.
+    /// </summary>
     public IFtpLogger Log => _log;
+    /// <summary>
+    /// Gets the file system interface used for file and directory operations.
+    /// </summary>
     public FtpFileSystem FileSystem => _fs;
+    /// <summary>
+    /// Gets the FTP server configuration settings.
+    /// </summary>
     public FtpConfig Config => _cfg;
+    /// <summary>
+    /// Gets the SectionManager responsible for managing configuration sections.
+    /// </summary>
     public SectionManager Sections => _sections;
+    /// <summary>
+    /// Gets the user store used for managing FTP user accounts.
+    /// </summary>
     public IUserStore Users => _users;
+    /// <summary>
+    /// Gets the group store used for managing FTP user groups.
+    /// </summary>
     public IGroupStore Groups => _groups;
+    /// <summary>
+    /// Gets the RaceEngine used for race detection and management.
+    /// </summary>
     public RaceEngine RaceEngine => _raceEngine;
+    /// <summary>
+    /// Gets the credit engine used for managing user credits.
+    /// </summary>
     public CreditEngine Credits => _credits;
+    /// <summary>
+    /// Gets the daemon runtime configuration.
+    /// </summary>
     public AmFtpdRuntimeConfig Runtime { get; }
+    /// <summary>
+    /// Gets the directory rules registered in this FTP server.
+    /// </summary>
     public Dictionary<string, DirectoryRule> DirectoryRules => _directoryRules;
+    /// <summary>
+    /// Gets the registered SITE commands available in this FTP server.
+    /// </summary>
     public IReadOnlyDictionary<string, SiteCommandBase> SiteCommands => _siteCommands;
+    /// <summary>
+    /// Gets the parent FTP server instance.
+    /// </summary>
+    public FtpServer Server => _server;
     #endregion
 
     /// <summary>
@@ -282,6 +323,7 @@ public sealed partial class FtpCommandRouter
                     {
                         Type = FtpEventType.Logout,
                         Timestamp = DateTimeOffset.UtcNow,
+                        SessionId = _s.SessionId,
                         User = _s.Account.UserName,
                         Group = _s.Account.GroupName
                     });
@@ -509,6 +551,76 @@ public sealed partial class FtpCommandRouter
         }
 
         return section;
+    }
+
+    /// <summary>
+    /// Copies data between streams using a pooled buffer and an optional bandwidth throttle.
+    /// Returns the number of bytes transferred.
+    /// </summary>
+    private static async Task<long> CopyWithThrottleAsync(
+        Stream source,
+        Stream destination,
+        int maxKbps,
+        bool isDownload,
+        CancellationToken ct)
+    {
+        if (source is null) throw new ArgumentNullException(nameof(source));
+        if (destination is null) throw new ArgumentNullException(nameof(destination));
+        if (maxKbps < 0) maxKbps = 0;
+
+        var buffer = FtpDataConnection.BufferPool.Rent(FtpDataConnection.TransferBufferSize);
+
+        try
+        {
+            long total = 0;
+
+            Stopwatch? sw = null;
+            long windowBytes = 0;
+
+            if (maxKbps > 0)
+            {
+                sw = Stopwatch.StartNew();
+            }
+
+            while (true)
+            {
+                var read = await source.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false);
+                if (read == 0)
+                    break;
+
+                await destination.WriteAsync(buffer, 0, read, ct).ConfigureAwait(false);
+                total += read;
+
+                if (maxKbps > 0 && sw is not null)
+                {
+                    windowBytes += read;
+                    var elapsedMs = sw.ElapsedMilliseconds;
+                    if (elapsedMs > 0)
+                    {
+                        var currentKbps = (windowBytes / 1024.0) / (elapsedMs / 1000.0);
+                        if (currentKbps > maxKbps)
+                        {
+                            var desiredMs = (windowBytes / 1024.0) / maxKbps * 1000.0;
+                            var delayMs = (int)(desiredMs - elapsedMs);
+                            if (delayMs > 0)
+                            {
+                                await Task.Delay(delayMs, ct).ConfigureAwait(false);
+                            }
+
+                            sw.Restart();
+                            windowBytes = 0;
+                        }
+                    }
+                }
+            }
+
+            PerfCounters.AddBytesTransferred(total, isDownload);
+            return total;
+        }
+        finally
+        {
+            FtpDataConnection.BufferPool.Return(buffer);
+        }
     }
 
     private static async Task<long> CopyWithThrottleAsync(

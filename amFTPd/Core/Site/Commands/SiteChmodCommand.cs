@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteChmodCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-13 04:45:42
- *  CRC32:          0x55B8A09C
+ *  Last Modified:  2025-12-14 21:27:32
+ *  CRC32:          0x4FBCE746
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands;
@@ -28,7 +25,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteChmodCommand : SiteCommandBase
 {
     public override string Name => "CHMOD";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "CHMOD";
 
     public override async Task ExecuteAsync(

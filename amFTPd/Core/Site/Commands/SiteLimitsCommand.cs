@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteLimitsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 10:53:01
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0x55B2D77B
+ *  Last Modified:  2025-12-14 21:32:35
+ *  CRC32:          0x251D88B4
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,16 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Globalization;
@@ -34,7 +27,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteLimitsCommand : SiteCommandBase
 {
     public override string Name => "LIMITS";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText =>
         "LIMITS <user> [ul_kbps dl_kbps max_logins [idle_seconds]] - show or set per-user limits";
 
@@ -47,7 +41,7 @@ public sealed class SiteLimitsCommand : SiteCommandBase
         if (acc is not { IsAdmin: true })
         {
             await context.Session.WriteAsync(
-                "550 SITE LIMITS requires admin privileges.\r\n",
+                "550 SITE LIMITS requires admin/siteop privileges.\r\n",
                 cancellationToken);
             return;
         }

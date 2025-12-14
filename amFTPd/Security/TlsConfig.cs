@@ -4,8 +4,8 @@
  *  File:           TlsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 22:05:34
- *  CRC32:          0x9FF3ADA6
+ *  Last Modified:  2025-12-14 21:09:20
+ *  CRC32:          0xD92F4DF7
  *  
  *  Description:
  *      Represents the configuration for Transport Layer Security (TLS), including the server certificate and supported SSL/T...
@@ -18,6 +18,7 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ====================================================================================================
  */
+
 
 
 using amFTPd.Logging;
@@ -60,7 +61,7 @@ namespace amFTPd.Security
         /// data-connection layer.
         /// </summary>
         public bool RefuseClearDataOnSecureControl { get; init; } = false;
-        
+
         /// <summary>
         /// Creates or loads a TLS configuration based on the specified certificate file.
         /// </summary>
@@ -75,13 +76,18 @@ namespace amFTPd.Security
         /// <returns>A <see cref="TlsConfig"/> instance containing the loaded or newly generated certificate.</returns>
         public static async Task<TlsConfig> CreateOrLoadAsync(
             string pfxPath,
-            string pfxPassword,
+            string? pfxPassword,
             string subjectName,
             IFtpLogger logger)
         {
+            // Normalize password: null / empty / whitespace => null (no password)
+            string? pwd = string.IsNullOrWhiteSpace(pfxPassword) ? null : pfxPassword;
+
+            // Use *user* keystore so we don't need admin rights, and persist the key
             const X509KeyStorageFlags Flags =
-                X509KeyStorageFlags.MachineKeySet |
-                X509KeyStorageFlags.Exportable;
+                X509KeyStorageFlags.UserKeySet |
+                X509KeyStorageFlags.Exportable |
+                X509KeyStorageFlags.PersistKeySet;
 
             // 1) Try load existing PFX
             if (File.Exists(pfxPath))
@@ -90,11 +96,18 @@ namespace amFTPd.Security
                 {
                     logger.Log(FtpLogLevel.Info, $"Loading certificate: {pfxPath}");
 
-                    var cert = X509CertificateLoader.LoadPkcs12FromFile(
-                        pfxPath,
-                        pfxPassword,
-                        Flags
-                    );
+                    var raw = await File.ReadAllBytesAsync(pfxPath).ConfigureAwait(false);
+
+#pragma warning disable SYSLIB0057
+                    var cert = new X509Certificate2(raw, pwd, Flags);
+#pragma warning restore SYSLIB0057
+
+                    if (!cert.HasPrivateKey)
+                    {
+                        throw new CryptographicException(
+                            $"Loaded certificate '{pfxPath}' does not have a private key.");
+                    }
+
                     return new TlsConfig(cert);
                 }
                 catch (CryptographicException ex)
@@ -109,15 +122,16 @@ namespace amFTPd.Security
                 }
             }
 
-            // 2) Generate new self-signed RSA cert
+            // 2) Generate new self-signed RSA cert (with persistent user key)
             logger.Log(FtpLogLevel.Info, "Generating self-signed certificate (RSA)...");
-            var certNew = CreateSelfSignedRsaCertificate(subjectName, pfxPassword);
+            var certNew = CreateSelfSignedRsaCertificate(subjectName, pwd, Flags);
 
-            // 3) Try to persist it for next runs
+            // 3) Persist PFX for future runs
             try
             {
-                var pfxBytes = certNew.Export(X509ContentType.Pfx, pfxPassword);
-                await File.WriteAllBytesAsync(pfxPath, pfxBytes);
+                var pfxBytes = certNew.Export(X509ContentType.Pkcs12, pwd);
+                Directory.CreateDirectory(Path.GetDirectoryName(pfxPath)!);
+                await File.WriteAllBytesAsync(pfxPath, pfxBytes).ConfigureAwait(false);
                 logger.Log(FtpLogLevel.Info, $"Saved new certificate: {pfxPath}");
             }
             catch (Exception ex)
@@ -130,6 +144,7 @@ namespace amFTPd.Security
 
             return new TlsConfig(certNew);
         }
+
         /// <summary>
         /// Creates and configures an instance of <see cref="SslServerAuthenticationOptions"/>  with predefined server
         /// authentication settings.
@@ -180,51 +195,41 @@ namespace amFTPd.Security
 
         private static X509Certificate2 CreateSelfSignedRsaCertificate(
             string subjectName,
-            string pfxPassword)
+            string? pfxPassword,
+            X509KeyStorageFlags flags)
         {
-            using var rsa = RSA.Create(2048);
-
-            var dn = new X500DistinguishedName($"CN={subjectName}");
+            using var rsa = RSA.Create(4096);
 
             var req = new CertificateRequest(
-                dn,
+                $"CN={subjectName}",
                 rsa,
                 HashAlgorithmName.SHA256,
                 RSASignaturePadding.Pkcs1);
 
-            // Not a CA
-            req.CertificateExtensions.Add(
-                new X509BasicConstraintsExtension(
-                    certificateAuthority: false,
-                    hasPathLengthConstraint: false,
-                    pathLengthConstraint: 0,
-                    critical: true));
-
-            // Key usage: digital signature + key encipherment
             req.CertificateExtensions.Add(
                 new X509KeyUsageExtension(
                     X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
                     critical: true));
 
-            // Subject key identifier
-            req.CertificateExtensions.Add(
-                new X509SubjectKeyIdentifierExtension(
-                    req.PublicKey,
-                    critical: false));
+            // 1) Self-signed cert with in-memory key (may be ephemeral)
+            using var temp = req.CreateSelfSigned(
+                DateTimeOffset.UtcNow.AddDays(-1),
+                DateTimeOffset.UtcNow.AddYears(5));
 
-            var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
-            var notAfter = notBefore.AddYears(5);
+            // 2) Export to PFX using the same password we always use
+            var pfxBytes = temp.Export(X509ContentType.Pkcs12, pfxPassword);
 
-            using var generated = req.CreateSelfSigned(notBefore, notAfter);
+            // 3) Re-import into user store with persistent key so Schannel can use it
+#pragma warning disable SYSLIB0057
+            var cert = new X509Certificate2(pfxBytes, pfxPassword, flags);
+#pragma warning restore SYSLIB0057
 
-            // Export as PFX and re-import with *user* key store, persisted
-            var pfxBytes = generated.Export(X509ContentType.Pfx, pfxPassword);
+            if (!cert.HasPrivateKey)
+            {
+                throw new CryptographicException("Generated TLS certificate has no private key.");
+            }
 
-            return X509CertificateLoader.LoadPkcs12(
-                pfxBytes,
-                pfxPassword,
-                X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.Exportable
-            );
+            return cert;
         }
     }
 }

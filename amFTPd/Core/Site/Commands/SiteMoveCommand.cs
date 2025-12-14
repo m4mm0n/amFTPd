@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteMoveCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-13 04:45:42
- *  CRC32:          0x75419C07
+ *  Last Modified:  2025-12-14 21:32:55
+ *  CRC32:          0xD43ED918
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Logging;
@@ -32,7 +27,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteMoveCommand : SiteCommandBase
 {
     public override string Name => "MOVE";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "MOVE";
 
     public override async Task ExecuteAsync(

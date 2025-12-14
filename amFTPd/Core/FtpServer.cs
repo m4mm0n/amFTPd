@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpServer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-11 03:56:47
- *  CRC32:          0x3FFD32F3
+ *  Last Modified:  2025-12-14 21:17:28
+ *  CRC32:          0xACD6F4CD
  *  
  *  Description:
  *      Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file tran...
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Daemon;
@@ -27,13 +26,14 @@ using amFTPd.Config.Ident;
 using amFTPd.Config.Scripting;
 using amFTPd.Config.Vfs;
 using amFTPd.Core.Sections;
+using amFTPd.Core.Stats;
+using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
 using amFTPd.Security.BanList;
 using amFTPd.Security.HammerGuard;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -50,29 +50,44 @@ namespace amFTPd.Core;
 public sealed class FtpServer
 {
     #region Private Fields
-    private readonly FtpConfig _cfg;
-    private readonly IUserStore _users;
-    private readonly TlsConfig _tls;
+    private FtpConfig _cfg;
+    private IUserStore _users;
+    private TlsConfig _tls;
     private readonly IFtpLogger _log;
 
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
-    private readonly SectionManager _sections;
+    private SectionManager _sections;
 
-    private readonly IdentConfig _identCfg;
-    private readonly VfsConfig _vfsCfg;
-    private readonly SectionResolver _sectionResolver;
+    private IdentConfig _identCfg;
+    private VfsConfig _vfsCfg;
+    private SectionResolver _sectionResolver;
 
-    private readonly HammerGuard _hammerGuard;
+    private HammerGuard _hammerGuard;
     private readonly BanList _banList;
 
     private readonly Lock _connectionLock = new();
     private readonly ConcurrentDictionary<IPAddress, int> _connectionsPerIp = new();
     private int _currentConnections;
 
-    private readonly AmFtpdRuntimeConfig _runtime;
-    #endregion
+    private AmFtpdRuntimeConfig _runtime;
+    private readonly string _configPath;
+    private readonly Lock _configLock = new();
 
+    private readonly SessionLogWriter? _sessionLog;
+    #endregion
+    /// <summary>
+    /// Gets the date and time at which the operation started.
+    /// </summary>
+    public DateTimeOffset StartedAt { get; }
+    /// <summary>
+    /// Gets the current runtime configuration for the FTP server.
+    /// </summary>
+    public AmFtpdRuntimeConfig Runtime => _runtime;
+    /// <summary>
+    /// Gets the path to the configuration file used by the FTP server.
+    /// </summary>
+    public string ConfigPath => _configPath;
     /// <summary>
     /// Gets the current <see cref="HammerGuard"/> instance associated with this object.
     /// </summary>
@@ -81,7 +96,6 @@ public sealed class FtpServer
     /// Gets the list of banned users associated with the current instance.
     /// </summary>
     public BanList BanList => _banList;
-
     /// <summary>
     /// Initializes a new instance of the FtpServer class using the specified runtime configuration and logger.
     /// </summary>
@@ -96,7 +110,35 @@ public sealed class FtpServer
         IFtpLogger log)
     {
         _runtime = runtime;
-        _log = log;
+        _log = log ?? throw new ArgumentNullException(nameof(log));
+
+        _configPath = runtime.ConfigFilePath ?? throw new ArgumentNullException(
+            nameof(runtime.ConfigFilePath),
+            "Runtime configuration must know the path to its JSON source.");
+
+        StartedAt = DateTimeOffset.UtcNow;
+
+        // Initialize session/audit logging (JSONL) next to the config file.
+        try
+        {
+            var configDir = Path.GetDirectoryName(_configPath);
+            if (string.IsNullOrWhiteSpace(configDir))
+                configDir = AppContext.BaseDirectory;
+
+            var sessionLogPath = Path.Combine(configDir!, "amftpd-sessionlog.jsonl");
+
+            _sessionLog = new SessionLogWriter(sessionLogPath, _log);
+            runtime.EventBus.Subscribe(_sessionLog.OnEvent);
+
+            _log.Log(FtpLogLevel.Info, $"Session log enabled. Path: {sessionLogPath}");
+        }
+        catch (Exception ex)
+        {
+            _log.Log(
+                FtpLogLevel.Warn,
+                $"Failed to initialize session log writer; running without session log. {ex.Message}",
+                ex);
+        }
 
         // Assign all local fields from runtime
         _cfg = runtime.FtpConfig;
@@ -169,6 +211,14 @@ public sealed class FtpServer
         userScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         groupScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
 
+        ConfigureScriptEngine(creditScript, scriptConfig);
+        ConfigureScriptEngine(fxpScript, scriptConfig);
+        ConfigureScriptEngine(activeScript, scriptConfig);
+        ConfigureScriptEngine(sectionRoutingScript, scriptConfig);
+        ConfigureScriptEngine(siteScript, scriptConfig);
+        ConfigureScriptEngine(userScript, scriptConfig);
+        ConfigureScriptEngine(groupScript, scriptConfig);
+
         // --------------------------------------------------------------------
         // Main accept loop
         // --------------------------------------------------------------------
@@ -222,6 +272,9 @@ public sealed class FtpServer
             var rem = remoteEndPoint.ToString();
             _log.Log(FtpLogLevel.Info, $"Connection from {rem}");
 
+            // update global perf counters
+            PerfCounters.ConnectionOpened();
+
             var defaultProt = MapDataChannelProtectionToLetter(_cfg.DataChannelProtectionDefault);
 
             // capture for the task
@@ -241,7 +294,7 @@ public sealed class FtpServer
                         _tls,
                         _identCfg,
                         _vfsCfg,
-                        _sectionResolver);
+                        _sectionResolver, this);
 
                     var router = new FtpCommandRouter(this, session, _log, fs, _cfg, _tls, _sections, _runtime);
 
@@ -275,6 +328,15 @@ public sealed class FtpServer
                 }
             });
         }
+    }
+    
+    private void ConfigureScriptEngine(AMScriptEngine e, ScriptConfig scriptConfig)
+    {
+        e.MaxRulesPerEvaluation = scriptConfig.MaxRulesPerEvaluation;
+        e.MaxEvaluationTime = scriptConfig.MaxEvaluationMilliseconds > 0
+            ? TimeSpan.FromMilliseconds(scriptConfig.MaxEvaluationMilliseconds)
+            : TimeSpan.Zero;
+        e.MaxConcurrentEvaluations = scriptConfig.MaxConcurrentScripts;
     }
 
     private static string MapDataChannelProtectionToLetter(DataChannelProtectionLevel level)
@@ -358,6 +420,9 @@ public sealed class FtpServer
                 }
             }
         }
+
+        // Keep the perf counters in sync with the real connection set.
+        PerfCounters.ConnectionClosed();
     }
 
     // Optional helper for login failures from elsewhere:
@@ -370,7 +435,65 @@ public sealed class FtpServer
             _log.Log(FtpLogLevel.Warn,$"IP {address} temporarily banned for {decision.BanDuration} ({decision.Reason})");
         }
     }
+    /// <summary>
+    /// Reloads the configuration from disk and atomically swaps the live runtime snapshot.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for the reload operation.</param>
+    /// <returns>
+    /// A tuple indicating success, a human-readable summary, and the list of high-level sections that changed.
+    /// </returns>
+    public async Task<(bool Success, string Message, IReadOnlyList<string> ChangedSections)>
+        ReloadConfigurationAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var result = await AmFtpdConfigLoader.ReloadAsync(
+                    _configPath,
+                    _runtime,
+                    _log,
+                    cancellationToken)
+                .ConfigureAwait(false);
 
+            lock (_configLock)
+            {
+                _runtime = result.Runtime;
+
+                _cfg = _runtime.FtpConfig;
+                _users = _runtime.UserStore;
+                _tls = _runtime.TlsConfig;
+
+                _sections = _runtime.Sections;
+                _sectionResolver = new SectionResolver(_sections.GetSections());
+
+                _identCfg = _runtime.IdentConfig;
+                _vfsCfg = _runtime.VfsConfig;
+
+                // Recreate HammerGuard with new thresholds,
+                // while keeping the existing BanList (bans survive reload).
+                _hammerGuard = new HammerGuard(_cfg);
+            }
+
+            var msg = "Configuration reloaded successfully.";
+            if (result.ChangedSections.Count > 0)
+            {
+                msg += " Changed sections: " + string.Join(", ", result.ChangedSections);
+            }
+            else
+            {
+                msg += " No material changes detected.";
+            }
+
+            _log.Log(FtpLogLevel.Info, $"[REHASH] {msg}");
+
+            return (true, msg, result.ChangedSections);
+        }
+        catch (Exception ex)
+        {
+            var err = $"Configuration reload failed: {ex.Message}";
+            _log.Log(FtpLogLevel.Error, err, ex);
+            return (false, err, Array.Empty<string>());
+        }
+    }
     /// <summary>
     /// Stops the FTP server, canceling any ongoing operations and releasing resources.
     /// </summary>

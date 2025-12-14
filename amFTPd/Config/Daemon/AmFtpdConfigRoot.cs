@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdConfigRoot.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xCCF0AE50
+ *  Last Modified:  2025-12-14 20:17:17
+ *  CRC32:          0xE623E3FC
  *  
  *  Description:
  *      Represents the root configuration for an AmFtpd server instance, including server, TLS, storage, identity, virtual fi...
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Ftpd;
@@ -27,6 +26,7 @@ using amFTPd.Config.Fxp;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Irc;
 using amFTPd.Config.Vfs;
+using amFTPd.Core.Zipscript;
 
 namespace amFTPd.Config.Daemon;
 
@@ -46,6 +46,9 @@ namespace amFTPd.Config.Daemon;
 /// <param name="Groups">A collection of group configurations, keyed by group name, that define user group settings and permissions.</param>
 /// <param name="FxpPolicy">Optional FXP policy configuration that governs file transfer policies between FTP servers.</param>
 /// <param name="Irc">Optional IRC configuration for integrating with IRC networks for notifications or commands.</param>
+/// <param name="Zipscript">Optional Zipscript configuration for managing automated release processing and rescanning.</param>
+/// <param name="Status">Optional status endpoint configuration for monitoring the server's health and status via HTTP.</param>
+/// <param name="Compatibility">Optional FTP compatibility configuration for handling various FTP client quirks and behaviors.</param>
 public sealed record AmFtpdConfigRoot(
     AmFtpdServerConfig Server,
     AmFtpdTlsConfig Tls,
@@ -57,5 +60,8 @@ public sealed record AmFtpdConfigRoot(
     Dictionary<string, RatioRule> RatioRules,
     Dictionary<string, GroupConfig> Groups,
     FxpPolicyConfig? FxpPolicy = null,
-    IrcConfig? Irc = null
+    IrcConfig? Irc = null,
+    ZipscriptConfig? Zipscript = null,
+    AmFtpdStatusConfig? Status = null,
+    FtpCompatibilityConfig? Compatibility = null
 );

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDirflagsCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x3DE08CB7
+ *  Last Modified:  2025-12-14 21:29:37
+ *  CRC32:          0x22F5B7F0
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Ftpd.RatioRules;
@@ -31,7 +28,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteDirflagsCommand : SiteCommandBase
 {
     public override string Name => "DIRFLAGS";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "DIRFLAGS [virt-path]  - show effective directory ratio/flags";
 
     public override async Task ExecuteAsync(

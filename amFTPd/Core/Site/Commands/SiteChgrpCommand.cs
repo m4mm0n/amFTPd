@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteChgrpCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0x87CAD79F
+ *  Last Modified:  2025-12-14 21:27:23
+ *  CRC32:          0x58C311C5
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,11 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands;
@@ -27,7 +25,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteChgrpCommand : SiteCommandBase
 {
     public override string Name => "CHGRP";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "CHGRP <user> <primary-group> [secondary1,secondary2,...]";
 
     public override async Task ExecuteAsync(

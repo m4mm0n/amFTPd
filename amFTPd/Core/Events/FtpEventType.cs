@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpEventType.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:48:28
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x4CB90FE5
+ *  Last Modified:  2025-12-14 10:28:47
+ *  CRC32:          0xA5C2B501
  *  
  *  Description:
  *      Represents the types of events that can occur during FTP operations.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Events;
@@ -39,6 +38,7 @@ public enum FtpEventType
     Login,
     Logout,
     Nuke,
+    Unnuke,
     Wipe,
     Pre,
     RaceUpdate,

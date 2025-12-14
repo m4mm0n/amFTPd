@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpUserConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0xB0DC912D
+ *  Last Modified:  2025-12-14 13:54:38
+ *  CRC32:          0xCA226B17
  *  
  *  Description:
  *      Container for configured users + helper to build runtime FtpUser objects.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Config.Ftpd;
@@ -88,6 +85,11 @@ public sealed record FtpUserConfig
             MaxDownloadKbps: cfg.MaxDownloadKbps,
             CreditsKb: cfg.CreditsKb,
             Sections: sections,
-            MaxConcurrentLogins: cfg.MaxConcurrentLogins);
+            MaxConcurrentLogins: cfg.MaxConcurrentLogins)
+        {
+            MaxConnectionsPerIpOverride = cfg.MaxConnectionsPerIpOverride,
+            MaxCommandsPerMinuteOverride = cfg.MaxCommandsPerMinuteOverride,
+            MaxFailedLoginsPerIpOverride = cfg.MaxFailedLoginsPerIpOverride
+        };
     }
 }

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteShowuserCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 02:56:04
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xF43CF8BA
+ *  Last Modified:  2025-12-14 21:40:26
+ *  CRC32:          0xB669CDEC
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,9 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Text;
@@ -27,7 +27,8 @@ namespace amFTPd.Core.Site.Commands
     public sealed class SiteShowuserCommand : SiteCommandBase
     {
         public override string Name => "SHOWUSER";
-        public override bool RequiresAdmin => true;
+        public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
         public override string HelpText => "SHOWUSER <user> - show detailed info about a user";
 
         public override async Task ExecuteAsync(

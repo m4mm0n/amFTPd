@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AMScriptEngine.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-16 06:46:16
- *  Last Modified:  2025-12-13 04:39:15
- *  CRC32:          0xD2AE6FEB
+ *  Last Modified:  2025-12-14 18:14:18
+ *  CRC32:          0xC91D312B
  *  
  *  Description:
  *      Represents a script engine for processing and evaluating rules defined in a custom AMScript file.
@@ -15,13 +16,11 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
 
 
-
-
-
-
+using System.Diagnostics;
 
 namespace amFTPd.Scripting;
 
@@ -32,11 +31,17 @@ namespace amFTPd.Scripting;
 /// specified script file. Rules are defined in a custom syntax and can be used to evaluate conditions and apply
 /// actions based on the provided context. The engine supports dynamic reloading of the script file when changes are
 /// detected.</remarks>
-public sealed class AMScriptEngine
+public sealed class AMScriptEngine : IDisposable
 {
     private readonly List<AMRule> _rules = [];
     private readonly string _filePath;
     private FileSystemWatcher? _watcher;
+
+    public int MaxRulesPerEvaluation { get; set; } = 1024;
+    public TimeSpan MaxEvaluationTime { get; set; } = TimeSpan.FromMilliseconds(100);
+
+    private int _maxConcurrentEvaluations = 8;
+    private SemaphoreSlim _gate;
 
     /// <summary>
     /// Gets or sets the delegate used to log debug messages.
@@ -53,9 +58,33 @@ public sealed class AMScriptEngine
     /// <param name="filePath">The path to the script file to be loaded and monitored. Cannot be null or empty.</param>
     public AMScriptEngine(string filePath)
     {
-        _filePath = filePath;
+        _filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
+        _gate = new SemaphoreSlim(_maxConcurrentEvaluations, _maxConcurrentEvaluations);
+
         Load();
         Watch();
+    }
+
+    public void Dispose()
+    {
+        _gate.Dispose();
+        // Stop file watchers etc. if you have them
+    }
+
+    public int MaxConcurrentEvaluations
+    {
+        get => _maxConcurrentEvaluations;
+        set
+        {
+            if (value <= 0) value = 1;
+            if (value == _maxConcurrentEvaluations) return;
+
+            _maxConcurrentEvaluations = value;
+
+            var old = _gate;
+            _gate = new SemaphoreSlim(_maxConcurrentEvaluations, _maxConcurrentEvaluations);
+            old.Dispose();
+        }
     }
 
     /// <summary>
@@ -135,13 +164,76 @@ public sealed class AMScriptEngine
     public AMScriptResult EvaluateGroup(AMScriptContext ctx)
         => EvaluateInternal(ctx);
 
+    /// <summary>
+    /// Evaluates the specified site context and returns the result of the evaluation.
+    /// </summary>
+    /// <param name="ctx">The <see cref="AMScriptContext"/> representing the site context to evaluate. Cannot be <see langword="null"/>.</param>
+    /// <returns>An <see cref="AMScriptResult"/> containing the outcome of the site evaluation.</returns>
+    public AMScriptResult EvaluateSite(AMScriptContext ctx) => EvaluateInternal(ctx);
+    
+    /// <summary>
+    /// Evaluates the specified section of AMPScript code within the given context.
+    /// </summary>
+    /// <param name="ctx">The <see cref="AMScriptContext"/> that provides the variables, functions, and execution environment for the
+    /// evaluation. Cannot be <c>null</c>.</param>
+    /// <returns>An <see cref="AMScriptResult"/> containing the outcome of the evaluation, including any output or errors
+    /// generated during execution.</returns>
+    public AMScriptResult EvaluateSection(AMScriptContext ctx) => EvaluateInternal(ctx);
+
     // Generic: we treat download/upload same in v1, context decides meaning
     private AMScriptResult EvaluateInternal(AMScriptContext ctx)
     {
-        foreach (var rule in _rules.Where(rule => EvaluateCondition(ctx, rule.Condition)))
-            return ApplyAction(ctx, rule.Action);
+        _gate.Wait();
 
-        return AMScriptResult.NoChange(ctx);
+        try
+        {
+            Stopwatch? sw = null;
+            if (MaxEvaluationTime > TimeSpan.Zero)
+            {
+                sw = Stopwatch.StartNew();
+            }
+
+            var rules = _rules; // local copy to avoid races during reload
+            var maxRules = MaxRulesPerEvaluation;
+
+            var checkedRules = 0;
+
+            foreach (var rule in rules)
+            {
+                if (maxRules > 0 && ++checkedRules > maxRules)
+                {
+                    DebugLog?.Invoke(
+                        $"[AMScript] Rule limit exceeded for {ctx.UserName} in '{_filePath}'.");
+                    return AMScriptResult.Error(ctx, "TooManyRules",
+                        "AMScript rule limit exceeded.");
+                }
+
+                if (sw is not null && sw.Elapsed > MaxEvaluationTime)
+                {
+                    DebugLog?.Invoke(
+                        $"[AMScript] Timeout for {ctx.UserName} in '{_filePath}'.");
+                    return AMScriptResult.Error(ctx, "Timeout",
+                        "AMScript evaluation timeout.");
+                }
+
+                if (EvaluateCondition(ctx, rule.Condition))
+                {
+                    return ApplyAction(ctx, rule.Action);
+                }
+            }
+
+            return AMScriptResult.NoChange(ctx);
+        }
+        catch (Exception ex)
+        {
+            DebugLog?.Invoke(
+                $"[AMScript] Exception in '{_filePath}' for {ctx.UserName}: {ex}");
+            return AMScriptResult.Error(ctx, "Exception", ex.Message);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     // ---------------------------------------------------------
@@ -395,4 +487,6 @@ public sealed class AMScriptEngine
 
         _watcher.EnableRaisingEvents = true;
     }
+
+    
 }

@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpSection.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x3EA58B27
+ *  Last Modified:  2025-12-14 18:01:19
+ *  CRC32:          0x838615BE
  *  
  *  Description:
  *      Logical FTP section (like "0DAY").
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Config.Ftpd
@@ -76,6 +75,12 @@ namespace amFTPd.Config.Ftpd
 
         /// <summary>Nuke multiplier for nuking releases.</summary>
         public double? NukeMultiplier { get; init; } = 1.0;
+
+        /// <summary>
+        /// Optional aliases for this section name, used for compatibility with
+        /// legacy configs (gl/io/raiden) and for convenience.
+        /// </summary>
+        public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
 
         public FtpSection()
         {

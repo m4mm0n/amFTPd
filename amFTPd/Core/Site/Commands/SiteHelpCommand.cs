@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteHelpCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 00:06:48
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x171B345C
+ *  Last Modified:  2025-12-14 21:31:25
+ *  CRC32:          0x9484CFDF
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Text;

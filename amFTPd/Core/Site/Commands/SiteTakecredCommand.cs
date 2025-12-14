@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteTakecredCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:34
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0x6C8020F7
+ *  Last Modified:  2025-12-14 21:41:37
+ *  CRC32:          0x004677FE
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Globalization;
@@ -32,7 +27,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteTakecredCommand : SiteCommandBase
 {
     public override string Name => "TAKECRED";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "TAKECRED <user> <kb> - remove credits (KiB) from a user";
 
     public override async Task ExecuteAsync(

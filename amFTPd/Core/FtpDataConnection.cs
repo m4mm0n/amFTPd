@@ -4,8 +4,8 @@
  *  File:           FtpDataConnection.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 16:11:32
- *  CRC32:          0x505EE584
+ *  Last Modified:  2025-12-14 17:19:02
+ *  CRC32:          0x8FA650BE
  *  
  *  Description:
  *      Represents a data connection for FTP transfers, supporting both active and passive modes, with optional TLS encryptio...
@@ -20,15 +20,14 @@
  */
 
 
-
-
-
-
+using amFTPd.Core.Stats;
+using amFTPd.Logging;
+using amFTPd.Security;
+using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
-using amFTPd.Logging;
-using amFTPd.Security;
 
 namespace amFTPd.Core;
 
@@ -52,6 +51,16 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     private TcpClient? _client;
     private TcpListener? _listener;
     private Stream? _stream;
+
+    // Shared buffer pool for all data transfers to avoid per-transfer allocations.
+    internal static readonly ArrayPool<byte> BufferPool = ArrayPool<byte>.Shared;
+
+    /// <summary>
+    /// Default buffer size used for uploads/downloads.
+    /// Exposed so higher layers can align their buffers if they want.
+    /// </summary>
+    internal const int TransferBufferSize = 64 * 1024;
+
     #endregion
 
     /// <summary>
@@ -100,7 +109,11 @@ internal sealed class FtpDataConnection : IAsyncDisposable
         }
 
         _log.Log(FtpLogLevel.Debug, $"DATA(ACTIVE): Connecting to {remoteEndPoint}...");
-        _client = new TcpClient();
+        _client = new TcpClient
+        {
+            NoDelay = true
+        };
+        
         await _client.ConnectAsync(remoteEndPoint.Address, remoteEndPoint.Port, ct);
 
         var baseStream = _client.GetStream();
@@ -150,6 +163,7 @@ internal sealed class FtpDataConnection : IAsyncDisposable
             var client = await _listener.AcceptTcpClientAsync(ct);
             _log.Log(FtpLogLevel.Debug, $"DATA(PASSIVE): Client connected from {client.Client.RemoteEndPoint}.");
 
+            client.NoDelay = true;
             _client = client;
             var baseStream = client.GetStream();
             _stream = await WrapAsync(baseStream, ct);
@@ -188,7 +202,7 @@ internal sealed class FtpDataConnection : IAsyncDisposable
         catch (Exception ex)
         {
             _log.Log(FtpLogLevel.Error, $"DATA: TLS handshake failed on data connection: {ex}");
-            ssl.Dispose();
+            await ssl.DisposeAsync();
             throw;
         }
     }
@@ -198,13 +212,24 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     public async Task SendAsync(Func<Stream, Task> send, CancellationToken ct)
     {
-        await EnsureConnectedAsync(ct);
+        await EnsureConnectedAsync(ct).ConfigureAwait(false);
 
         if (_stream is null)
             throw new InvalidOperationException("Data stream not available.");
 
-        await send(_stream);
-        await _stream.FlushAsync(ct);
+        PerfCounters.OnTransferStarted();
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            await send(_stream).ConfigureAwait(false);
+            await _stream.FlushAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            sw.Stop();
+            PerfCounters.OnTransferCompleted(sw.Elapsed);
+        }
     }
 
     /// <summary>
@@ -212,7 +237,7 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        try { _stream?.Dispose(); } catch { /* ignore */ }
+        try { _stream?.DisposeAsync(); } catch { /* ignore */ }
         try { _client?.Close(); } catch { /* ignore */ }
         try { _listener?.Stop(); } catch { /* ignore */ }
 

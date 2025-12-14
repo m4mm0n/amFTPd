@@ -1,13 +1,14 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IrcAnnouncer.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:51:58
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0xA4A1B6B3
+ *  Last Modified:  2025-12-14 18:06:52
+ *  CRC32:          0xDE57EAD3
  *  
  *  Description:
- *      IRC announcer that subscribes to the EventBus and formats scene-style lines. For now, it only logs what it *would* se...
+ *      IRC announcer that subscribes to the EventBus and announces events to IRC. It handles connection, reconnection, PING/...
  * 
  *  License:
  *      MIT License
@@ -15,18 +16,15 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Irc;
 using amFTPd.Core.Events;
 using amFTPd.Logging;
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -35,10 +33,6 @@ using System.Text;
 
 namespace amFTPd.Core.Irc;
 
-/// <summary>
-/// IRC announcer that subscribes to the EventBus and formats scene-style lines.
-/// For now, it only logs what it *would* send to IRC; you can wire real IRC I/O later.
-/// </summary>
 /// <summary>
 /// IRC announcer that subscribes to the EventBus and announces events to IRC.
 /// It handles connection, reconnection, PING/PONG and a simple send queue.
@@ -64,19 +58,46 @@ public sealed class IrcAnnouncer : IAsyncDisposable
 
     private bool _isConnected;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IrcAnnouncer"/> class with the specified configuration, logger, and
+    /// event bus.
+    /// </summary>
+    /// <remarks>This constructor provides a simplified way to create an <see cref="IrcAnnouncer"/> when
+    /// advanced dependencies are not required.</remarks>
+    /// <param name="config">The IRC configuration settings to use for connecting and announcing messages. Cannot be null.</param>
+    /// <param name="log">The logger used to record operational events and errors. Cannot be null.</param>
+    /// <param name="bus">The event bus for subscribing to and handling application events. Cannot be null.</param>
     public IrcAnnouncer(IrcConfig config, IFtpLogger log, EventBus bus)
         : this(config, log, bus, fish: null, scriptHook: null)
     {
     }
-
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IrcAnnouncer"/> class with the specified configuration, logger,
+    /// event bus, and optional FishCodec.
+    /// </summary>
+    /// <param name="config">The IRC configuration settings to use for connecting and operating the announcer. Cannot be null.</param>
+    /// <param name="log">The logger used to record FTP-related events and messages. Cannot be null.</param>
+    /// <param name="bus">The event bus for publishing and subscribing to application events. Cannot be null.</param>
+    /// <param name="fish">An optional <see cref="FishCodec"/> instance for message encryption and decryption. If null, encryption is not
+    /// used.</param>
     public IrcAnnouncer(IrcConfig config, IFtpLogger log, EventBus bus, FishCodec? fish)
         : this(config, log, bus, fish, scriptHook: null)
     {
     }
-
     /// <summary>
-    /// Main constructor, allowing both FiSH and an IRC script hook.
+    /// Initializes a new instance of the <see cref="IrcAnnouncer"/> class with the specified configuration, logger,
+    /// event bus, optional Fish codec, and optional IRC script hook.
     /// </summary>
+    /// <remarks>This constructor subscribes the instance to the provided event bus to handle relevant events
+    /// automatically.</remarks>
+    /// <param name="config">The IRC configuration settings to use. Cannot be <see langword="null"/>.</param>
+    /// <param name="log">The logger used to record FTP-related events. Cannot be <see langword="null"/>.</param>
+    /// <param name="bus">The event bus for subscribing to and handling application events. Cannot be <see langword="null"/>.</param>
+    /// <param name="fish">An optional Fish codec for message encryption and decryption. If <see langword="null"/>, Fish encryption is not
+    /// used.</param>
+    /// <param name="scriptHook">An optional script hook for extending IRC functionality. If <see langword="null"/>, no script hook is used.</param>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="config"/>, <paramref name="log"/>, or <paramref name="bus"/> is <see
+    /// langword="null"/>.</exception>
     public IrcAnnouncer(
         IrcConfig config,
         IFtpLogger log,
@@ -145,14 +166,12 @@ public sealed class IrcAnnouncer : IAsyncDisposable
         CleanupConnection();
         _log.Log(FtpLogLevel.Info, "[IRC] IRC announcer loop stopped.");
     }
-
     private bool ValidateServerCertificate(
         object? sender,
         X509Certificate? certificate,
         X509Chain? chain,
         SslPolicyErrors sslPolicyErrors) =>
         !_config.UseTls || _config.TlsAllowInvalidCerts || sslPolicyErrors == SslPolicyErrors.None;
-
     private async Task EnsureConnectedAsync(CancellationToken ct)
     {
         if (_isConnected)
@@ -263,7 +282,6 @@ public sealed class IrcAnnouncer : IAsyncDisposable
             CleanupConnection();
         }
     }
-
     private async Task RunConnectionAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && _isConnected)
@@ -300,7 +318,6 @@ public sealed class IrcAnnouncer : IAsyncDisposable
 
         CleanupConnection();
     }
-
     private void HandleIncomingLine(string line)
     {
         if (line.StartsWith("PING", StringComparison.OrdinalIgnoreCase))
@@ -331,7 +348,6 @@ public sealed class IrcAnnouncer : IAsyncDisposable
         // optional debug log...
         // _log.Log(FtpLogLevel.Debug, $"[IRC] << {line}");
     }
-
     private async Task FlushSendQueueAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested && _isConnected && _sendQueue.TryDequeue(out var msg))
@@ -359,7 +375,6 @@ public sealed class IrcAnnouncer : IAsyncDisposable
             }
         }
     }
-
     private Task SendRawAsync(string line)
     {
         StreamWriter? writer;
@@ -382,7 +397,6 @@ public sealed class IrcAnnouncer : IAsyncDisposable
             return Task.CompletedTask;
         }
     }
-
     private void HandleEvent(FtpEvent ev)
     {
         if (!_config.Enabled)
@@ -395,78 +409,156 @@ public sealed class IrcAnnouncer : IAsyncDisposable
         _sendQueue.Enqueue(line);
     }
 
-    private static string? FormatLine(FtpEvent ev)
-    {
-        // Keep it small for now; can be extended later.
-        return ev.Type switch
-        {
-            FtpEventType.Pre => FormatPre(ev),
-            FtpEventType.Nuke => FormatNuke(ev),
-            FtpEventType.RaceComplete => FormatRaceComplete(ev),
-            FtpEventType.Upload => FormatUpload(ev),
-            FtpEventType.ZipscriptStatus => FormatZipscript(ev),
-            _ => null
-        };
-    }
+    private string? FormatLine(FtpEvent ev) =>
+           ev.Type switch
+           {
+               FtpEventType.Pre => FormatPre(ev),
+               FtpEventType.Nuke => FormatNuke(ev),
+               FtpEventType.Unnuke => FormatUnnuke(ev),
+               FtpEventType.RaceComplete => FormatRaceComplete(ev),
+               FtpEventType.Upload => FormatUpload(ev),
+               FtpEventType.ZipscriptStatus => FormatZipscript(ev),
+               _ => null
+           };
 
-    private static string FormatPre(FtpEvent ev)
+    private string FormatPre(FtpEvent ev)
     {
         var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
         var sec = ev.Section ?? "(no-sec)";
         var user = ev.User ?? "(unknown)";
+        var mb = BytesToMb(ev.Bytes);
+
+        if (!string.IsNullOrWhiteSpace(_config.PreFormat))
+        {
+            return ApplyTemplate(_config.PreFormat, ev, rel, sec, user, mb);
+        }
+
         return $"*** PRE: {rel} in {sec} by {user}";
     }
 
-    private static string FormatNuke(FtpEvent ev)
+    private string FormatNuke(FtpEvent ev)
     {
         var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var reason = ev.Reason ?? "no reason";
+        var sec = ev.Section ?? "(no-sec)";
         var user = ev.User ?? "(unknown)";
+        var reason = ev.Reason ?? "no reason";
+        var mult = ExtractMultiplier(ev.Extra);
 
-        var multText = "";
-        if (!string.IsNullOrEmpty(ev.Extra))
+        if (!string.IsNullOrWhiteSpace(_config.NukeFormat))
         {
-            // crude parse: "mult=3" from Extra
-            const string key = "mult=";
-            var idx = ev.Extra.IndexOf(key, StringComparison.OrdinalIgnoreCase);
-            if (idx >= 0)
-            {
-                var rest = ev.Extra[(idx + key.Length)..].Trim();
-                var sep = rest.IndexOfAny([' ', ';', ',']);
-                var mult = sep >= 0 ? rest[..sep] : rest;
-                multText = $" x{mult}";
-            }
+            return ApplyTemplate(_config.NukeFormat, ev, rel, sec, user, null, reason, mult);
         }
 
+        var multText = string.IsNullOrEmpty(mult) ? string.Empty : $" x{mult}";
         return $"*** NUKE: {rel}{multText} ({reason}) by {user}";
     }
 
-    private static string FormatRaceComplete(FtpEvent ev)
+    private string FormatUnnuke(FtpEvent ev)
     {
         var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var mb = ev.Bytes.HasValue
-            ? (ev.Bytes.Value / (1024.0 * 1024.0)).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
-            : "?";
-        return $"*** RACE COMPLETE: {rel} ({mb} MB)";
-    }
-
-    private static string FormatUpload(FtpEvent ev)
-    {
-        var user = ev.User ?? "(unknown)";
         var sec = ev.Section ?? "(no-sec)";
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var mb = ev.Bytes.HasValue
-            ? (ev.Bytes.Value / (1024.0 * 1024.0)).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
-            : "?";
+        var user = ev.User ?? "(unknown)";
+        var reason = ev.Reason ?? "no reason";
 
-        return $"*** UPLOAD: {user} -> {sec} {rel} ({mb} MB)";
+        if (!string.IsNullOrWhiteSpace(_config.UnnukeFormat))
+        {
+            return ApplyTemplate(_config.UnnukeFormat, ev, rel, sec, user, null, reason);
+        }
+
+        return $"*** UNNUKE: {rel} ({reason}) by {user}";
     }
 
-    private static string FormatZipscript(FtpEvent ev)
+    private string FormatRaceComplete(FtpEvent ev)
     {
         var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var status = ev.Reason ?? "UNKNOWN"; // you can put COMPLETE/INCOMPLETE in Reason
-        return $"*** SFV: {rel} {status}";
+        var sec = ev.Section ?? "(no-sec)";
+
+        if (!string.IsNullOrWhiteSpace(_config.RaceCompleteFormat))
+        {
+            return ApplyTemplate(_config.RaceCompleteFormat, ev, rel, sec, ev.User ?? "(unknown)");
+        }
+
+        return $"*** RACE COMPLETE: {rel} in {sec}";
+    }
+
+    private string FormatUpload(FtpEvent ev)
+    {
+        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
+        var sec = ev.Section ?? "(no-sec)";
+        var user = ev.User ?? "(unknown)";
+        var mb = BytesToMb(ev.Bytes);
+
+        if (!string.IsNullOrWhiteSpace(_config.UploadFormat))
+        {
+            return ApplyTemplate(_config.UploadFormat, ev, rel, sec, user, mb);
+        }
+
+        return $"*** UP: {rel} ({mb ?? "?"} MB) in {sec} by {user}";
+    }
+
+    private string FormatZipscript(FtpEvent ev)
+    {
+        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
+        var sec = ev.Section ?? "(no-sec)";
+        var reason = ev.Reason ?? string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(_config.ZipscriptFormat))
+        {
+            return ApplyTemplate(_config.ZipscriptFormat, ev, rel, sec, ev.User ?? "(unknown)", null, reason);
+        }
+
+        return $"*** ZIP: {rel} [{sec}] {reason}";
+    }
+
+    private static string? BytesToMb(long? bytes)
+    {
+        if (!bytes.HasValue || bytes.Value <= 0)
+            return null;
+
+        var mb = bytes.Value / (1024.0 * 1024.0);
+        return mb.ToString("0.00", CultureInfo.InvariantCulture);
+    }
+
+    private static string ExtractMultiplier(string? extra)
+    {
+        if (string.IsNullOrEmpty(extra))
+            return string.Empty;
+
+        const string key = "mult=";
+        var idx = extra.IndexOf(key, StringComparison.OrdinalIgnoreCase);
+        if (idx < 0)
+            return string.Empty;
+
+        var rest = extra[(idx + key.Length)..].Trim();
+        var sep = rest.IndexOfAny(new[] { ' ', ';', ',' });
+        return sep >= 0 ? rest[..sep] : rest;
+    }
+
+    private static string ApplyTemplate(
+        string template,
+        FtpEvent ev,
+        string release,
+        string section,
+        string user,
+        string? mb = null,
+        string? reason = null,
+        string? mult = null)
+    {
+        var result = template
+            .Replace("{release}", release, StringComparison.OrdinalIgnoreCase)
+            .Replace("{section}", section, StringComparison.OrdinalIgnoreCase)
+            .Replace("{user}", user, StringComparison.OrdinalIgnoreCase);
+
+        if (mb is not null)
+            result = result.Replace("{mb}", mb, StringComparison.OrdinalIgnoreCase);
+
+        if (reason is not null)
+            result = result.Replace("{reason}", reason, StringComparison.OrdinalIgnoreCase);
+
+        if (mult is not null)
+            result = result.Replace("{mult}", mult, StringComparison.OrdinalIgnoreCase);
+
+        return result;
     }
 
     private void CleanupConnection()
@@ -487,7 +579,7 @@ public sealed class IrcAnnouncer : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _cts.Cancel();
+        await _cts.CancelAsync();
         if (_loop is not null)
         {
             try

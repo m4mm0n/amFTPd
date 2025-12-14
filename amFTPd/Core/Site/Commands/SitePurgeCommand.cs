@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SitePurgeCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:52:30
- *  Last Modified:  2025-12-13 04:45:42
- *  CRC32:          0x2BD15E4F
+ *  Last Modified:  2025-12-14 21:34:29
+ *  CRC32:          0xA864FDDD
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands
@@ -30,7 +25,8 @@ namespace amFTPd.Core.Site.Commands
     public sealed class SitePurgeCommand : SiteCommandBase
     {
         public override string Name => "PURGE";
-        public override bool RequiresAdmin => true;
+        public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
         public override string HelpText => "PURGE <virt-path>  - recursively delete directory tree";
 
         public override async Task ExecuteAsync(

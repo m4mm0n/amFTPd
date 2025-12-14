@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDbbackupCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:28:48
- *  Last Modified:  2025-12-10 03:29:05
- *  CRC32:          0x8AA7D62D
+ *  Last Modified:  2025-12-14 21:28:16
+ *  CRC32:          0xB8A99451
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,9 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Db;

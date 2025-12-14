@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpEvent.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-03 03:45:47
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x24F016BF
+ *  Last Modified:  2025-12-14 16:27:20
+ *  CRC32:          0x2C28F1E0
  *  
  *  Description:
  *      Represents an event in an FTP system, encapsulating details such as the event type, timestamp, user information, and...
@@ -15,10 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Events
@@ -37,6 +36,9 @@ namespace amFTPd.Core.Events
 
         /// <summary>UTC timestamp when the event occurred.</summary>
         public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
+
+        /// <summary>Numeric session identifier (if known).</summary>
+        public int? SessionId { get; init; }
 
         /// <summary>User nick / login name associated with the event (if any).</summary>
         public string? User { get; init; }

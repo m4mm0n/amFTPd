@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpPath.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xBF172B04
+ *  Last Modified:  2025-12-14 00:59:46
+ *  CRC32:          0xFC5943AB
  *  
  *  Description:
  *      Provides utility methods for normalizing and resolving FTP paths to a consistent POSIX-style format.
@@ -15,11 +16,11 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
 
 
-
-
+using System.Collections.Concurrent;
 
 namespace amFTPd.Core;
 
@@ -31,6 +32,8 @@ namespace amFTPd.Core;
 /// backslashes to forward slashes for consistency.</remarks>
 internal static class FtpPath
 {
+    private static readonly ConcurrentDictionary<(string Current, string Input), string> _normalizeCache = new();
+
     /// <summary>
     /// Normalizes a given input path by replacing backslashes with forward slashes and resolving relative paths.
     /// </summary>
@@ -41,9 +44,23 @@ internal static class FtpPath
     /// empty, or whitespace, the <paramref name="current"/> path is returned.</returns>
     public static string Normalize(string current, string input)
     {
-        if (string.IsNullOrWhiteSpace(input)) return current;
+        if (string.IsNullOrWhiteSpace(input))
+            return current;
+
+        var key = (current, input);
+
+        if (_normalizeCache.TryGetValue(key, out var cached))
+            return cached;
+
         var p = input.Replace('\\', '/');
-        return Collapse(p.StartsWith('/') ? p : $"{current.TrimEnd('/')}/{p}");
+        var result = Collapse(p.StartsWith('/') ? p : $"{current.TrimEnd('/')}/{p}");
+
+        // Very cheap size guard to avoid unbounded growth on path spam.
+        if (_normalizeCache.Count > 4096)
+            _normalizeCache.Clear();
+
+        _normalizeCache[key] = result;
+        return result;
     }
 
     private static string Collapse(string p)

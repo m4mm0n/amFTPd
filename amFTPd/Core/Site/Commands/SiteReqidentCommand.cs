@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteReqidentCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-25 03:06:33
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xB0AE3012
+ *  Last Modified:  2025-12-14 21:35:12
+ *  CRC32:          0xE37C6EA7
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands;
@@ -28,7 +25,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteReqidentCommand : SiteCommandBase
 {
     public override string Name => "REQIDENT";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "REQIDENT <user> <on|off> [ident]";
 
     public override async Task ExecuteAsync(

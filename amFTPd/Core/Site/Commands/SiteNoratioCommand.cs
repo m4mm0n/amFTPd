@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteNoratioCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 10:51:59
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0xA98507BD
+ *  Last Modified:  2025-12-14 21:33:06
+ *  CRC32:          0x0B3D3536
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands;
@@ -30,7 +25,8 @@ namespace amFTPd.Core.Site.Commands;
 public sealed class SiteNoratioCommand : SiteCommandBase
 {
     public override string Name => "NORATIO";
-    public override bool RequiresAdmin => true;
+    public override bool RequiresAdmin => false;
+    public override bool RequiresSiteop => true;
     public override string HelpText => "NORATIO <user> [ON|OFF] - show or toggle no-ratio flag for user";
 
     public override async Task ExecuteAsync(

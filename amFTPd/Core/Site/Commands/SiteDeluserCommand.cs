@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDeluserCommand.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-07 08:44:27
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0x5145CE11
+ *  Last Modified:  2025-12-14 21:29:30
+ *  CRC32:          0xD2A75FD4
  *  
  *  Description:
  *      TODO: Describe this file.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 namespace amFTPd.Core.Site.Commands
@@ -28,7 +25,8 @@ namespace amFTPd.Core.Site.Commands
     public sealed class SiteDeluserCommand : SiteCommandBase
     {
         public override string Name => "DELUSER";
-        public override bool RequiresAdmin => true;
+        public override bool RequiresAdmin => false;
+        public override bool RequiresSiteop => true;
         public override string HelpText => "DELUSER <user>  - disables the account";
 
         public override async Task ExecuteAsync(

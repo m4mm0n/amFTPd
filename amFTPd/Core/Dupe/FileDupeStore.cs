@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FileDupeStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-02 04:35:27
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0xB5302D1A
+ *  Last Modified:  2025-12-14 01:10:52
+ *  CRC32:          0x0AA4F3C0
  *  
  *  Description:
  *      File-backed dupe store. Keeps everything in memory and saves to a JSON file on each change. Good enough for typical s...
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using System.Text.Json;
@@ -38,6 +35,17 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
     private readonly Dictionary<string, DupeEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
 
+    private const int SaveBatchThreshold = 32;
+    private int _pendingSaves;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="FileDupeStore"/> class using the specified file path for persistent
+    /// storage.
+    /// </summary>
+    /// <remarks>If the directory for the specified file path does not exist, it is created automatically. The
+    /// constructor loads any existing data from the file into memory.</remarks>
+    /// <param name="filePath">The full path to the file used for storing duplicate information. Cannot be null.</param>
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="filePath"/> is null.</exception>
     public FileDupeStore(string filePath)
     {
         _filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
@@ -99,7 +107,9 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
     {
         if (entry is null) throw new ArgumentNullException(nameof(entry));
 
+        List<DupeEntry>? snapshot = null;
         var key = entry.Key;
+
         _lock.EnterWriteLock();
         try
         {
@@ -113,11 +123,21 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
                     ? DateTimeOffset.UtcNow
                     : entry.FirstSeen
             };
-            SaveToDiskNoLock();
+
+            if (ShouldPersist())
+            {
+                snapshot = _entries.Values.ToList();
+                _pendingSaves = 0;
+            }
         }
         finally
         {
             _lock.ExitWriteLock();
+        }
+
+        if (snapshot is not null)
+        {
+            SaveToDiskNoLock(snapshot);
         }
     }
 
@@ -125,13 +145,16 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
     {
         var key = DupeEntry.MakeKey(sectionName, releaseName);
 
+        List<DupeEntry>? snapshot = null;
+
         _lock.EnterWriteLock();
         try
         {
             var removed = _entries.Remove(key);
-            if (removed)
+            if (removed && ShouldPersist())
             {
-                SaveToDiskNoLock();
+                snapshot = _entries.Values.ToList();
+                _pendingSaves = 0;
             }
             return removed;
         }
@@ -139,6 +162,19 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         {
             _lock.ExitWriteLock();
         }
+
+        if (snapshot is not null)
+        {
+            SaveToDiskNoLock(snapshot);
+        }
+
+        return snapshot is not null;
+    }
+
+    private bool ShouldPersist()
+    {
+        var count = Interlocked.Increment(ref _pendingSaves);
+        return count >= SaveBatchThreshold;
     }
 
     private void LoadFromDisk()
@@ -165,12 +201,12 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         }
     }
 
-    private void SaveToDiskNoLock()
+    private void SaveToDiskNoLock(IReadOnlyCollection<DupeEntry> snapshot)
     {
-        var snapshot = _entries.Values.ToList();
-        var json = JsonSerializer.Serialize(snapshot,
+        var json = JsonSerializer.Serialize(
+            snapshot,
             new JsonSerializerOptions { WriteIndented = false });
-
+        
         File.WriteAllText(_filePath, json);
     }
 
