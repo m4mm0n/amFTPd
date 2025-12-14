@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           RatioRule.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-23 20:41:52
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xE1452322
+ *  Last Modified:  2025-12-13 20:18:12
+ *  CRC32:          0x6F8EC2AF
  *  
  *  Description:
  *      Describes ratio behavior for a logical section or group.
@@ -15,7 +16,9 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
+
 
 
 
@@ -70,11 +73,11 @@ namespace amFTPd.Config.Ftpd.RatioRules
 
         public long CalculateDownloadCost(long sizeInBytes)
         {
-            if (IsFree.Value || sizeInBytes <= 0)
+            if (IsFree != null && (IsFree.Value || sizeInBytes <= 0))
                 return 0;
 
             var kib = sizeInBytes / 1024.0;
-            return (long)(kib * CreditsPerKiBDownloaded * MultiplyCost);
+            return (long)(kib * CreditsPerKiBDownloaded * MultiplyCost)!;
         }
 
         public RatioRule()

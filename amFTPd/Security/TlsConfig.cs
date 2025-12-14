@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           TlsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 03:59:07
- *  CRC32:          0xBBF8AC88
+ *  Last Modified:  2025-12-13 22:05:34
+ *  CRC32:          0x9FF3ADA6
  *  
  *  Description:
  *      Represents the configuration for Transport Layer Security (TLS), including the server certificate and supported SSL/T...
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Logging;
@@ -56,6 +53,14 @@ namespace amFTPd.Security
         /// </summary>
         /// <param name="cert">The <see cref="X509Certificate2"/> to be used for TLS configuration. Cannot be <see langword="null"/>.</param>
         public TlsConfig(X509Certificate2 cert) => Certificate = cert;
+
+        /// <summary>
+        /// When true, clear-text data channels (PROT C) are refused whenever the control
+        /// connection is protected with TLS. This is a generic knob honoured by the
+        /// data-connection layer.
+        /// </summary>
+        public bool RefuseClearDataOnSecureControl { get; init; } = false;
+        
         /// <summary>
         /// Creates or loads a TLS configuration based on the specified certificate file.
         /// </summary>
@@ -142,6 +147,35 @@ namespace amFTPd.Security
                 ClientCertificateRequired = false,
                 CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                 AllowRenegotiation = false
+            };
+        /// <summary>
+        /// Returns <see langword="true"/> if the given protocol is considered strong enough
+        /// compared to the configured minimum.
+        /// </summary>
+        /// <param name="protocol">The negotiated protocol (e.g. from <see cref="SslStream.SslProtocol"/>).</param>
+        /// <param name="minimum">The minimum acceptable protocol.</param>
+        public bool IsProtocolStrongEnough(SslProtocols protocol, SslProtocols minimum)
+        {
+            if (minimum == SslProtocols.None)
+                return true;
+
+            var actualRank = GetProtocolRank(protocol);
+            var requiredRank = GetProtocolRank(minimum);
+
+            if (requiredRank == 0)
+                return true; // "no opinion" about the minimum
+
+            return actualRank >= requiredRank && actualRank != 0;
+        }
+
+        private static int GetProtocolRank(SslProtocols protocol)
+            => protocol switch
+            {
+                //SslProtocols.Tls => 1, // TLS 1.0 is considered weak
+                //SslProtocols.Tls11 => 2, // TLS 1.1 is considered weak
+                SslProtocols.Tls12 => 3,
+                SslProtocols.Tls13 => 4,
+                _ => 0
             };
 
         private static X509Certificate2 CreateSelfSignedRsaCertificate(

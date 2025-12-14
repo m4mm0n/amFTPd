@@ -5,6 +5,15 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.5.0.0 - 14.12.2025 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Minor code cleanup...
+* Minor optimizations...
+* Security & FXP policy milestone: centralized hammering protection,
+  reputation-based sessions, unified command authorization, and a
+  proper FXP/TLS policy engine with logging...
+
 [ v0.4.2.0 - 13.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

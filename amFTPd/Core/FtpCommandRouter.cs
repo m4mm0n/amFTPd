@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpCommandRouter.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 04:18:09
- *  CRC32:          0xA1883E8B
+ *  Last Modified:  2025-12-14 00:25:01
+ *  CRC32:          0x36EBE5D5
  *  
  *  Description:
  *      Routes and handles FTP commands received from a client session.
@@ -15,16 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Daemon;
@@ -436,7 +429,7 @@ public sealed partial class FtpCommandRouter
         var ip = _s.RemoteEndPoint?.Address;
         if (ip is not null)
         {
-            var decision = _server.HammerGuard.RegisterCommand(ip, cmd, _s.CommandsPerMinute);
+            var decision = _server.HammerGuard.RegisterCommand(ip, cmd, _s.CommandsPerMinute, _s.EffectiveMaxCommandsPerMinute);
             if (decision.ShouldBan && decision.BanDuration.HasValue)
             {
                 _server.BanList.AddTemporaryBan(ip, decision.BanDuration.Value, decision.Reason);
@@ -832,7 +825,12 @@ public sealed partial class FtpCommandRouter
             SectionName = sectionName,
             VirtualPath = _s.Cwd,
             RemoteHost = remoteFxIp.ToString(),
+            RemoteIp = remoteFxIp,
+            ControlPeerIp = _s.RemoteEndPoint?.Address,
             RemoteIdent = _s.RemoteIdent,
+            ControlTlsActive = _s.TlsActive,
+            DataChannelProtected = string.Equals(_s.Protection, "P", StringComparison.OrdinalIgnoreCase),
+            ControlProtocol = _s.TlsProtocol,
             UserAllowFxp = account?.AllowFxp ?? false,
             IsAdmin = account?.IsAdmin ?? false,
             Direction = direction

@@ -1,14 +1,14 @@
 ﻿/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
- *  File:           FxpDecision.cs
+ *  File:           FxpTlsState.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-03 03:57:30
- *  Last Modified:  2025-12-13 21:12:25
- *  CRC32:          0x01BCA8F0
+ *  Created:        2025-12-13 21:10:50
+ *  Last Modified:  2025-12-13 21:10:50
+ *  CRC32:          0x1CACC8C1
  *  
  *  Description:
- *      Result of FXP policy evaluation.
+ *      TODO: Describe this file.
  * 
  *  License:
  *      MIT License
@@ -18,15 +18,12 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ====================================================================================================
  */
-
+using amFTPd.Config.Fxp;
 
 namespace amFTPd.Core.Fxp;
 
-/// <summary>
-/// Result of FXP policy evaluation.
-/// </summary>
-public sealed record FxpDecision(bool Allowed, string? DenyReason)
-{
-    public static FxpDecision Allow() => new(true, null);
-    public static FxpDecision Deny(string reason) => new(false, reason);
-}
+/// <summary>Logical TLS state used by FXP policy.</summary>
+public sealed record FxpTlsState(
+    bool Active,
+    TlsVersion Protocol,
+    string? CipherSuite);

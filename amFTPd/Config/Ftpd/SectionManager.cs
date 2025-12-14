@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SectionManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 04:32:32
- *  CRC32:          0xBF29CBB7
+ *  Last Modified:  2025-12-13 16:16:42
+ *  CRC32:          0x1249BEB7
  *  
  *  Description:
  *      Holds the runtime collection of <see cref="FtpSection"/> objects and provides helpers for loading them from JSON / DB.
@@ -15,12 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Db;
@@ -36,6 +33,13 @@ public sealed class SectionManager
 {
     private readonly IReadOnlyList<FtpSection> _sections;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SectionManager"/> class with the specified FTP sections.
+    /// </summary>
+    /// <remarks>Each section is normalized and ordered by descending virtual root length before being managed
+    /// by the <see cref="SectionManager"/>.</remarks>
+    /// <param name="sections">The collection of <see cref="FtpSection"/> objects to manage. If <paramref name="sections"/> is <see
+    /// langword="null"/>, an empty collection is used.</param>
     public SectionManager(IEnumerable<FtpSection> sections)
     {
         _sections = (sections ?? [])

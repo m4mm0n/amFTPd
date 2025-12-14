@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           HammerGuard.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-12-11 03:00:22
- *  Last Modified:  2025-12-11 03:00:22
- *  CRC32:          0x82AB48B4
+ *  Last Modified:  2025-12-14 00:24:09
+ *  CRC32:          0x63DCADCE
  *  
  *  Description:
  *      Centralized rate limiting and abuse detection for commands and logins. Stateless callers, stateful per-IP inside.
@@ -15,7 +16,9 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
+
 
 using System.Collections.Concurrent;
 using System.Net;
@@ -100,13 +103,13 @@ public sealed class HammerGuard
     /// </summary>
     /// <param name="address">Client IP.</param>
     /// <param name="verb">Command verb (USER, PASS, RETR, etc.).</param>
-    /// <param name="currentSessionCommandsPerMinute">
-    /// Already computed commands per minute for the current session.
-    /// </param>
+    /// <param name="currentSessionCommandsPerMinute">Already computed commands per minute for the current session.</param>
+    /// <param name="maxCommandsPerMinute"></param>
     public HammerDecision RegisterCommand(
         IPAddress address,
         string verb,
-        int currentSessionCommandsPerMinute)
+        int currentSessionCommandsPerMinute,
+        int maxCommandsPerMinute)
     {
         var now = DateTime.UtcNow;
         var state = _states.GetOrAdd(address, _ => new HammerState
@@ -118,7 +121,7 @@ public sealed class HammerGuard
             WindowCommandCount = 0
         });
 
-        var maxPerMinute = _config.MaxCommandsPerMinute;
+        var maxPerMinute = maxCommandsPerMinute;
         if (maxPerMinute <= 0)
         {
             // No command-rate limits configured

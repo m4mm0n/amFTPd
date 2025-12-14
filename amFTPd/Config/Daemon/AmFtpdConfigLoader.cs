@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdConfigLoader.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-10 03:58:32
- *  CRC32:          0xB5AA1942
+ *  Last Modified:  2025-12-13 20:20:24
+ *  CRC32:          0x6C510396
  *  
  *  Description:
  *      Asynchronously loads the runtime configuration for the FTP server from the specified configuration file.
@@ -15,7 +16,9 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
+
 
 
 
@@ -307,7 +310,7 @@ public static class AmFtpdConfigLoader
         var dirEngine = new DirectoryRuleEngine(root.DirectoryRules);
 
         var ratioSectionResolver =
-            new amFTPd.Config.Ftpd.RatioRules.SectionResolver(root.Sections);
+            new Ftpd.RatioRules.SectionResolver(root.Sections);
 
         var ratioPipeline = new RatioResolutionPipeline(
             dirEngine,
@@ -327,14 +330,14 @@ public static class AmFtpdConfigLoader
 
         FxpPolicyEngine? fxpPolicy = null;
         if (root.FxpPolicy is not null)
-            fxpPolicy = new FxpPolicyEngine(root.FxpPolicy);
+            fxpPolicy = new FxpPolicyEngine(root.FxpPolicy, tlsCfg);
 
         // ======================================================================
         // VFS SYSTEM (FtpSection-based)
         // ======================================================================
 
         var vfsSectionResolver =
-            new amFTPd.Core.Sections.SectionResolver(sections.GetSections());
+            new Core.Sections.SectionResolver(sections.GetSections());
 
         // ======================================================================
         // CREDIT ENGINE

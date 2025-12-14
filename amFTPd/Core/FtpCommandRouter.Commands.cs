@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpCommandRouter.Commands.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 04:18:09
- *  CRC32:          0x1485CC36
+ *  Last Modified:  2025-12-14 00:28:27
+ *  CRC32:          0xF188FE8B
  *  
  *  Description:
  *      Partial class for handling FTP commands within the FtpCommandRouter.
@@ -15,14 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Core.Events;
@@ -627,6 +622,7 @@ namespace amFTPd.Core
 
             if (hadTransfer)
             {
+                _s.NotifyTransferAborted();
                 // Transfer was in progress and is now cancelled.
                 await _s.WriteAsync("226 Abort command successful; transfer cancelled.\r\n", ct);
             }
@@ -755,6 +751,13 @@ namespace amFTPd.Core
             {
                 var req = BuildFxpRequest(remote.Address, FxpDirection.Incoming);
                 var decision = _fxpPolicy.Evaluate(req);
+                _log.Log(FtpLogLevel.Info,
+                    $"FXP {(decision.Allowed ? "ALLOW" : "DENY")} [PASV] user={req.UserName} admin={req.IsAdmin} " +
+                    $"section={req.SectionName ?? "-"} vpath={req.VirtualPath} " +
+                    $"dir={req.Direction} remoteHost={req.RemoteHost} remoteIp={req.RemoteIp} " +
+                    $"ctlTls={(req.ControlTlsActive ? (req.ControlProtocol?.ToString() ?? "tls") : "plain")} " +
+                    $"dataTls={(req.DataTlsActive ? (req.DataProtocol?.ToString() ?? "tls") : (req.DataChannelProtected ? "prot-only" : "plain"))} " +
+                    $"reason={decision.DenyReason ?? "OK"}");
                 if (!decision.Allowed)
                 {
                     var reason = decision.DenyReason ?? "FXP not allowed in PASV by policy.";
@@ -802,6 +805,14 @@ namespace amFTPd.Core
             {
                 var req = BuildFxpRequest(remote.Address, FxpDirection.Incoming);
                 var decision = _fxpPolicy.Evaluate(req);
+                _log.Log(FtpLogLevel.Info,
+                    $"FXP {(decision.Allowed ? "ALLOW" : "DENY")} [EPSV] user={req.UserName} admin={req.IsAdmin} " +
+                    $"section={req.SectionName ?? "-"} vpath={req.VirtualPath} " +
+                    $"dir={req.Direction} remoteHost={req.RemoteHost} remoteIp={req.RemoteIp} " +
+                    $"ctlTls={(req.ControlTlsActive ? (req.ControlProtocol?.ToString() ?? "tls") : "plain")} " +
+                    $"dataTls={(req.DataTlsActive ? (req.DataProtocol?.ToString() ?? "tls") : (req.DataChannelProtected ? "prot-only" : "plain"))} " +
+                    $"reason={decision.DenyReason ?? "OK"}");
+
                 if (!decision.Allowed)
                 {
                     var reason = decision.DenyReason ?? "FXP not allowed in EPSV by policy.";
@@ -858,7 +869,6 @@ namespace amFTPd.Core
             }
 
             // FXP via script
-            // FXP via script
             if (_fxpScript is not null && _isFxp)
             {
                 var ctx = BuildSimpleContextForFxpAndActive("PORT");
@@ -875,6 +885,14 @@ namespace amFTPd.Core
             {
                 var req = BuildFxpRequest(requestedIp, FxpDirection.Outgoing);
                 var decision = _fxpPolicy.Evaluate(req);
+                _log.Log(FtpLogLevel.Info,
+                    $"FXP {(decision.Allowed ? "ALLOW" : "DENY")} [PORT] user={req.UserName} admin={req.IsAdmin} " +
+                    $"section={req.SectionName ?? "-"} vpath={req.VirtualPath} " +
+                    $"dir={req.Direction} remoteHost={req.RemoteHost} remoteIp={req.RemoteIp} " +
+                    $"ctlTls={(req.ControlTlsActive ? (req.ControlProtocol?.ToString() ?? "tls") : "plain")} " +
+                    $"dataTls={(req.DataTlsActive ? (req.DataProtocol?.ToString() ?? "tls") : (req.DataChannelProtected ? "prot-only" : "plain"))} " +
+                    $"reason={decision.DenyReason ?? "OK"}");
+
                 if (!decision.Allowed)
                 {
                     var reason = decision.DenyReason ?? "FXP not allowed by policy.";
@@ -949,6 +967,14 @@ namespace amFTPd.Core
             {
                 var req = BuildFxpRequest(ip, FxpDirection.Outgoing);
                 var decision = _fxpPolicy.Evaluate(req);
+                _log.Log(FtpLogLevel.Info,
+                    $"FXP {(decision.Allowed ? "ALLOW" : "DENY")} [EPRT] user={req.UserName} admin={req.IsAdmin} " +
+                    $"section={req.SectionName ?? "-"} vpath={req.VirtualPath} " +
+                    $"dir={req.Direction} remoteHost={req.RemoteHost} remoteIp={req.RemoteIp} " +
+                    $"ctlTls={(req.ControlTlsActive ? (req.ControlProtocol?.ToString() ?? "tls") : "plain")} " +
+                    $"dataTls={(req.DataTlsActive ? (req.DataProtocol?.ToString() ?? "tls") : (req.DataChannelProtected ? "prot-only" : "plain"))} " +
+                    $"reason={decision.DenyReason ?? "OK"}");
+
                 if (!decision.Allowed)
                 {
                     var reason = decision.DenyReason ?? "FXP not allowed by policy.";

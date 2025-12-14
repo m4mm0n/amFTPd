@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpSession.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-13 04:18:09
- *  CRC32:          0x237995A5
+ *  Last Modified:  2025-12-14 00:21:18
+ *  CRC32:          0xD0CF7704
  *  
  *  Description:
  *      Represents an FTP session that manages the control and data connections, user authentication,  and command handling f...
@@ -15,20 +16,8 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
-
-
-
-
-
-
-
-
-
-
-
-
-
+ * ====================================================================================================
+ */
 
 
 using amFTPd.Config.Ftpd;
@@ -43,6 +32,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Text;
 
 namespace amFTPd.Core;
@@ -83,6 +73,23 @@ public sealed class FtpSession : IAsyncDisposable
 
     #endregion
     #region Public Properties and Methods
+
+    /// <summary>
+    /// Gets the maximum number of commands allowed per minute, taking into account any user-specific override.
+    /// </summary>
+    /// <remarks>If a user-specific override is set and greater than zero, that value is returned; otherwise,
+    /// the system-wide default is used.</remarks>
+    public int EffectiveMaxCommandsPerMinute
+    {
+        get
+        {
+            var userOverride = Account?.MaxCommandsPerMinuteOverride;
+            if (userOverride.HasValue && userOverride.Value > 0)
+                return userOverride.Value;
+
+            return _cfg.MaxCommandsPerMinute;
+        }
+    }
     /// <summary>
     /// Represents the underlying TCP client used for control operations.
     /// </summary>
@@ -124,6 +131,10 @@ public sealed class FtpSession : IAsyncDisposable
     /// Gets a value indicating whether TLS (Transport Layer Security) is currently active.
     /// </summary>
     public bool TlsActive { get; private set; }
+    /// <summary>
+    /// Negotiated TLS protocol for the control channel, if TLS is active.
+    /// </summary>
+    public SslProtocols? TlsProtocol { get; private set; }
     /// <summary>
     /// Gets or sets the protection level or status associated with the object.
     /// </summary>
@@ -329,7 +340,8 @@ public sealed class FtpSession : IAsyncDisposable
             await ssl.AuthenticateAsServerAsync(options, ct).ConfigureAwait(false);
 
             _ctrlStream = ssl;
-            _log.Log(FtpLogLevel.Debug, "Control connection successfully upgraded to TLS.");
+            TlsActive = true;
+            TlsProtocol = ssl.SslProtocol;
         }
         catch (Exception ex)
         {

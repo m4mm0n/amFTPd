@@ -1,14 +1,14 @@
 ﻿/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
- *  File:           FxpDecision.cs
+ *  File:           TlsVersion.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-03 03:57:30
- *  Last Modified:  2025-12-13 21:12:25
- *  CRC32:          0x01BCA8F0
+ *  Created:        2025-12-13 21:09:06
+ *  Last Modified:  2025-12-13 21:09:06
+ *  CRC32:          0x1E19655D
  *  
  *  Description:
- *      Result of FXP policy evaluation.
+ *      Logical TLS version enum decoupled from concrete SslProtocols values.
  * 
  *  License:
  *      MIT License
@@ -18,15 +18,16 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ====================================================================================================
  */
-
-
-namespace amFTPd.Core.Fxp;
+namespace amFTPd.Config.Fxp;
 
 /// <summary>
-/// Result of FXP policy evaluation.
+/// Logical TLS version enum decoupled from concrete SslProtocols values.
 /// </summary>
-public sealed record FxpDecision(bool Allowed, string? DenyReason)
+public enum TlsVersion
 {
-    public static FxpDecision Allow() => new(true, null);
-    public static FxpDecision Deny(string reason) => new(false, reason);
+    Any = 0,
+    Tls10 = 10,
+    Tls11 = 11,
+    Tls12 = 12,
+    Tls13 = 13,
 }

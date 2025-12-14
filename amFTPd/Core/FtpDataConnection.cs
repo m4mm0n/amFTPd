@@ -1,10 +1,11 @@
-﻿/* ====================================================================================================
+﻿/*
+ * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpDataConnection.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
  *  Created:        2025-11-15 16:36:40
- *  Last Modified:  2025-12-09 19:20:10
- *  CRC32:          0xDF07B6A8
+ *  Last Modified:  2025-12-13 16:11:32
+ *  CRC32:          0x505EE584
  *  
  *  Description:
  *      Represents a data connection for FTP transfers, supporting both active and passive modes, with optional TLS encryptio...
@@ -15,7 +16,9 @@
  *
  *  Notes:
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ==================================================================================================== */
+ * ====================================================================================================
+ */
+
 
 
 
@@ -87,6 +90,15 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     {
         await DisposeAsync();
 
+        // Optional TLS policy: refuse clear-text data when control is TLS.
+        if (_controlTlsActive &&
+            !_prot.Equals("P", StringComparison.OrdinalIgnoreCase) &&
+            _tls.RefuseClearDataOnSecureControl)
+        {
+            throw new InvalidOperationException(
+                "Clear-text data channel is refused because control is TLS and policy forbids it.");
+        }
+
         _log.Log(FtpLogLevel.Debug, $"DATA(ACTIVE): Connecting to {remoteEndPoint}...");
         _client = new TcpClient();
         await _client.ConnectAsync(remoteEndPoint.Address, remoteEndPoint.Port, ct);
@@ -105,14 +117,23 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     {
         await DisposeAsync();
 
+        // Optional TLS policy: refuse clear-text data when control is TLS.
+        if (_controlTlsActive &&
+            !_prot.Equals("P", StringComparison.OrdinalIgnoreCase) &&
+            _tls.RefuseClearDataOnSecureControl)
+        {
+            throw new InvalidOperationException(
+                "Clear-text passive data channel is refused because control is TLS and policy forbids it.");
+        }
+
         var ep = new IPEndPoint(bindAddress, port);
         _listener = new TcpListener(ep);
         _listener.Start();
+
+        _log.Log(FtpLogLevel.Debug, $"DATA(PASSIVE): Listening on {ep}.");
         Mode = FtpTransferMode.Passive;
 
-        var actual = (IPEndPoint)_listener.LocalEndpoint;
-        _log.Log(FtpLogLevel.Debug, $"DATA(PASSIVE): Listening on {actual}.");
-        return actual.Port;
+        return ((IPEndPoint)_listener.LocalEndpoint).Port;
     }
 
     private async Task EnsureConnectedAsync(CancellationToken ct)
