@@ -42,5 +42,17 @@ public sealed record AmFtpdStorageConfig(
     string MasterPassword,    // used for BinaryUserStore encryption
     string GroupsDbPath = "amftpd-groups.db",
     string SectionsDbPath = "amftpd-sections.db",
-    bool UseMmap = true
+    bool UseMmap = true,
+    /// <summary>
+    /// Backend used for dupe persistence.
+    /// Supported values: "file" (JSON file), "binary" (BinaryDupeStore).
+    /// </summary>
+    string DupeStoreBackend = "file",
+    /// <summary>
+    /// Optional override for dupe storage location.
+    /// - If <see cref="DupeStoreBackend"/> == "file": a full file path.
+    /// - If <see cref="DupeStoreBackend"/> == "binary": a base directory.
+    /// If null/empty: defaults next to UsersDbPath.
+    /// </summary>
+    string? DupeStorePath = null
 );

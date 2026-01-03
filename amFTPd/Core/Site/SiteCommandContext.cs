@@ -19,10 +19,13 @@
  * ====================================================================================================
  */
 
-
 using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
+using amFTPd.Core.Monitoring;
 using amFTPd.Core.Race;
+using amFTPd.Core.Scene;
+using amFTPd.Core.Services;
+using amFTPd.Core.Stats;
 using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
@@ -30,96 +33,114 @@ using amFTPd.Logging;
 namespace amFTPd.Core.Site
 {
     /// <summary>
-    /// Context passed to all SITE commands.
+    /// Canonical context object passed to all SITE commands.
+    ///
+    /// This context represents the complete execution environment for a SITE command,
+    /// including identity, authorization, runtime state, filesystem access, and
+    /// controlled service capabilities.
+    ///
+    /// SITE commands and SITE scripts MUST rely exclusively on this context and must
+    /// not access server internals, singletons, or global state directly.
     /// </summary>
     public sealed class SiteCommandContext
     {
-        /// <summary>
-        /// Gets the <see cref="FtpCommandRouter"/> instance responsible for routing FTP commands.
-        /// </summary>
+        // =====================================================================
+        // Core routing / session
+        // =====================================================================
+
         public FtpCommandRouter Router { get; }
 
-        /// <summary>
-        /// Gets the current FTP session associated with the router.
-        /// </summary>
         public FtpSession Session => Router.Session;
 
-        /// <summary>
-        /// Gets the logger instance used to log FTP-related operations and events.
-        /// </summary>
-        public IFtpLogger Log => Router.Log;
-
-        /// <summary>
-        /// Gets the user store associated with the current router.
-        /// </summary>
-        /// <remarks>
-        /// The returned <see cref="IUserStore"/> is managed by the router and may depend on the
-        /// router's configuration. Ensure the router is properly initialized before accessing this property.
-        /// </remarks>
-        public IUserStore Users => Router.Users;
-
-        /// <summary>
-        /// Gets the store that provides access to groups managed by the router.
-        /// </summary>
-        public IGroupStore Groups => Router.Groups;
-
-        /// <summary>
-        /// Gets the <see cref="SectionManager"/> instance that manages the sections of the server.
-        /// </summary>
-        public SectionManager Sections => Router.Sections;
-
-        /// <summary>
-        /// Gets the runtime configuration for the FTP server.
-        /// </summary>
-        public AmFtpdRuntimeConfig Runtime => Router.Runtime;
-
-        /// <summary>
-        /// Gets the current instance of the <see cref="DatabaseManager"/> associated with the runtime.
-        /// </summary>
-        public DatabaseManager? Database => Router.Runtime.Database;
-
-        /// <summary>
-        /// Gets the <see cref="CreditEngine"/> instance associated with the current router.
-        /// </summary>
-        public CreditEngine Credits => Router.Credits;
-
-        /// <summary>
-        /// Gets the <see cref="RaceEngine"/> instance associated with the current router.
-        /// </summary>
-        public RaceEngine RaceEngine => Router.RaceEngine;
-
-        /// <summary>
-        /// The SITE sub-command verb (e.g. "KICK", "BAN", "WHO").
-        /// </summary>
-        public string Verb { get; }
-
-        /// <summary>
-        /// The raw argument string after the SITE verb.
-        /// </summary>
-        public string Arguments { get; }
-
-        /// <summary>
-        /// Gets the FTP server hosting this session.
-        /// </summary>
         public FtpServer Server => Router.Server;
 
+        public IFtpLogger Log => Router.Log;
+
+        // =====================================================================
+        // Identity & authorization
+        // =====================================================================
+
+        public FtpUser? User => Session.Account;
+
+        public string? PrimaryGroup => Session.Account?.PrimaryGroup;
+
+        public IReadOnlyList<string?> SecondaryGroups =>
+            Session.Account?.SecondaryGroups ?? [];
+
+        public bool IsAuthenticated => Session.Account is not null;
+
         /// <summary>
-        /// Initializes a new instance of the <see cref="SiteCommandContext"/> class with the specified FTP command
-        /// router.
+        /// SITEOP semantics: explicit SITEOP or admin implies SITEOP.
         /// </summary>
-        /// <param name="router">The <see cref="FtpCommandRouter"/> instance used to route FTP commands. Cannot be <see langword="null"/>.</param>
-        /// <exception cref="ArgumentNullException">Thrown if <paramref name="router"/> is <see langword="null"/>.</exception>
+        public bool IsSiteop =>
+            Session.Account?.IsSiteop == true ||
+            Session.Account?.IsAdmin == true;
+
+        public string IpAddress => Session.RemoteEndPoint.Address.ToString();
+
+        // =====================================================================
+        // Runtime truth & observability
+        // =====================================================================
+
+        /// <summary>
+        /// Authoritative runtime statistics snapshot.
+        /// This is the ONLY approved runtime truth source for SITE logic.
+        /// </summary>
+        public StatsSnapshot Stats => Router.StatsSnapshot;
+
+        public StatusEndpoint? StatusEndpoint => Router.StatusEndpoint;
+
+        // =====================================================================
+        // Virtual filesystem & scene structure (transitional)
+        // =====================================================================
+
+        /// <remarks>
+        /// Transitional access. Future SITE logic should prefer higher-level
+        /// abstractions and services.
+        /// </remarks>
+        public FtpFileSystem FileSystem => Router.FileSystem;
+
+        public SectionManager Sections => Router.Sections;
+
+        // =====================================================================
+        // Persistence & configuration
+        // =====================================================================
+
+        public IUserStore Users => Router.Users;
+
+        public IGroupStore Groups => Router.Groups;
+
+        public AmFtpdRuntimeConfig Runtime => Router.Runtime;
+
+        public DatabaseManager? Database => Router.Runtime.Database;
+
+        // =====================================================================
+        // Scene engines (legacy / transitional)
+        // =====================================================================
+
+        public ICreditService CreditService => Router.CreditService;
+
+        public RaceEngine RaceEngine => Router.RaceEngine;
+
+        public SceneStateRegistry SceneRegistry => Router.Server.SceneRegistry;
+
+        // =====================================================================
+        // SITE command invocation data
+        // =====================================================================
+
+        public string Verb { get; }
+
+        public string Arguments { get; }
+
+        // =====================================================================
+        // Construction
+        // =====================================================================
+
         public SiteCommandContext(FtpCommandRouter router)
             : this(router, string.Empty, string.Empty)
         {
         }
 
-        /// <summary>
-        /// Initializes a new instance of the <see cref="SiteCommandContext"/> class with router and SITE verb/arguments.
-        /// </summary>
-        /// <param name="router">The <see cref="FtpCommandRouter"/> instance used to route FTP commands.</param>
-        /// <param name="verb">SITE sub-command verb.</param>
-        /// <param name="arguments">SITE arguments (after the verb).</param>
         public SiteCommandContext(FtpCommandRouter router, string verb, string arguments)
         {
             Router = router ?? throw new ArgumentNullException(nameof(router));

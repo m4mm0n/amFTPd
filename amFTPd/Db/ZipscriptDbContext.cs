@@ -30,10 +30,7 @@ public sealed class ZipscriptDbContext
 {
     public string DbFilePath { get; }
 
-    public ZipscriptDbContext(string dbFilePath)
-    {
-        DbFilePath = dbFilePath ?? throw new ArgumentNullException(nameof(dbFilePath));
-    }
+    public ZipscriptDbContext(string dbFilePath) => DbFilePath = dbFilePath ?? throw new ArgumentNullException(nameof(dbFilePath));
 
     public (int Version, List<ZipscriptFileEntity> Files) Load()
     {

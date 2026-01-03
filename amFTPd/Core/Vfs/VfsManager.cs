@@ -17,15 +17,12 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
 
-
-
-
-
-
-
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Vfs;
+using amFTPd.Core.Pre;
+using amFTPd.Core.ReleaseSystem;
 using amFTPd.Core.Sections;
+using amFTPd.Core.Vfs.Providers;
 
 namespace amFTPd.Core.Vfs;
 
@@ -39,106 +36,63 @@ namespace amFTPd.Core.Vfs;
 /// designed to work with an FTP file system and supports caching for improved performance.</remarks>
 public sealed class VfsManager
 {
-    private readonly List<VfsMount> _mounts;
-    private readonly List<VfsUserMount> _userMounts;
-    private readonly SectionResolver _sectionResolver;
     private readonly VfsCache _cache;
+    private readonly List<IVfsProvider> _providers;
 
     public VfsManager(
         IEnumerable<VfsMount> mounts,
         IEnumerable<VfsUserMount> userMounts,
-        SectionResolver sectionResolver)
+        ReleaseRegistry releaseRegistry,
+        SectionResolver sectionResolver,
+        PreRegistry preRegistry)
     {
-        _mounts = mounts?.ToList() ?? [];
-        _userMounts = userMounts?.ToList() ?? [];
-        _sectionResolver = sectionResolver ?? throw new ArgumentNullException(nameof(sectionResolver));
+        ArgumentNullException.ThrowIfNull(sectionResolver);
+        ArgumentNullException.ThrowIfNull(preRegistry);
+        ArgumentNullException.ThrowIfNull(releaseRegistry);
 
-        // your real class requires a TimeSpan TTL
         _cache = new VfsCache(TimeSpan.FromSeconds(5));
+
+        // IMPORTANT: provider order = priority
+        _providers = new List<IVfsProvider>
+        {
+            new PreVfsProvider(preRegistry),
+            new ReleaseVfsProvider(releaseRegistry),
+            new GroupVfsProvider(releaseRegistry),
+            new ShortcutVfsProvider(sectionResolver),
+            new PhysicalVfsProvider(
+                mounts?.ToList() ?? [],
+                userMounts?.ToList() ?? [],
+                sectionResolver)
+        };
     }
 
     // ---------------------------------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------------------------------
-    public VfsResolveResult? Resolve(string virtualPath, FtpUser? user)
+    public VfsResolveResult Resolve(string virtualPath, FtpUser? user)
     {
         if (string.IsNullOrWhiteSpace(virtualPath))
-            return VfsResolveResult.NotFound("No path provided.");
+            return VfsResolveResult.NotFound();
 
         virtualPath = NormalizeVirtualPath(virtualPath);
 
-        // ----------------------------
-        // 1. User-specific mounts
-        // ----------------------------
-        var um = _userMounts
-            .Where(m => virtualPath.StartsWith(m.VirtualPath, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(m => m.VirtualPath.Length)
-            .FirstOrDefault();
+        if (_cache.TryGet(virtualPath, out var cached))
+            return cached;
 
-        if (um != null)
+        foreach (var provider in _providers)
         {
-            var relative = virtualPath[um.VirtualPath.Length..].TrimStart('/');
-            var physical = Path.Combine(um.PhysicalPath, relative);
+            if (!provider.CanHandle(virtualPath))
+                continue;
 
-            return BuildPhysicalDirResult(virtualPath, physical, user,
-                _sectionResolver.Resolve(virtualPath));
-        }
-
-        // ----------------------------
-        // 2. Global VFS mounts
-        // ----------------------------
-        var gm = _mounts
-            .Where(m => virtualPath.StartsWith(m.VirtualPath, StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(m => m.VirtualPath.Length)
-            .FirstOrDefault();
-
-        if (gm != null)
-        {
-            var relative = virtualPath[gm.VirtualPath.Length..].TrimStart('/');
-            var physical = Path.Combine(gm.PhysicalPath, relative);
-
-            return BuildPhysicalDirResult(virtualPath, physical, user,
-                _sectionResolver.Resolve(virtualPath));
-        }
-
-        // ----------------------------
-        // 3. Auto-section mounts (Option A)
-        // ----------------------------
-        var section = _sectionResolver.Resolve(virtualPath);
-        if (section != null)
-        {
-            var vr = section.VirtualRoot;
-            var relative = virtualPath.Length > vr.Length
-                ? virtualPath[vr.Length..].TrimStart('/')
-                : string.Empty;
-
-            // Auto-mount into the user's home directory
-            if (user?.HomeDir != null)
+            var result = provider.Resolve(virtualPath, user);
+            if (result.Success)
             {
-                var physical = Path.Combine(
-                    user.HomeDir,
-                    vr.TrimStart('/'),
-                    relative
-                );
-
-                return BuildPhysicalDirResult(virtualPath, physical, user, section);
+                _cache.Set(virtualPath, result);
+                return result;
             }
         }
 
-        // ----------------------------
-        // 4. Fallback: Home directory mapping
-        // ----------------------------
-        {
-            var relative = virtualPath.TrimStart('/');
-            if (user?.HomeDir != null)
-            {
-                var physical = Path.Combine(user.HomeDir, relative);
-
-                return BuildPhysicalDirResult(virtualPath, physical, user, null);
-            }
-        }
-
-        return null;
+        return VfsResolveResult.NotFound();
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -147,34 +101,14 @@ public sealed class VfsManager
     private static string NormalizeVirtualPath(string path)
     {
         path = path.Replace('\\', '/').Trim();
+
         if (!path.StartsWith('/'))
             path = "/" + path;
+
+        // no trailing slash except root
+        if (path.Length > 1 && path.EndsWith('/'))
+            path = path.TrimEnd('/');
+
         return path;
-    }
-
-    private VfsResolveResult BuildPhysicalDirResult(
-        string virtualPath,
-        string physicalPath,
-        FtpUser? user,
-        FtpSection? section)
-    {
-        FileSystemInfo? fsi = null;
-        if (Directory.Exists(physicalPath))
-            fsi = new DirectoryInfo(physicalPath);
-        else if (File.Exists(physicalPath))
-            fsi = new FileInfo(physicalPath);
-
-        var node = new VfsNode(
-            Type: VfsNodeType.PhysicalDirectory,
-            VirtualPath: virtualPath,
-            PhysicalPath: physicalPath,
-            FileSystemInfo: fsi,
-            VirtualContent: null
-        );
-
-        return new VfsResolveResult(true, null, node)
-        {
-            Section = section
-        };
     }
 }

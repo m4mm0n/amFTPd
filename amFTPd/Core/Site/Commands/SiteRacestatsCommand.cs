@@ -76,7 +76,7 @@ public sealed class SiteRacestatsCommand : SiteCommandBase
             var user = kv.Key;
             var bytes = kv.Value;
             var mb = bytes / (1024.0 * 1024.0);
-            var pct = (double)bytes * 100.0 / denom;
+            var pct = bytes * 100.0 / denom;
 
             await context.Session.WriteAsync(
                 $"211- {user,-12} {mb,8:0.00} {pct,6:0.0}\r\n",

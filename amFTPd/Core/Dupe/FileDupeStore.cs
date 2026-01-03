@@ -19,7 +19,6 @@
  * ====================================================================================================
  */
 
-
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -33,7 +32,8 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
 {
     private readonly string _filePath;
     private readonly ReaderWriterLockSlim _lock = new(LockRecursionPolicy.NoRecursion);
-    private readonly Dictionary<string, DupeEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DupeRelease> _releases
+        = new(StringComparer.OrdinalIgnoreCase);
 
     private const int SaveBatchThreshold = 32;
     private int _pendingSaves;
@@ -60,7 +60,12 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         _lock.EnterReadLock();
         try
         {
-            return _entries.TryGetValue(key, out var entry) ? entry : null;
+            if (!_releases.TryGetValue(key, out var r))
+                return null;
+
+            return DupeEntryMapper.ToEntry(
+                r,
+                virtualPath: $"/{r.Section}/{r.ReleaseName}");
         }
         finally
         {
@@ -79,18 +84,20 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         _lock.EnterReadLock();
         try
         {
-            foreach (var entry in _entries.Values)
+            foreach (var r in _releases.Values)
             {
                 if (sectionFilter is not null &&
-                    !entry.SectionName.Equals(sectionFilter, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (!regex.IsMatch(entry.ReleaseName))
+                    !r.Section.Equals(sectionFilter, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                list.Add(entry);
+                if (!regex.IsMatch(r.ReleaseName))
+                    continue;
+
+                list.Add(
+                    DupeEntryMapper.ToEntry(
+                        r,
+                        virtualPath: $"/{r.Section}/{r.ReleaseName}"));
+
                 if (list.Count >= limit)
                     break;
             }
@@ -105,28 +112,40 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
 
     public void Upsert(DupeEntry entry)
     {
-        if (entry is null) throw new ArgumentNullException(nameof(entry));
+        if (entry is null)
+            throw new ArgumentNullException(nameof(entry));
 
-        List<DupeEntry>? snapshot = null;
         var key = entry.Key;
+        List<DupeRelease>? snapshot = null;
 
         _lock.EnterWriteLock();
         try
         {
-            _entries[key] = entry with
+            if (!_releases.TryGetValue(key, out var r))
             {
-                // ensure LastUpdated is always set
-                LastUpdated = entry.LastUpdated == default
-                    ? DateTimeOffset.UtcNow
-                    : entry.LastUpdated,
-                FirstSeen = entry.FirstSeen == default
-                    ? DateTimeOffset.UtcNow
-                    : entry.FirstSeen
-            };
+                r = new DupeRelease(
+                    entry.SectionName,
+                    entry.ReleaseName,
+                    entry.UploaderGroup ?? "UNKNOWN",
+                    entry.FirstSeen == default
+                        ? DateTimeOffset.UtcNow
+                        : entry.FirstSeen);
+
+                _releases[key] = r;
+            }
+
+            if (entry.IsNuked)
+            {
+                r.Nuke(
+                    entry.NukeReason ?? "nuked",
+                    entry.NukeMultiplier > 0
+                        ? entry.NukeMultiplier
+                        : 1);
+            }
 
             if (ShouldPersist())
             {
-                snapshot = _entries.Values.ToList();
+                snapshot = _releases.Values.ToList();
                 _pendingSaves = 0;
             }
         }
@@ -136,24 +155,22 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         }
 
         if (snapshot is not null)
-        {
-            SaveToDiskNoLock(snapshot);
-        }
+            SaveToDisk(snapshot);
     }
 
     public bool Remove(string sectionName, string releaseName)
     {
         var key = DupeEntry.MakeKey(sectionName, releaseName);
 
-        List<DupeEntry>? snapshot = null;
+        List<DupeRelease>? snapshot = null;
 
         _lock.EnterWriteLock();
         try
         {
-            var removed = _entries.Remove(key);
+            var removed = _releases.Remove(key);
             if (removed && ShouldPersist())
             {
-                snapshot = _entries.Values.ToList();
+                snapshot = _releases.Values.ToList();
                 _pendingSaves = 0;
             }
             return removed;
@@ -165,7 +182,7 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
 
         if (snapshot is not null)
         {
-            SaveToDiskNoLock(snapshot);
+            SaveToDisk(snapshot);
         }
 
         return snapshot is not null;
@@ -185,30 +202,35 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         try
         {
             var json = File.ReadAllText(_filePath);
-            var entries = JsonSerializer.Deserialize<List<DupeEntry>>(json) ?? [];
+            var releases = JsonSerializer.Deserialize<List<DupeRelease>>(json)
+                           ?? [];
 
-            foreach (var e in entries)
+            foreach (var r in releases)
             {
-                var key = e.Key;
-                _entries[key] = e;
+                var key = DupeEntry.MakeKey(r.Section, r.ReleaseName);
+                _releases[key] = r;
             }
         }
         catch
         {
             // If the dupe file is corrupt, we start empty rather than crash the daemon.
             // You can log this if you want.
-            _entries.Clear();
+            _releases.Clear();
         }
     }
 
-    private void SaveToDiskNoLock(IReadOnlyCollection<DupeEntry> snapshot)
+    private void SaveToDisk(IReadOnlyCollection<DupeRelease> snapshot)
     {
         var json = JsonSerializer.Serialize(
             snapshot,
-            new JsonSerializerOptions { WriteIndented = false });
-        
+            new JsonSerializerOptions
+            {
+                WriteIndented = false
+            });
+
         File.WriteAllText(_filePath, json);
     }
+
 
     private static Regex WildcardToRegex(string pattern)
     {

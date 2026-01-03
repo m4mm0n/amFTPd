@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.14.36623.8
+# Visual Studio Version 18
+VisualStudioVersion = 18.0.11217.181 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "amFTPd", "amFTPd\amFTPd.csproj", "{A19DBC2C-93A2-4006-968C-E8DE7F594A7D}"
 EndProject
@@ -11,6 +11,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		amftpd_logo.png = amftpd_logo.png
 		version_history.txt = version_history.txt
 	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Plugins", "Plugins", "{DB41D37B-AA70-4EE3-ABD5-6FC6381A0261}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "amFTPd.Sqlite", "Plugins\amFTPd.Sqlite\amFTPd.Sqlite.csproj", "{ACF889BE-E58C-48F7-8302-A10BA3765A7B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "amFTPd.MySql", "Plugins\amFTPd.MySql\amFTPd.MySql.csproj", "{C95D95ED-5987-46D7-BA95-70282C0AE011}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "amFTPd.Postgres", "Plugins\amFTPd.Postgres\amFTPd.Postgres.csproj", "{6C21EC4B-AED7-47D3-BB65-D90CB0B755ED}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "amFTPd.Db.Abstractions", "Plugins\amFTPd.Db.Abstractions\amFTPd.Db.Abstractions.csproj", "{85D383AC-EA6B-430E-9AF5-1E20517D7758}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -22,9 +32,31 @@ Global
 		{A19DBC2C-93A2-4006-968C-E8DE7F594A7D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A19DBC2C-93A2-4006-968C-E8DE7F594A7D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A19DBC2C-93A2-4006-968C-E8DE7F594A7D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{ACF889BE-E58C-48F7-8302-A10BA3765A7B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{ACF889BE-E58C-48F7-8302-A10BA3765A7B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{ACF889BE-E58C-48F7-8302-A10BA3765A7B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{ACF889BE-E58C-48F7-8302-A10BA3765A7B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C95D95ED-5987-46D7-BA95-70282C0AE011}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C95D95ED-5987-46D7-BA95-70282C0AE011}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C95D95ED-5987-46D7-BA95-70282C0AE011}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C95D95ED-5987-46D7-BA95-70282C0AE011}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C21EC4B-AED7-47D3-BB65-D90CB0B755ED}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C21EC4B-AED7-47D3-BB65-D90CB0B755ED}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C21EC4B-AED7-47D3-BB65-D90CB0B755ED}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C21EC4B-AED7-47D3-BB65-D90CB0B755ED}.Release|Any CPU.Build.0 = Release|Any CPU
+		{85D383AC-EA6B-430E-9AF5-1E20517D7758}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{85D383AC-EA6B-430E-9AF5-1E20517D7758}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{85D383AC-EA6B-430E-9AF5-1E20517D7758}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{85D383AC-EA6B-430E-9AF5-1E20517D7758}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{ACF889BE-E58C-48F7-8302-A10BA3765A7B} = {DB41D37B-AA70-4EE3-ABD5-6FC6381A0261}
+		{C95D95ED-5987-46D7-BA95-70282C0AE011} = {DB41D37B-AA70-4EE3-ABD5-6FC6381A0261}
+		{6C21EC4B-AED7-47D3-BB65-D90CB0B755ED} = {DB41D37B-AA70-4EE3-ABD5-6FC6381A0261}
+		{85D383AC-EA6B-430E-9AF5-1E20517D7758} = {DB41D37B-AA70-4EE3-ABD5-6FC6381A0261}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {E8A642A3-2E90-4DBA-9C98-1D7F698F8E30}

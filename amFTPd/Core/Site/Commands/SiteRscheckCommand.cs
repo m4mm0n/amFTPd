@@ -19,7 +19,6 @@
  * ====================================================================================================
  */
 
-
 namespace amFTPd.Core.Site.Commands;
 
 public sealed class SiteRscheckCommand : SiteCommandBase

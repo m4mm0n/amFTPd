@@ -43,10 +43,7 @@ public sealed record FtpSectionConfig
     {
     }
 
-    public FtpSectionConfig(IReadOnlyList<FtpSection> sections)
-    {
-        Sections = sections.ToList();
-    }
+    public FtpSectionConfig(IReadOnlyList<FtpSection> sections) => Sections = sections.ToList();
 
     public FtpSection? GetSection(string name)
         => Sections.FirstOrDefault(s =>

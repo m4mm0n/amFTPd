@@ -17,10 +17,6 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
 
-
-
-
-
 namespace amFTPd.Core.Dupe
 {
     /// <summary>
@@ -64,9 +60,33 @@ namespace amFTPd.Core.Dupe
 
         public string Key => MakeKey(SectionName, ReleaseName);
 
-        public static string MakeKey(string sectionName, string releaseName)
+        public static string MakeKey(string sectionName, string releaseName) => $"{sectionName.Trim().ToUpperInvariant()}|{releaseName.Trim().ToUpperInvariant()}";
+
+        public static DupeEntry FromRelease(DupeRelease r)
         {
-            return $"{sectionName.Trim().ToUpperInvariant()}|{releaseName.Trim().ToUpperInvariant()}";
+            if (r is null) throw new ArgumentNullException(nameof(r));
+
+            return new DupeEntry
+            {
+                SectionName = r.Section,
+                ReleaseName = r.ReleaseName,
+
+                // DupeStore still keeps VirtualPath for now
+                VirtualPath = $"/{r.Section}/{r.ReleaseName}",
+
+                TotalBytes = r.TotalBytes,
+                FirstSeen = r.FirstSeen,
+                LastUpdated = r.LastUpdated,
+
+                UploaderGroup = r.Group,
+                UploaderUser = null, // not known here
+
+                IsNuked = r.IsNuked,
+                NukeReason = r.NukeReason,
+                NukeMultiplier = r.NukeMultiplier > 0
+                    ? (int)Math.Round(r.NukeMultiplier)
+                    : 0
+            };
         }
     }
 }

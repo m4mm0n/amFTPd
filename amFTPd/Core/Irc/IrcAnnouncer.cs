@@ -22,16 +22,21 @@
 
 using amFTPd.Config.Irc;
 using amFTPd.Core.Events;
+using amFTPd.Core.Irc.FiSH;
 using amFTPd.Logging;
-using System.Collections.Concurrent;
-using System.Globalization;
 using System.Net.Security;
 using System.Net.Sockets;
-using System.Security.Authentication;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace amFTPd.Core.Irc;
+
+enum IrcState
+{
+    Disconnected,
+    Connecting,
+    Registering,
+    Registered
+}
 
 /// <summary>
 /// IRC announcer that subscribes to the EventBus and announces events to IRC.
@@ -39,559 +44,626 @@ namespace amFTPd.Core.Irc;
 /// </summary>
 public sealed class IrcAnnouncer : IAsyncDisposable
 {
-    private readonly IrcConfig _config;
     private readonly IFtpLogger _log;
     private readonly EventBus _bus;
-    private readonly FishCodec? _fish;
-    private readonly IIrcScriptHook? _scriptHook;
-    private IrcScriptContext? _scriptContext;
+    private IrcConfig _config;
 
-    private readonly CancellationTokenSource _cts = new();
-    private Task? _loop;
+    private readonly FishKeyStore _keys = new();
+    private readonly Dh1080Manager _dh1080;
 
-    private readonly ConcurrentQueue<string> _sendQueue = new();
-    private readonly Lock _connLock = new();
+    private string _currentNick = string.Empty;
+    private int _maxNickLength = 30; // safe default
+    private int _nickAttempts;
+
+#if DEBUG
+    private readonly IrcWireLogger _wire;
+#endif
 
     private TcpClient? _client;
-    private StreamWriter? _writer;
     private StreamReader? _reader;
+    private Stream? _netStream;
 
-    private bool _isConnected;
+    private Task? _loop;
+    private readonly CancellationTokenSource _cts = new();
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IrcAnnouncer"/> class with the specified configuration, logger, and
-    /// event bus.
-    /// </summary>
-    /// <remarks>This constructor provides a simplified way to create an <see cref="IrcAnnouncer"/> when
-    /// advanced dependencies are not required.</remarks>
-    /// <param name="config">The IRC configuration settings to use for connecting and announcing messages. Cannot be null.</param>
-    /// <param name="log">The logger used to record operational events and errors. Cannot be null.</param>
-    /// <param name="bus">The event bus for subscribing to and handling application events. Cannot be null.</param>
-    public IrcAnnouncer(IrcConfig config, IFtpLogger log, EventBus bus)
-        : this(config, log, bus, fish: null, scriptHook: null)
-    {
-    }
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IrcAnnouncer"/> class with the specified configuration, logger,
-    /// event bus, and optional FishCodec.
-    /// </summary>
-    /// <param name="config">The IRC configuration settings to use for connecting and operating the announcer. Cannot be null.</param>
-    /// <param name="log">The logger used to record FTP-related events and messages. Cannot be null.</param>
-    /// <param name="bus">The event bus for publishing and subscribing to application events. Cannot be null.</param>
-    /// <param name="fish">An optional <see cref="FishCodec"/> instance for message encryption and decryption. If null, encryption is not
-    /// used.</param>
-    public IrcAnnouncer(IrcConfig config, IFtpLogger log, EventBus bus, FishCodec? fish)
-        : this(config, log, bus, fish, scriptHook: null)
-    {
-    }
-    /// <summary>
-    /// Initializes a new instance of the <see cref="IrcAnnouncer"/> class with the specified configuration, logger,
-    /// event bus, optional Fish codec, and optional IRC script hook.
-    /// </summary>
-    /// <remarks>This constructor subscribes the instance to the provided event bus to handle relevant events
-    /// automatically.</remarks>
-    /// <param name="config">The IRC configuration settings to use. Cannot be <see langword="null"/>.</param>
-    /// <param name="log">The logger used to record FTP-related events. Cannot be <see langword="null"/>.</param>
-    /// <param name="bus">The event bus for subscribing to and handling application events. Cannot be <see langword="null"/>.</param>
-    /// <param name="fish">An optional Fish codec for message encryption and decryption. If <see langword="null"/>, Fish encryption is not
-    /// used.</param>
-    /// <param name="scriptHook">An optional script hook for extending IRC functionality. If <see langword="null"/>, no script hook is used.</param>
-    /// <exception cref="ArgumentNullException">Thrown if <paramref name="config"/>, <paramref name="log"/>, or <paramref name="bus"/> is <see
-    /// langword="null"/>.</exception>
+    private static readonly Encoding IrcEncoding = Encoding.GetEncoding(28591);
+    private IrcState _state = IrcState.Disconnected;
+    private IIrcScriptHook? _scriptHook;
+
     public IrcAnnouncer(
         IrcConfig config,
         IFtpLogger log,
         EventBus bus,
-        FishCodec? fish,
         IIrcScriptHook? scriptHook)
     {
-        _config = config ?? throw new ArgumentNullException(nameof(config));
-        _log = log ?? throw new ArgumentNullException(nameof(log));
-        _bus = bus ?? throw new ArgumentNullException(nameof(bus));
-        _fish = fish;
-        _scriptHook = scriptHook;
+        _config = config;
+        _log = log;
+        _bus = bus;
+        _scriptHook = scriptHook;   
+        _dh1080 = new Dh1080Manager(log);
 
-        _bus.Subscribe(HandleEvent);
+#if DEBUG
+        var logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+        Directory.CreateDirectory(logDir);
+        _wire = new IrcWireLogger(Path.Combine(logDir, "irc-announcer.log"));
+#endif
+
+        // preload static channel keys
+        foreach (var kv in _config.FishKeys)
+            _keys.AddEcb(kv.Key, kv.Value);
+
+        _bus.Subscribe(OnEvent);
     }
 
-    /// <summary>
-    /// Start the background IRC loop (connect, announce, reconnect).
-    /// Safe to call only once.
-    /// </summary>
+    // ------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------
+
     public void Start()
     {
-        if (!_config.Enabled)
-        {
-            _log.Log(FtpLogLevel.Info, "[IRC] IRC announcer disabled by config (Enabled = false).");
-            return;
-        }
-
-        if (_loop is not null)
+        if (!_config.Enabled || _loop != null)
             return;
 
-        _log.Log(FtpLogLevel.Info, "[IRC] Starting IRC announcer loop...");
-        _loop = Task.Run(() => RunLoopAsync(_cts.Token), _cts.Token);
+        _loop = Task.Run(() => RunAsync(_cts.Token));
     }
 
-    private async Task RunLoopAsync(CancellationToken ct)
+    public async Task ReloadAsync(IrcConfig? newConfig)
+    {
+        await DisposeAsync();
+
+        if (newConfig is { Enabled: true })
+        {
+            _config = newConfig;
+            _loop = Task.Run(() => RunAsync(_cts.Token));
+        }
+    }
+
+    // ------------------------------------------------------------
+    // Main loop
+    // ------------------------------------------------------------
+
+    private async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                await EnsureConnectedAsync(ct).ConfigureAwait(false);
-                if (!_isConnected)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
-                    continue;
-                }
-
-                // Run main IO loop (read + send)
-                await RunConnectionAsync(ct).ConfigureAwait(false);
+                await ConnectAndRegisterAsync(ct);
+                await SessionLoopAsync(ct);
             }
-            catch (TaskCanceledException)
+            catch (OperationCanceledException)
             {
                 break;
             }
             catch (Exception ex)
             {
-                _log.Log(FtpLogLevel.Error, $"[IRC] Fatal error in IRC loop: {ex}");
+                _log.Log(FtpLogLevel.Warn, $"[IRC] Disconnected: {ex.Message}", ex);
             }
 
-            // If we get here, connection dropped; clean up and retry later.
-            CleanupConnection();
-            await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+            Cleanup();
+            _state = IrcState.Disconnected;
+            await Task.Delay(TimeSpan.FromSeconds(5), ct);
         }
-
-        CleanupConnection();
-        _log.Log(FtpLogLevel.Info, "[IRC] IRC announcer loop stopped.");
     }
-    private bool ValidateServerCertificate(
-        object? sender,
-        X509Certificate? certificate,
-        X509Chain? chain,
-        SslPolicyErrors sslPolicyErrors) =>
-        !_config.UseTls || _config.TlsAllowInvalidCerts || sslPolicyErrors == SslPolicyErrors.None;
-    private async Task EnsureConnectedAsync(CancellationToken ct)
+
+    // ------------------------------------------------------------
+    // Connection
+    // ------------------------------------------------------------
+
+    private async Task ConnectAndRegisterAsync(CancellationToken ct)
     {
-        if (_isConnected)
-            return;
+        _state = IrcState.Connecting;
 
-        lock (_connLock)
-            if (_isConnected)
-                return;
+        _client = new TcpClient();
+        await _client.ConnectAsync(_config.Server, _config.Port, ct);
 
-        try
-        {
-            _log.Log(FtpLogLevel.Info, $"[IRC] Connecting to {_config.Server}:{_config.Port}...");
+        var ssl = new SslStream(
+            _client.GetStream(),
+            false,
+            (_, _, _, _) => _config.TlsAllowInvalidCerts);
 
-            var client = new TcpClient { NoDelay = true };
-            var connectTask = client.ConnectAsync(_config.Server, _config.Port, ct);
-            await using (ct.Register(() => client.Close())) await connectTask.ConfigureAwait(false);
+        await ssl.AuthenticateAsClientAsync(_config.TlsServerName ?? _config.Server);
 
-            Stream stream = client.GetStream();
+        _netStream = ssl;
+        _reader = new StreamReader(ssl, IrcEncoding, false, 1024, leaveOpen: true);
 
-            // Optional TLS
-            if (_config.UseTls)
-            {
-                var targetHost = _config.TlsServerName ?? _config.Server;
-                var ssl = new SslStream(stream, false, ValidateServerCertificate);
+        _state = IrcState.Registering;
 
-                var options = new SslClientAuthenticationOptions
-                {
-                    TargetHost = targetHost,
-                    EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
-                    CertificateRevocationCheckMode = X509RevocationMode.NoCheck
-                };
+        await SendRawAsync("CAP LS 302");
 
-                await ssl.AuthenticateAsClientAsync(options, ct).ConfigureAwait(false);
-                stream = ssl;
+        if (!string.IsNullOrEmpty(_config.ServerPassword))
+            await SendRawAsync($"PASS {_config.ServerPassword}");
 
-                _log.Log(FtpLogLevel.Info, "[IRC] TLS handshake completed.");
-            }
-
-            var writer = new StreamWriter(stream, Encoding.UTF8)
-            {
-                NewLine = "\r\n",
-                AutoFlush = true
-            };
-            var reader = new StreamReader(stream, Encoding.UTF8);
-
-            // Build script context now that we have a live writer
-            var scriptContext = new IrcScriptContext(
-                _config,
-                _log,
-                raw => SendRawAsync(raw));
-
-            var useScript = _config.ScriptEnabled && _scriptHook is not null;
-            var scriptHandledRegister = false;
-
-            if (useScript)
-            {
-                try
-                {
-                    scriptHandledRegister = await _scriptHook!.OnRegisterAsync(scriptContext).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _log.Log(FtpLogLevel.Warn, $"[IRC] Script OnRegisterAsync failed: {ex.Message}", ex);
-                }
-            }
-
-            if (!scriptHandledRegister)
-            {
-                // Optional PASS
-                if (!string.IsNullOrEmpty(_config.ServerPassword))
-                    await writer.WriteLineAsync($"PASS {_config.ServerPassword}").ConfigureAwait(false);
-
-                // Default registration
-                await writer.WriteLineAsync($"NICK {_config.Nick}").ConfigureAwait(false);
-                await writer.WriteLineAsync($"USER {_config.User} 0 * :{_config.RealName}").ConfigureAwait(false);
-
-                // Default channel joins
-                foreach (var chan in _config.GetChannelList()) await writer.WriteLineAsync($"JOIN {chan}").ConfigureAwait(false);
-            }
-
-            lock (_connLock)
-            {
-                _client = client;
-                _writer = writer;
-                _reader = reader;
-                _isConnected = true;
-                _scriptContext = scriptContext;
-            }
-
-            _log.Log(FtpLogLevel.Info, "[IRC] Connected and joined channels (or script-registered).");
-
-            // Notify script that we are fully connected
-            if (useScript)
-            {
-                try
-                {
-                    await _scriptHook!.OnConnectedAsync(scriptContext).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _log.Log(FtpLogLevel.Warn, $"[IRC] Script OnConnectedAsync failed: {ex.Message}", ex);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.Log(FtpLogLevel.Error, $"[IRC] Failed to connect to IRC: {ex.Message}", ex);
-            CleanupConnection();
-        }
+        await SendRawAsync($"NICK {_config.Nick}");
+        await SendRawAsync($"USER {_config.User} 0 * :{_config.RealName}");
     }
-    private async Task RunConnectionAsync(CancellationToken ct)
+
+    // ------------------------------------------------------------
+    // IRC session
+    // ------------------------------------------------------------
+
+    private async Task SessionLoopAsync(CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested && _isConnected)
+        while (!ct.IsCancellationRequested && _client?.Connected == true)
         {
-            // Read line if available (without blocking forever)
-            string? line = null;
-            try
+            var line = await _reader!.ReadLineAsync(ct);
+            if (line == null)
+                throw new IOException("IRC connection closed");
+
+#if DEBUG
+            _wire.Receive(line);
+#endif
+
+            if (line.StartsWith("PING "))
             {
-                if (_reader is not null && _client is { Connected: true })
-                {
-                    // Use ReadLineAsync, but we still rely on cancellation to break out
-                    var readTask = _reader.ReadLineAsync();
-                    var completed = await Task.WhenAny(readTask, Task.Delay(100, ct)).ConfigureAwait(false);
-                    if (completed == readTask)
-                    {
-                        line = readTask.Result;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Log(FtpLogLevel.Warn, $"[IRC] Read error: {ex.Message}", ex);
-                break;
+                await SendRawAsync("PONG " + line[5..]);
+                continue;
             }
 
-            if (line is not null)
-            {
-                HandleIncomingLine(line);
-            }
-
-            // Flush send queue
-            await FlushSendQueueAsync(ct).ConfigureAwait(false);
+            HandleIncomingLine(line);
         }
-
-        CleanupConnection();
     }
+
+    // --- SNIP header unchanged ---
+
     private void HandleIncomingLine(string line)
     {
-        if (line.StartsWith("PING", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(line))
+            return;
+
+        string? prefix = null;
+        string command;
+        List<string> args = new();
+
+        var idx = 0;
+
+        // Prefix
+        if (line[idx] == ':')
         {
-            var token = line.Length > 4 ? line[4..].TrimStart(':', ' ') : "";
-            _ = SendRawAsync($"PONG :{token}");
+            var end = line.IndexOf(' ');
+            if (end == -1)
+                return;
+
+            prefix = line.Substring(1, end - 1);
+            idx = end + 1;
         }
 
-        var ctx = _scriptContext;
-        var hook = _scriptHook;
-
-        if (_config.ScriptEnabled && ctx is not null && hook is not null)
+        // Command
+        var cmdEnd = line.IndexOf(' ', idx);
+        if (cmdEnd == -1)
         {
-            // Fire and forget – script errors are logged but don't kill the loop.
-            _ = Task.Run(async () =>
+            command = line[idx..];
+        }
+        else
+        {
+            command = line[idx..cmdEnd];
+            idx = cmdEnd + 1;
+
+            // Params
+            while (idx < line.Length)
+            {
+                if (line[idx] == ':')
+                {
+                    args.Add(line[(idx + 1)..]);
+                    break;
+                }
+
+                var next = line.IndexOf(' ', idx);
+                if (next == -1)
+                {
+                    args.Add(line[idx..]);
+                    break;
+                }
+
+                args.Add(line[idx..next]);
+                idx = next + 1;
+            }
+        }
+
+        switch (command)
+        {
+            // ─────────────────────────────────────────────
+            // Registration / connection lifecycle
+            // ─────────────────────────────────────────────
+
+            case "001": // RPL_WELCOME
+                        // args[0] is always OUR current nick
+                _currentNick = args[0];
+
+                _log.Log(FtpLogLevel.Info,
+                    $"[IRC] Registered as {_currentNick}");
+
+                _ = OnRegisteredAsync();
+                return;
+
+            case "005": // RPL_ISUPPORT
+                foreach (var arg in args)
+                {
+                    if (arg.StartsWith("NICKLEN=", StringComparison.OrdinalIgnoreCase) &&
+                        int.TryParse(arg.AsSpan(8), out var len))
+                    {
+                        _maxNickLength = len;
+                        _log.Log(FtpLogLevel.Debug,
+                            $"[IRC] Server nick length limit: {_maxNickLength}");
+                    }
+
+                    // Future-proofing (cheap to keep)
+                    // CHANTYPES=#&
+                    // PREFIX=(ov)@+
+                    // MODES=4
+                    // CASEMAPPING=rfc1459
+                }
+                return;
+
+            // ─────────────────────────────────────────────
+            // Keepalive
+            // ─────────────────────────────────────────────
+
+            case "PING":
+                if (args.Count > 0)
+                    _ = SendRawAsync("PONG :" + args[0]);
+                return;
+
+            // ─────────────────────────────────────────────
+            // Nick handling / collisions
+            // ─────────────────────────────────────────────
+
+            case "432": // ERR_ERRONEUSNICKNAME
+            case "433": // ERR_NICKNAMEINUSE
+            case "437": // ERR_UNAVAILRESOURCE
+                _log.Log(FtpLogLevel.Warn,
+                    $"[IRC] Nick collision or invalid nick ({command}), choosing new nick");
+
+                if (++_nickAttempts > 5)
+                {
+                    _log.Log(FtpLogLevel.Error,
+                        "[IRC] Too many nick collisions, giving up");
+                    return;
+                }
+
+                _ = HandleNickCollisionAsync();
+                return;
+            
+            case "MODE":
+            case "KICK":
+            case "INVITE":
+                break;
+
+            case "NICK":
+            {
+                // Prefix MUST exist for NICK
+                if (prefix == null || args.Count < 1)
+                    return;
+
+                var oldNick = prefix.Split('!')[0];
+                var newNick = args[0];
+
+                _log.Log(FtpLogLevel.Info,
+                    $"[IRC] Nick change: {oldNick} → {newNick}");
+
+                // If it's us, update identity
+                if (oldNick.Equals(_currentNick, StringComparison.OrdinalIgnoreCase))
+                {
+                    _currentNick = newNick;
+                    _nickAttempts = 0;
+
+                    _log.Log(FtpLogLevel.Info,
+                        $"[IRC] Our nick is now {_currentNick}");
+                }
+
+                // 🔐 Rebind FiSH keys
+                _keys.Rebind(oldNick, newNick);
+
+                // 🔁 Rebind DH1080 session (if mid-handshake)
+                _dh1080.Rebind(oldNick, newNick);
+                return;
+            }
+
+            // ─────────────────────────────────────────────
+            // Channel / presence numerics (useful later)
+            // ─────────────────────────────────────────────
+
+            case "353": // RPL_NAMREPLY
+                        // args: <me> <symbol> <channel> :nick nick nick
+                        // Useful later for encrypted channel announce routing
+                return;
+
+            case "366": // RPL_ENDOFNAMES
+                        // End of NAMES list
+                return;
+
+            case "332": // RPL_TOPIC
+                        // Channel topic
+                return;
+
+            case "333": // RPL_TOPICWHOTIME
+                        // Topic metadata
+                return;
+
+            // ─────────────────────────────────────────────
+            // Errors worth knowing about
+            // ─────────────────────────────────────────────
+
+            case "401": // ERR_NOSUCHNICK
+            case "403": // ERR_NOSUCHCHANNEL
+            case "404": // ERR_CANNOTSENDTOCHAN
+                _log.Log(FtpLogLevel.Debug,
+                    $"[IRC] Target error ({command}): {string.Join(' ', args)}");
+                return;
+
+            // ─────────────────────────────────────────────
+            // User / server messages
+            // ─────────────────────────────────────────────
+
+            case "NOTICE":
+            case "PRIVMSG":
+                if (args.Count >= 2 && prefix != null)
+                {
+                    var from = prefix.Split('!')[0];
+                    var target = args[0];
+                    var msg = args[1];
+                    var isNotice = command == "NOTICE";
+
+                    HandleIncomingMessage(from, target, msg, isNotice);
+                }
+                return;
+
+            // ─────────────────────────────────────────────
+            // Default: ignore silently
+            // ─────────────────────────────────────────────
+
+            default:
+                return;
+        }
+    }
+
+    private void HandleIncomingMessage(
+        string from,
+        string target,
+        string msg,
+        bool isNotice)
+    {
+        if (isNotice)
+        {
+            // Normalize IRC payload (strip CTCP / BOM / control chars)
+            msg = msg.TrimStart(
+                '\u0001', // CTCP
+                '\uFEFF', // BOM / zero-width
+                '\0', '\r', '\n', '\t', ' '
+            );
+
+            if (msg.StartsWith("DH1080_", StringComparison.Ordinal))
             {
                 try
                 {
-                    await hook.OnIncomingLineAsync(ctx, line).ConfigureAwait(false);
+                    if (!target.Equals(_currentNick, StringComparison.OrdinalIgnoreCase))
+                        return;
+
+                    if (!_dh1080.TryGet(from, out var session)) session = _dh1080.Start(from);
+
+                    if (msg.StartsWith("DH1080_INIT", StringComparison.Ordinal))
+                    {
+                        var parts = msg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length < 2)
+                        {
+                            _log.Log(FtpLogLevel.Warn, "[IRC] Malformed DH1080_INIT");
+                            return;
+                        }
+
+                        var keyPart = parts[1];
+
+                        var reply = session.HandleInit(keyPart);
+                        if (string.IsNullOrEmpty(reply))
+                        {
+                            _log.Log(FtpLogLevel.Warn,
+                                "[IRC] DH1080 HandleInit returned empty reply");
+                            return;
+                        }
+
+                        _ = SendNoticeAsync(from, reply);
+                        _keys.MarkPending(from);
+                        return;
+                    }
+
+                    if (msg.StartsWith("DH1080_FINISH", StringComparison.Ordinal))
+                    {
+                        var parts = msg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length < 2)
+                            return;
+
+                        session.HandleFinish(parts[1]);
+
+                        var key = session.DeriveFishKey();
+                        _keys.UpgradeToCbc(from, key);
+                        _dh1080.Remove(from);
+
+                        _log.Log(FtpLogLevel.Info,
+                            $"[IRC] DH1080 CBC key established with {from}");
+                        return;
+                    }
                 }
                 catch (Exception ex)
                 {
-                    ctx.Log.Log(FtpLogLevel.Warn, $"[IRC] Script OnIncomingLineAsync failed: {ex.Message}", ex);
+                    _log.Log(FtpLogLevel.Error, "[IRC] DH1080 handler crashed it seems!", ex);
                 }
-            });
+            }
         }
 
-        // optional debug log...
-        // _log.Log(FtpLogLevel.Debug, $"[IRC] << {line}");
-    }
-    private async Task FlushSendQueueAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested && _isConnected && _sendQueue.TryDequeue(out var msg))
+        // --------------------
+        // FiSH decrypt (NOTICE or PRIVMSG)
+        // --------------------
+        if (msg.StartsWith("+OK ") && _keys.TryGet(from, out var entry))
         {
-            foreach (var chan in _config.GetChannelList())
+            try
             {
-                var outMsg = msg;
+                var fish = new Fish(entry.Key, entry.Mode);
+                var plain = fish.Decrypt(msg);
 
-                if (_config.FishEnabled && _fish is not null && _fish.HasKeyForTarget(chan))
-                {
-                    try
-                    {
-                        outMsg = _fish.EncryptMessage(chan, msg);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.Log(FtpLogLevel.Warn,
-                            $"[IRC] FiSH encryption failed for channel {chan}: {ex.Message}", ex);
-                        // fall back to plaintext
-                        outMsg = msg;
-                    }
-                }
-
-                await SendRawAsync($"PRIVMSG {chan} :{outMsg}").ConfigureAwait(false);
+                _log.Log(FtpLogLevel.Debug,
+                    $"[IRC] <{from}> {plain}");
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Warn,
+                    $"[IRC] FiSH decrypt failed from {from}", ex);
             }
         }
     }
-    private Task SendRawAsync(string line)
-    {
-        StreamWriter? writer;
-        lock (_connLock)
-        {
-            writer = _writer;
-        }
 
-        if (writer is null)
-            return Task.CompletedTask;
+    private async Task SendNoticeAsync(string target, string message) => await SendRawAsync($"NOTICE {target} :{message}");
 
-        try
-        {
-            // _log.Log(FtpLogLevel.Debug, $"[IRC] >> {line}");
-            return writer.WriteLineAsync(line);
-        }
-        catch (Exception ex)
-        {
-            _log.Log(FtpLogLevel.Warn, $"[IRC] Failed to send line: {ex.Message}", ex);
-            return Task.CompletedTask;
-        }
-    }
-    private void HandleEvent(FtpEvent ev)
+    // ------------------------------------------------------------
+    // Registration
+    // ------------------------------------------------------------
+
+    private async Task OnRegisteredAsync()
     {
-        if (!_config.Enabled)
+        if (_state == IrcState.Registered)
             return;
 
-        var line = FormatLine(ev);
-        if (string.IsNullOrEmpty(line))
+        _state = IrcState.Registered;
+
+        foreach (var chan in _config.GetChannelList())
+        {
+            if (_config.FishKeys.TryGetValue(chan, out var key))
+                await SendRawAsync($"JOIN {chan} {key}");
+            else
+                await SendRawAsync($"JOIN {chan}");
+        }
+
+        _log.Log(FtpLogLevel.Info, "[IRC] Connected and registered.");
+    }
+
+    private async Task HandleNickCollisionAsync()
+    {
+        var suffix = "_" + Random.Shared.Next(10, 99);
+        var maxBaseLen = Math.Max(1, _maxNickLength - suffix.Length);
+
+        var baseNick = _config.Nick.Length > maxBaseLen
+            ? _config.Nick[..maxBaseLen]
+            : _config.Nick;
+
+        var newNick = baseNick + suffix;
+
+        _log.Log(FtpLogLevel.Info,
+            $"[IRC] Trying alternate nick: {newNick}");
+
+        await SendRawAsync($"NICK {newNick}");
+    }
+
+    // ------------------------------------------------------------
+    // Sending
+    // ------------------------------------------------------------
+
+    private async Task SendPrivMsgAsync(string target, string message)
+    {
+        if (_keys.TryGet(target, out var key))
+        {
+            var fish = new Fish(key.Key, key.Mode);
+            message = fish.Encrypt(message);
+        }
+
+        await SendRawAsync($"PRIVMSG {target} :{message}");
+    }
+
+    private async Task SendRawAsync(string line)
+    {
+#if DEBUG
+        _wire.Send(line);
+#endif
+        _log.Log(FtpLogLevel.Debug, $"[IRC] RAW >> {line}");
+
+        var data = IrcEncoding.GetBytes(line + "\r\n");
+        await _netStream!.WriteAsync(data, 0, data.Length);
+        await _netStream.FlushAsync();
+    }
+
+    // ------------------------------------------------------------
+    // Event handling
+    // ------------------------------------------------------------
+
+    private void OnEvent(FtpEvent ev)
+    {
+        if (_state != IrcState.Registered)
             return;
 
-        _sendQueue.Enqueue(line);
-    }
-
-    private string? FormatLine(FtpEvent ev) =>
-           ev.Type switch
-           {
-               FtpEventType.Pre => FormatPre(ev),
-               FtpEventType.Nuke => FormatNuke(ev),
-               FtpEventType.Unnuke => FormatUnnuke(ev),
-               FtpEventType.RaceComplete => FormatRaceComplete(ev),
-               FtpEventType.Upload => FormatUpload(ev),
-               FtpEventType.ZipscriptStatus => FormatZipscript(ev),
-               _ => null
-           };
-
-    private string FormatPre(FtpEvent ev)
-    {
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var sec = ev.Section ?? "(no-sec)";
-        var user = ev.User ?? "(unknown)";
-        var mb = BytesToMb(ev.Bytes);
-
-        if (!string.IsNullOrWhiteSpace(_config.PreFormat))
+        switch (ev.Type)
         {
-            return ApplyTemplate(_config.PreFormat, ev, rel, sec, user, mb);
-        }
+            case FtpEventType.Pre:
+                if (ev.Section != null && ev.ReleaseName != null)
+                    _ = SendPreAsync(ev);
+                break;
 
-        return $"*** PRE: {rel} in {sec} by {user}";
+            case FtpEventType.Nuke:
+                _ = SendNukeAsync(ev);
+                break;
+
+            case FtpEventType.Unnuke:
+                _ = SendUnnukeAsync(ev);
+                break;
+
+            case FtpEventType.Delete:
+                _ = SendDeleteAsync(ev);
+                break;
+        }
     }
 
-    private string FormatNuke(FtpEvent ev)
+    private async Task SendPreAsync(FtpEvent ev)
     {
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var sec = ev.Section ?? "(no-sec)";
-        var user = ev.User ?? "(unknown)";
-        var reason = ev.Reason ?? "no reason";
-        var mult = ExtractMultiplier(ev.Extra);
-
-        if (!string.IsNullOrWhiteSpace(_config.NukeFormat))
+        foreach (var chan in _config.GetChannelList()) await SendPrivMsgAsync(chan, $"PRE {ev.Section} {ev.ReleaseName}");
+    }
+    private async Task SendNukeAsync(FtpEvent ev)
+    {
+        foreach (var chan in _config.GetChannelList())
         {
-            return ApplyTemplate(_config.NukeFormat, ev, rel, sec, user, null, reason, mult);
+            var msg =
+                $"NUKE {ev.Section} {ev.ReleaseName} " +
+                $"{ev.Reason ?? "no-reason"}";
+
+            await SendPrivMsgAsync(chan, msg);
         }
-
-        var multText = string.IsNullOrEmpty(mult) ? string.Empty : $" x{mult}";
-        return $"*** NUKE: {rel}{multText} ({reason}) by {user}";
     }
-
-    private string FormatUnnuke(FtpEvent ev)
+    private async Task SendUnnukeAsync(FtpEvent ev)
     {
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var sec = ev.Section ?? "(no-sec)";
-        var user = ev.User ?? "(unknown)";
-        var reason = ev.Reason ?? "no reason";
-
-        if (!string.IsNullOrWhiteSpace(_config.UnnukeFormat))
+        foreach (var chan in _config.GetChannelList())
         {
-            return ApplyTemplate(_config.UnnukeFormat, ev, rel, sec, user, null, reason);
+            var msg =
+                $"UNNUKE {ev.Section} {ev.ReleaseName}";
+
+            await SendPrivMsgAsync(chan, msg);
         }
-
-        return $"*** UNNUKE: {rel} ({reason}) by {user}";
     }
-
-    private string FormatRaceComplete(FtpEvent ev)
+    private async Task SendDeleteAsync(FtpEvent ev)
     {
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var sec = ev.Section ?? "(no-sec)";
-
-        if (!string.IsNullOrWhiteSpace(_config.RaceCompleteFormat))
+        foreach (var chan in _config.GetChannelList())
         {
-            return ApplyTemplate(_config.RaceCompleteFormat, ev, rel, sec, ev.User ?? "(unknown)");
+            var msg =
+                $"DEL {ev.Section} {ev.ReleaseName}";
+
+            await SendPrivMsgAsync(chan, msg);
         }
-
-        return $"*** RACE COMPLETE: {rel} in {sec}";
     }
 
-    private string FormatUpload(FtpEvent ev)
+    // ------------------------------------------------------------
+    // Cleanup
+    // ------------------------------------------------------------
+
+    private void Cleanup()
     {
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var sec = ev.Section ?? "(no-sec)";
-        var user = ev.User ?? "(unknown)";
-        var mb = BytesToMb(ev.Bytes);
+        try { _reader?.Dispose(); } catch { }
+        try { _client?.Dispose(); } catch { }
 
-        if (!string.IsNullOrWhiteSpace(_config.UploadFormat))
-        {
-            return ApplyTemplate(_config.UploadFormat, ev, rel, sec, user, mb);
-        }
-
-        return $"*** UP: {rel} ({mb ?? "?"} MB) in {sec} by {user}";
-    }
-
-    private string FormatZipscript(FtpEvent ev)
-    {
-        var rel = ev.ReleaseName ?? ev.VirtualPath ?? "(unknown)";
-        var sec = ev.Section ?? "(no-sec)";
-        var reason = ev.Reason ?? string.Empty;
-
-        if (!string.IsNullOrWhiteSpace(_config.ZipscriptFormat))
-        {
-            return ApplyTemplate(_config.ZipscriptFormat, ev, rel, sec, ev.User ?? "(unknown)", null, reason);
-        }
-
-        return $"*** ZIP: {rel} [{sec}] {reason}";
-    }
-
-    private static string? BytesToMb(long? bytes)
-    {
-        if (!bytes.HasValue || bytes.Value <= 0)
-            return null;
-
-        var mb = bytes.Value / (1024.0 * 1024.0);
-        return mb.ToString("0.00", CultureInfo.InvariantCulture);
-    }
-
-    private static string ExtractMultiplier(string? extra)
-    {
-        if (string.IsNullOrEmpty(extra))
-            return string.Empty;
-
-        const string key = "mult=";
-        var idx = extra.IndexOf(key, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
-            return string.Empty;
-
-        var rest = extra[(idx + key.Length)..].Trim();
-        var sep = rest.IndexOfAny(new[] { ' ', ';', ',' });
-        return sep >= 0 ? rest[..sep] : rest;
-    }
-
-    private static string ApplyTemplate(
-        string template,
-        FtpEvent ev,
-        string release,
-        string section,
-        string user,
-        string? mb = null,
-        string? reason = null,
-        string? mult = null)
-    {
-        var result = template
-            .Replace("{release}", release, StringComparison.OrdinalIgnoreCase)
-            .Replace("{section}", section, StringComparison.OrdinalIgnoreCase)
-            .Replace("{user}", user, StringComparison.OrdinalIgnoreCase);
-
-        if (mb is not null)
-            result = result.Replace("{mb}", mb, StringComparison.OrdinalIgnoreCase);
-
-        if (reason is not null)
-            result = result.Replace("{reason}", reason, StringComparison.OrdinalIgnoreCase);
-
-        if (mult is not null)
-            result = result.Replace("{mult}", mult, StringComparison.OrdinalIgnoreCase);
-
-        return result;
-    }
-
-    private void CleanupConnection()
-    {
-        lock (_connLock)
-        {
-            if (_client is not null)
-            {
-                try { _client.Close(); } catch { /* ignore */ }
-            }
-
-            _client = null;
-            _writer = null;
-            _reader = null;
-            _isConnected = false;
-        }
+        _reader = null;
+        _client = null;
+        _netStream = null;
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _cts.CancelAsync();
-        if (_loop is not null)
-        {
-            try
-            {
-                await _loop.ConfigureAwait(false);
-            }
-            catch
-            {
-                // ignore
-            }
-        }
-        _cts.Dispose();
-        CleanupConnection();
+        _cts.Cancel();
+        if (_loop != null)
+            await _loop;
+
+        Cleanup();
     }
 }

@@ -44,4 +44,31 @@ public abstract class SiteCommandBase
         SiteCommandContext context,
         string argument,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Determines whether the current session account has the required administrative or site operator permissions.
+    /// </summary>
+    /// <remarks>If both requiresAdmin and requiresSiteop are false, the method returns true for any
+    /// authenticated account. If the session account is null, the method returns false.</remarks>
+    /// <param name="ctx">The command context containing the session and account information to evaluate permissions for. Cannot be null.</param>
+    /// <param name="requiresAdmin">true to require the account to have administrative privileges; otherwise, false.</param>
+    /// <param name="requiresSiteop">true to require the account to have either administrative or site operator privileges; otherwise, false.</param>
+    /// <returns>true if the account associated with the session meets the specified permission requirements; otherwise, false.</returns>
+    protected static bool HasPermission(
+        SiteCommandContext ctx,
+        bool requiresAdmin,
+        bool requiresSiteop)
+    {
+        var acc = ctx.Session.Account;
+        if (acc is null)
+            return false;
+
+        if (requiresAdmin)
+            return acc.IsAdmin;
+
+        if (requiresSiteop)
+            return acc.IsAdmin || acc.IsSiteop;
+
+        return true;
+    }
 }

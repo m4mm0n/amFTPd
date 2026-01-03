@@ -81,7 +81,7 @@ namespace amFTPd.Security
             IFtpLogger logger)
         {
             // Normalize password: null / empty / whitespace => null (no password)
-            string? pwd = string.IsNullOrWhiteSpace(pfxPassword) ? null : pfxPassword;
+            var pwd = string.IsNullOrWhiteSpace(pfxPassword) ? null : pfxPassword;
 
             // Use *user* keystore so we don't need admin rights, and persist the key
             const X509KeyStorageFlags Flags =

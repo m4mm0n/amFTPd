@@ -291,9 +291,8 @@ namespace amFTPd.Config.Ftpd
             );
         }
 
-        private static FtpUserConfigUser ToConfig(FtpUser u)
-        {
-            return new FtpUserConfigUser(
+        private static FtpUserConfigUser ToConfig(FtpUser u) =>
+            new(
                 UserName: u.UserName,
                 PasswordHash: u.PasswordHash,
                 Disabled: u.Disabled,
@@ -317,11 +316,9 @@ namespace amFTPd.Config.Ftpd
                 CreditsKb: u.CreditsKb,
                 MaxConcurrentLogins: u.MaxConcurrentLogins
             );
-        }
 
-        private static FtpUser CreateDefaultAdminUser()
-        {
-            return new FtpUser(
+        private static FtpUser CreateDefaultAdminUser() =>
+            new(
                 "admin",                                  // userName
                 PasswordHasher.HashPassword("admin"),     // passwordHash
                 Disabled: false,
@@ -345,20 +342,17 @@ namespace amFTPd.Config.Ftpd
                 IsNoRatio: false,
                 FlagsRaw: string.Empty
             );
-        }
 
         // =====================================================================
         // Password verification helper (no VerifyHashedPassword in hasher)
         // =====================================================================
-        private static bool VerifyPassword(string storedHash, string password)
-        {
-            return string.IsNullOrEmpty(storedHash)
+        private static bool VerifyPassword(string storedHash, string password) =>
+            string.IsNullOrEmpty(storedHash)
                 ? string.IsNullOrEmpty(password)
                 :
                 // Accept either plain-text (for old configs)…
                 string.Equals(storedHash, password, StringComparison.Ordinal) ||
                 // …or PBKDF2-SHA256 formatted hashes.
                 PasswordHasher.VerifyPassword(password, storedHash);
-        }
     }
 }

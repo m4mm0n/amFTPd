@@ -47,10 +47,8 @@ public sealed class FxpPolicyEngine
     }
 
     public FxpPolicyEngine(FxpPolicyConfig policy, TlsConfig tls)
-        : this(new FxpConfig(), policy, tls)
-    {
+        : this(new FxpConfig(), policy, tls) =>
         _ = tls; // suppress unused warning
-    }
 
     public FxpDecision Evaluate(FxpRequest req)
     {

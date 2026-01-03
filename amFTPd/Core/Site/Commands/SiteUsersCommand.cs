@@ -45,12 +45,19 @@ public sealed class SiteUsersCommand : SiteCommandBase
             return;
         }
 
+        var full = argument?.Trim()
+            .Equals("FULL", StringComparison.OrdinalIgnoreCase) == true;
+
         var users = context.Users.GetAllUsers()
             .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var live = context.Runtime.LiveStats;
+
         var sb = new StringBuilder();
-        sb.AppendLine("211-Configured users:");
+        sb.AppendLine(full
+            ? "211-User statistics (live):"
+            : "211-Configured users:");
 
         foreach (var u in users)
         {
@@ -63,12 +70,24 @@ public sealed class SiteUsersCommand : SiteCommandBase
             sb.Append(" ACT=").Append(u.AllowActiveMode ? "Y" : "N");
             sb.Append(" NORATIO=").Append(u.IsNoRatio ? "Y" : "N");
             sb.Append(" CREDITSKB=").Append(u.CreditsKb);
+
+            if (full &&
+                live.Users.TryGetValue(u.UserName, out var lu))
+            {
+                sb.Append(" UL#=").Append(lu.Uploads);
+                sb.Append(" DL#=").Append(lu.Downloads);
+                sb.Append(" UP=").Append(lu.BytesUploaded);
+                sb.Append(" DN=").Append(lu.BytesDownloaded);
+                sb.Append(" SESS=").Append(lu.ActiveSessions);
+            }
+
             sb.AppendLine();
         }
 
         sb.AppendLine("211 End");
 
-        var text = sb.ToString().Replace("\n", "\r\n");
-        await context.Session.WriteAsync(text, cancellationToken);
+        await context.Session.WriteAsync(
+            sb.ToString().Replace("\n", "\r\n"),
+            cancellationToken);
     }
 }

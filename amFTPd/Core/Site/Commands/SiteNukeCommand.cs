@@ -177,82 +177,15 @@ public sealed class SiteNukeCommand : SiteCommandBase
                     $"SITE NUKE by {nuker}: {virt} => {target} (Reason: {reason}, Penalties: {penalties.Count})");
             }
 
-            // Append to nukes.log (scene-style nuke log stub)
-            try
-            {
-                Directory.CreateDirectory("logs");
-                var sb = new StringBuilder();
-                var now = DateTimeOffset.UtcNow;
-
-                sb.Append(now.ToString("yyyy-MM-dd HH:mm:ss zzz"))
-                    .Append(" | NUKE | ")
-                    .Append($"path={virt} | nuker={nuker} | reason={reason} | mult={nukeMultiplier}");
-
-                if (race is not null)
-                {
-                    sb.Append($" | totalBytes={race.TotalBytes} | files={race.FileCount}");
-                }
-
-                if (penalties.Count > 0)
-                {
-                    sb.Append(" | penalties=");
-                    sb.Append(string.Join(";", penalties.Select(p =>
-                        $"{p.User}:{p.Bytes}B:-{p.PenaltyKb}KB=>{p.NewCredits}KB")));
-                }
-
-                sb.AppendLine();
-
-                File.AppendAllText("logs/nukes.log", sb.ToString());
-            }
-            catch
-            {
-                // logging failure shouldn't break NUKE
-            }
-
-            // DUPE DB integration: mark releases as nuked
-            if (context.Runtime.DupeStore is { } dupeStore)
-            {
-                var trimmed = releaseVirt.TrimEnd('/', '\\');
-                var releaseName = Path.GetFileName(trimmed);
-
-                var matches = dupeStore.Search(releaseName);
-
-                foreach (var entry in matches)
-                {
-                    var updated = entry with
-                    {
-                        IsNuked = true,
-                        NukeReason = reason,
-                        NukeMultiplier = (int)Math.Round(nukeMultiplier),
-                        LastUpdated = DateTimeOffset.UtcNow
-                    };
-
-                    dupeStore.Upsert(updated);
-                }
-            }
-
-            // AMScript notification hooks:
-            context.Router.FireSiteEvent("onNuke", releaseVirt, section, nuker);
-
-            if (race is not null)
-                context.Router.FireSiteEvent("onRaceComplete", releaseVirt, section, nuker);
-
-            // EventBus: announce NUKE
-            var releaseNameForEvent = Path.GetFileName(releaseVirt.TrimEnd('/', '\\'));
-
-            context.Runtime.EventBus?.Publish(new FtpEvent
-            {
-                Type = FtpEventType.Nuke,
-                Timestamp = DateTimeOffset.UtcNow,
-                SessionId = context.Session.SessionId,
-                User = nuker,
-                Group = context.Session.Account?.GroupName,
-                Section = section?.Name,
-                VirtualPath = releaseVirt,
-                ReleaseName = releaseNameForEvent,
-                Reason = reason,
-                Extra = $"mult={nukeMultiplier}"
-            });
+            // Centralized side effects (dupe/zipscript state is already updated above)
+            NukePropagation.ApplyNuke(
+                context,
+                releaseVirt,
+                section,
+                nuker,
+                reason,
+                nukeMultiplier,
+                race);
 
             await context.Session.WriteAsync(
                 $"250 NUKE completed for {virt}. Reason: {reason}\r\n",

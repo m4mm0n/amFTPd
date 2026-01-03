@@ -89,24 +89,31 @@ namespace amFTPd.Db
         {
             Directory.CreateDirectory(baseDir);
 
+            // DB file paths
+            var usersDb = Path.Combine(baseDir, "amftpd-users.db");
+            var groupsDb = Path.Combine(baseDir, "amftpd-groups.db");
+            var sectionsDb = Path.Combine(baseDir, "amftpd-sections.db");
+
+            var isFirstRun =
+                !File.Exists(usersDb) &&
+                !File.Exists(groupsDb) &&
+                !File.Exists(sectionsDb);
+
             DbInstanceLock? instanceLock = null;
+
             try
             {
                 instanceLock = DbInstanceLock.Acquire(baseDir, debugLog);
             }
             catch
             {
-                // Re-throw so the caller knows binary DB cannot be used.
-                // The config loader will decide if it should fall back to JSON.
                 throw;
             }
 
-            debugLog?.Invoke("[DB-MANAGER] Loading stores…");
-
-            // DB file paths
-            var usersDb = Path.Combine(baseDir, "amftpd-users.db");
-            var groupsDb = Path.Combine(baseDir, "amftpd-groups.db");
-            var sectionsDb = Path.Combine(baseDir, "amftpd-sections.db");
+            debugLog?.Invoke(
+                isFirstRun
+                    ? "[DB-MANAGER] First run detected — creating fresh binary databases."
+                    : "[DB-MANAGER] Loading stores…");
 
             //
             // USER STORE
@@ -120,37 +127,12 @@ namespace amFTPd.Db
             }
             catch (Exception ex)
             {
-                debugLog?.Invoke($"[DB-MANAGER] User store failed. Falling back to memory: {ex.Message}");
+                if (isFirstRun)
+                    throw new InvalidOperationException(
+                        "Failed to create binary group/section database on first run.", ex);
 
-                // bootstrap admin user
-                var admin = new FtpUser(
-                    UserName: "admin",
-                    PasswordHash: PasswordHasher.HashPassword("admin"),
-                    HomeDir: "/",
-                    IsAdmin: true,
-                    AllowFxp: true,
-                    AllowUpload: true,
-                    AllowDownload: true,
-                    AllowActiveMode: true,
-                    MaxConcurrentLogins: 0,
-                    IdleTimeout: TimeSpan.FromHours(24),
-                    MaxUploadKbps: 0,
-                    MaxDownloadKbps: 0,
-                    PrimaryGroup: "admins",
-                    SecondaryGroups: ImmutableArray<string>.Empty,
-                    CreditsKb: long.MaxValue,
-                    AllowedIpMask: null,
-                    RequireIdentMatch: false,
-                    RequiredIdent: null,
-                    FlagsRaw: string.Empty
-                );
-
-                var dict = new Dictionary<string, FtpUser>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [admin.UserName] = admin
-                };
-
-                users = new InMemoryUserStore(dict, "in-memory");
+                throw new InvalidOperationException(
+                    "Binary database exists but failed to load.", ex);
             }
 
             //
@@ -163,20 +145,12 @@ namespace amFTPd.Db
             }
             catch (Exception ex)
             {
-                debugLog?.Invoke($"[DB-MANAGER] Group store failed. Falling back to memory: {ex.Message}");
+                if (isFirstRun)
+                    throw new InvalidOperationException(
+                        "Failed to create binary group/section database on first run.", ex);
 
-                groups = new InMemoryGroupStore();
-
-                // bootstrap admins group
-                groups.TryAddGroup(
-                    new FtpGroup(
-                        GroupName: "admins",
-                        Description: "Administrators",
-                        Users: ["admin"],
-                        SectionCredits: new Dictionary<string, long>()
-                    ),
-                    out _
-                );
+                throw new InvalidOperationException(
+                    "Binary database exists but failed to load.", ex);
             }
 
             //
@@ -189,26 +163,12 @@ namespace amFTPd.Db
             }
             catch (Exception ex)
             {
-                debugLog?.Invoke($"[DB-MANAGER] Section store failed. Falling back to memory: {ex.Message}");
+                if (isFirstRun)
+                    throw new InvalidOperationException(
+                        "Failed to create binary group/section database on first run.", ex);
 
-                var emptyManager = new SectionManager(
-                    new List<Config.Ftpd.FtpSection>(),
-                    "in-memory"
-                );
-
-                sections = new InMemorySectionStore(emptyManager);
-
-                // bootstrap default section
-                sections.TryAddSection(
-                    new Config.Ftpd.FtpSection(
-                        Name: "default",
-                        VirtualRoot: "/",
-                        FreeLeech: false,
-                        RatioUploadUnit: 1,
-                        RatioDownloadUnit: 3
-                    ),
-                    out _
-                );
+                throw new InvalidOperationException(
+                    "Binary database exists but failed to load.", ex);
             }
 
             //

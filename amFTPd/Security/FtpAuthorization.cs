@@ -59,27 +59,20 @@ namespace amFTPd.Security
                 "QUIT" => true,
 
                 // --- Directory listing & download ---
-                // LIST / NLST / MLSD / MLST / RETR => require download permission.
                 "LIST" or "NLST" or "MLSD" or "MLST" or "RETR" =>
                     user.AllowDownload,
 
                 // --- Upload / write-ish operations ---
-                // STOR / APPE => actual data uploads.
                 "STOR" or "APPE" =>
                     user.AllowUpload,
-
-                // DELE / MKD / RMD / RNFR / RNTO => modifications to filesystem.
                 "DELE" or "MKD" or "RMD" or "RNFR" or "RNTO" =>
                     user.AllowUpload,
 
                 // --- Navigation ---
-                // Changing directories is generally allowed if user can at least read OR write.
                 "CWD" or "CDUP" =>
                     user.AllowDownload || user.AllowUpload,
 
                 // --- Data connection setup ---
-                // Active mode requires AllowActiveMode; FXP specifics are handled
-                // later in the command handlers (using _isFxp + AllowFxp + AMScript).
                 "PORT" or "EPRT" =>
                     user.AllowActiveMode,
 
@@ -88,8 +81,6 @@ namespace amFTPd.Security
                     true,
 
                 // --- SITE commands ---
-                // Coarse gate: SITE is allowed once logged in.
-                // Fine-grained gating is done in CanUseSiteCommand per SITE sub-verb.
                 "SITE" =>
                     true,
 
@@ -140,7 +131,7 @@ namespace amFTPd.Security
         /// Fine-grained permissions for SITE sub-commands.
         /// The coarse "SITE" gate is in IsCommandAllowedForUser; this decides per-verb.
         /// </summary>
-        public static bool CanUseSiteCommand(FtpUser user, string siteVerb, SiteCommandContext ctx)
+        public static bool CanUseSiteCommand(FtpUser? user, string siteVerb, SiteCommandContext ctx)
         {
             if (user is null)
                 return false;
@@ -186,5 +177,16 @@ namespace amFTPd.Security
                     return user.IsAdmin;
             }
         }
+
+        /// <summary>
+        /// Determines whether the specified user has access to the given pre group.
+        /// </summary>
+        /// <param name="user">The user whose access permissions are to be evaluated. Cannot be null.</param>
+        /// <param name="group">The name of the pre group to check access for. Comparison is case-insensitive.</param>
+        /// <returns>true if the user is a site operator or belongs to the specified pre group; otherwise, false.</returns>
+        public static bool CanAccessPreGroup(FtpUser user, string group)
+            => user.IsSiteop ||
+               (user.GroupName != null &&
+                user.GroupName.Equals(group, StringComparison.OrdinalIgnoreCase));
     }
 }

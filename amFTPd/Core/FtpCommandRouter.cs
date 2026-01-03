@@ -19,7 +19,6 @@
  * ====================================================================================================
  */
 
-
 using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
@@ -27,8 +26,10 @@ using amFTPd.Core.Access;
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
+using amFTPd.Core.Monitoring;
 using amFTPd.Core.Race;
 using amFTPd.Core.Ratio;
+using amFTPd.Core.Services;
 using amFTPd.Core.Site;
 using amFTPd.Core.Stats;
 using amFTPd.Credits;
@@ -64,7 +65,7 @@ public sealed partial class FtpCommandRouter
 
     private readonly SectionManager _sections;
 
-    private readonly CreditEngine _credits;
+    //private readonly CreditEngine _credits;
     private readonly IUserStore _users;
     private readonly IGroupStore _groups;
     private readonly RatioEngine? _ratioEngine;
@@ -88,6 +89,10 @@ public sealed partial class FtpCommandRouter
 
     private readonly IReadOnlyDictionary<string, SiteCommandBase> _siteCommands;
     private readonly SiteCommandContext _siteContext;
+
+    private readonly HashSet<string> _sectionsTouched =
+        new(StringComparer.OrdinalIgnoreCase);
+
     #endregion
     #region Public Settings and Options
     /// <summary>
@@ -125,7 +130,7 @@ public sealed partial class FtpCommandRouter
     /// <summary>
     /// Gets the credit engine used for managing user credits.
     /// </summary>
-    public CreditEngine Credits => _credits;
+    public CreditEngine? Credits => _runtime.CreditEngine;
     /// <summary>
     /// Gets the daemon runtime configuration.
     /// </summary>
@@ -142,6 +147,21 @@ public sealed partial class FtpCommandRouter
     /// Gets the parent FTP server instance.
     /// </summary>
     public FtpServer Server => _server;
+    /// <summary>
+    /// Gets the status endpoint associated with the server, if available.
+    /// </summary>
+    public StatusEndpoint? StatusEndpoint => Server.StatusEndpoint;
+    /// <summary>
+    /// Gets a snapshot of the current runtime statistics.
+    /// </summary>
+    /// <remarks>The returned snapshot represents the state of the statistics at the moment the property is
+    /// accessed. Subsequent changes to the runtime statistics are not reflected in the returned object.</remarks>
+    public StatsSnapshot StatsSnapshot
+        => _runtime.StatsCollector.GetSnapshot();
+    /// <summary>
+    /// Gets the credit service used to perform credit-related operations.
+    /// </summary>
+    public ICreditService CreditService { get; }
     #endregion
 
     /// <summary>
@@ -190,12 +210,11 @@ public sealed partial class FtpCommandRouter
         _tls = tls ?? throw new ArgumentNullException(nameof(tls));
         _sections = sections ?? throw new ArgumentNullException(nameof(sections));
 
-        // ---- Runtime wiring (this was missing) ----
+        // ---- Runtime wiring ----
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Runtime = _runtime;
         // -------------------------------------------
 
-        _runtime = runtime;
         _ratioEngine = _runtime.RatioEngine;
         _fxpPolicy = _runtime.FxpPolicy;
 
@@ -216,7 +235,7 @@ public sealed partial class FtpCommandRouter
         {
             _groups = _runtime.GroupStore;
             var sectionStore = _runtime.SectionStore;
-            _credits = new CreditEngine(_users, _groups, sectionStore);
+            //_credits = new CreditEngine(_users, _groups, sectionStore);
         }
         else
         {
@@ -227,8 +246,12 @@ public sealed partial class FtpCommandRouter
 
             _groups = new InMemoryGroupStore();      // you'll implement this tiny adapter
             var sectionStore = new InMemorySectionStore(_sections); // also tiny adapter
-            _credits = new CreditEngine(_users, _groups, sectionStore);
+            //_credits = new CreditEngine(_users, _groups, sectionStore);
         }
+
+        CreditService = new CreditService(
+            Users,
+            Credits);
 
         _siteContext = new SiteCommandContext(this);
         _siteCommands = SiteCommandRegistry.Build(_siteContext);
@@ -275,7 +298,7 @@ public sealed partial class FtpCommandRouter
             return;
 
         // Count this command on the session stats
-        _s.NotifyCommandExecuted();
+        //_s.NotifyCommandExecuted();
 
         // ------------------------------------------------------------------
         // AMSCRIPT GROUP RULES (per-command)
@@ -374,12 +397,30 @@ public sealed partial class FtpCommandRouter
             case "RNTO": await RNTO(arg, ct); break;
 
             // SITE command
-            case "SITE": await SITE(arg, ct); break;
+            case "SITE":
+                if (_s.Reputation != FtpSessionReputation.Good)
+                {
+                    await _s.WriteAsync("550 SITE disabled for this session.\r\n", ct);
+                    return;
+                }
+
+                if (_s.Account is null)
+                {
+                    await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
+                    return;
+                }
+
+                await SITE(arg, ct);
+                break;
 
             default:
                 await _s.WriteAsync(FtpResponses.UnknownCmd, ct);
                 break;
         }
+
+        _runtime.RollingStats.Commands5s.Add(1);
+        _runtime.RollingStats.Commands1m.Add(1);
+        _runtime.RollingStats.Commands5m.Add(1);
     }
     /// <summary>
     /// Attaches the specified script engines to their respective roles within the system.
@@ -419,6 +460,10 @@ public sealed partial class FtpCommandRouter
         string arg,
         CancellationToken ct)
     {
+        _s.NotifyCommandExecuted();
+
+        Session.TickReputation();
+
         // 1) Session blocked?
         if (_s.Reputation == FtpSessionReputation.Blocked)
         {
@@ -440,31 +485,34 @@ public sealed partial class FtpCommandRouter
                 return false;
             }
 
-            // b) Dynamic delay based on how far over thresholds we are
-            var loginSuspect = _cfg.FailedLoginSuspectThreshold > 0
-                ? _cfg.FailedLoginSuspectThreshold
-                : 3;
+            // b) Dynamic delay (skip safety commands)
+            if (!cmd.Equals("ABOR", StringComparison.OrdinalIgnoreCase) &&
+                !cmd.Equals("QUIT", StringComparison.OrdinalIgnoreCase))
+            {
+                var loginSuspect = _cfg.FailedLoginSuspectThreshold > 0
+                    ? _cfg.FailedLoginSuspectThreshold
+                    : 3;
 
-            var abortSuspect = _cfg.AbortedTransferSuspectThreshold > 0
-                ? _cfg.AbortedTransferSuspectThreshold
-                : 5;
+                var abortSuspect = _cfg.AbortedTransferSuspectThreshold > 0
+                    ? _cfg.AbortedTransferSuspectThreshold
+                    : 5;
 
-            var overLogin = Math.Max(0, _s.FailedLoginAttempts - loginSuspect);
-            var overAbort = Math.Max(0, _s.AbortedTransfers - abortSuspect);
-            var penaltySteps = overLogin + overAbort;
+                var overLogin = Math.Max(0, _s.FailedLoginAttempts - loginSuspect);
+                var overAbort = Math.Max(0, _s.AbortedTransfers - abortSuspect);
+                var penaltySteps = overLogin + overAbort;
 
-            // Base 250ms + 150ms per "step", capped at 2 seconds
-            var delayMs = 250 + penaltySteps * 150;
-            if (delayMs > 2000)
-                delayMs = 2000;
+                var delayMs = 250 + penaltySteps * 150;
+                if (delayMs > 2000)
+                    delayMs = 2000;
 
-            var delay = TimeSpan.FromMilliseconds(delayMs);
+                var delay = TimeSpan.FromMilliseconds(delayMs);
 
-            _log.Log(FtpLogLevel.Debug,
-                $"Applying Suspect throttle ({delay.TotalMilliseconds} ms) to {_s.RemoteEndPoint} for {cmd} {arg} " +
-                $"[FailedLogins={_s.FailedLoginAttempts}, AbortedTransfers={_s.AbortedTransfers}]");
+                _log.Log(FtpLogLevel.Debug,
+                    $"Applying Suspect throttle ({delay.TotalMilliseconds} ms) to {_s.RemoteEndPoint} for {cmd} {arg} " +
+                    $"[FailedLogins={_s.FailedLoginAttempts}, AbortedTransfers={_s.AbortedTransfers}]");
 
-            await Task.Delay(delay, ct);
+                await Task.Delay(delay, ct);
+            }
         }
 
         // 2) Hammer / flood detection per IP
@@ -971,5 +1019,4 @@ public sealed partial class FtpCommandRouter
             RequiredIdent: null,
             FlagsRaw: string.Empty
         );
-
 }

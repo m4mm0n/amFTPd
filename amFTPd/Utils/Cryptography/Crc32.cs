@@ -17,15 +17,11 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
 
-
-
-
-
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace amFTPd.Utils
+namespace amFTPd.Utils.Cryptography
 {
     /// <summary>
     /// Provides methods for computing CRC32 checksums for data, streams, and files.

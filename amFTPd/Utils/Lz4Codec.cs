@@ -17,9 +17,7 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
 
-
-
-
+using K4os.Compression.LZ4;
 
 namespace amFTPd.Utils
 {
@@ -32,73 +30,93 @@ namespace amFTPd.Utils
     /// does not produce a full LZ4 frame format and is optimized for simplicity and speed.</remarks>
     public static class Lz4Codec
     {
-        /// <summary>
-        /// Compresses the input byte array using a lightweight LZ4-like compression algorithm.
-        /// </summary>
-        /// <remarks>This method implements a compact LZ4 block compression algorithm optimized for high
-        /// throughput. It is suitable for scenarios where fast compression is prioritized over achieving maximum
-        /// compression ratios.</remarks>
-        /// <param name="src">The source byte array to be compressed. Must not be null.</param>
-        /// <returns>A compressed byte array representing the input data. The size of the returned array may vary depending on
-        /// the input data.</returns>
+        private const byte RAW = 0x00;
+        private const byte LZ4 = 0x01;
+
+        // Minimum size where compression makes sense
+        private const int MinCompressSize = 64;
+
         public static byte[] Compress(byte[] src)
         {
-            // For simplicity we use .NET's built-in Brotli-like compression speed:
-            // custom LZ4 implementation (not full frame format)
-            // This is a compact LZ4 block compressor with ~300MB/s throughput.
+            if (src == null)
+                throw new ArgumentNullException(nameof(src));
 
-            var maxSize = src.Length + (src.Length / 255) + 16;
-            var dst = new byte[maxSize];
-            int d = 0, s = 0;
+            if (src.Length < MinCompressSize)
+                return MakeRaw(src);
 
-            while (s < src.Length)
-            {
-                var runStart = s;
-                s++;
+            var maxSize = LZ4Codec.MaximumOutputSize(src.Length);
+            var compressed = new byte[maxSize];
 
-                while (s < src.Length && src[s] == src[s - 1] && (s - runStart) < 255)
-                    s++;
+            var compressedSize = LZ4Codec.Encode(
+                src, 0, src.Length,
+                compressed, 0, compressed.Length,
+                LZ4Level.L00_FAST);
 
-                var runLen = s - runStart;
+            // If compression is pointless, store raw
+            if (compressedSize <= 0 || compressedSize >= src.Length)
+                return MakeRaw(src);
 
-                // literal
-                dst[d++] = (byte)runLen;
-                Buffer.BlockCopy(src, runStart, dst, d, runLen);
-                d += runLen;
-            }
+            using var ms = new MemoryStream(1 + 4 + 4 + compressedSize);
+            using var bw = new BinaryWriter(ms);
 
-            Array.Resize(ref dst, d);
-            return dst;
+            bw.Write(LZ4);
+            bw.Write(src.Length);
+            bw.Write(compressedSize);
+            bw.Write(compressed, 0, compressedSize);
+
+            return ms.ToArray();
         }
-        /// <summary>
-        /// Decompresses a byte array that was previously compressed using a custom format.
-        /// </summary>
-        /// <remarks>The method processes the input byte array by interpreting its structure to extract
-        /// the original data. The output array is dynamically resized as needed to accommodate the decompressed
-        /// data.</remarks>
-        /// <param name="src">The source byte array containing the compressed data.</param>
-        /// <returns>A byte array containing the decompressed data.</returns>
+
         public static byte[] Decompress(byte[] src)
         {
-            var outBuf = new byte[src.Length * 4];
-            int s = 0, d = 0;
+            if (src == null)
+                throw new ArgumentNullException(nameof(src));
+            if (src.Length == 0)
+                return Array.Empty<byte>();
 
-            while (s < src.Length)
+            var mode = src[0];
+
+            if (mode == RAW)
             {
-                int len = src[s++];
-                if (len == 0) break;
-
-                if (d + len > outBuf.Length)
-                    Array.Resize(ref outBuf, outBuf.Length * 2);
-
-                Buffer.BlockCopy(src, s, outBuf, d, len);
-
-                s += len;
-                d += len;
+                var raw = new byte[src.Length - 1];
+                Buffer.BlockCopy(src, 1, raw, 0, raw.Length);
+                return raw;
             }
 
-            Array.Resize(ref outBuf, d);
-            return outBuf;
+            if (mode != LZ4)
+                throw new InvalidDataException($"Unknown compression mode: {mode}");
+
+            using var ms = new MemoryStream(src, 1, src.Length - 1);
+            using var br = new BinaryReader(ms);
+
+            var originalLength = br.ReadInt32();
+            var compressedLength = br.ReadInt32();
+
+            if (originalLength < 0 || compressedLength < 0)
+                throw new InvalidDataException("Invalid LZ4 header");
+
+            var compressed = br.ReadBytes(compressedLength);
+            if (compressed.Length != compressedLength)
+                throw new InvalidDataException("Truncated LZ4 payload");
+
+            var output = new byte[originalLength];
+
+            var decoded = LZ4Codec.Decode(
+                compressed, 0, compressed.Length,
+                output, 0, output.Length);
+
+            if (decoded != originalLength)
+                throw new InvalidDataException("LZ4 decompression size mismatch");
+
+            return output;
+        }
+
+        private static byte[] MakeRaw(byte[] src)
+        {
+            var dst = new byte[src.Length + 1];
+            dst[0] = RAW;
+            Buffer.BlockCopy(src, 0, dst, 1, src.Length);
+            return dst;
         }
     }
 }

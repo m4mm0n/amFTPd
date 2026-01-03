@@ -26,6 +26,7 @@ using amFTPd.Config.Vfs;
 using amFTPd.Core.Ident;
 using amFTPd.Core.Sections;
 using amFTPd.Core.Stats;
+using amFTPd.Core.Stats.Live;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Security;
@@ -71,6 +72,15 @@ public sealed class FtpSession : IAsyncDisposable
 
     private int _failedLoginAttempts;
     private int _abortedTransfers;
+
+    private int _abortState; // 0 = not aborting, 1 = abort in progress
+    private readonly HashSet<string> _sectionsTouched =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private string? _ipKey;
+
+    private DateTimeOffset _lastViolationUtc;
+    private DateTimeOffset? _blockedUntilUtc;
 
     #endregion
     #region Public Properties and Methods
@@ -264,11 +274,23 @@ public sealed class FtpSession : IAsyncDisposable
         VfsManager = new VfsManager(
             vfsCfg.Mounts,
             vfsCfg.UserMounts,
-            sectionResolver);
+            server.Runtime.ReleaseRegistry,
+            sectionResolver, 
+            server.Runtime.PreRegistry);
+
         SessionId = Interlocked.Increment(ref _nextSessionId);
         _sessions[SessionId] = this;
         RemoteEndPoint = control.Client.RemoteEndPoint as IPEndPoint;
         Server = server;
+
+        // ---- IP key (anonymized bucket) -------------------------------
+        if (RemoteEndPoint is not null &&
+            Server?.StatusEndpoint is not null)
+        {
+            _ipKey = "ip_" +
+                     Server.StatusEndpoint.AnonymizeIp(
+                         RemoteEndPoint.Address.ToString());
+        }
     }
     /// <summary>
     /// Marks the current operation as requesting to quit.
@@ -292,7 +314,34 @@ public sealed class FtpSession : IAsyncDisposable
     {
         Account = account;
         UserName = account.UserName;
-        LoggedIn = true; // ensure the session is considered logged in
+        LoggedIn = true;
+
+        // ---- LiveStats: user session count -----------------------------
+        var live = Server?.Runtime.LiveStats;
+        if (live is not null)
+        {
+            var user = live.Users.GetOrAdd(
+                account.UserName,
+                _ => new UserLiveStats { UserName = account.UserName });
+
+            Interlocked.Increment(ref user.ActiveSessions);
+        }
+
+        var ip = RemoteEndPoint?.Address.ToString();
+        if (ip is not null && live is not null)
+        {
+            var ipStats = live.Ips.GetOrAdd(
+                ip,
+                _ => new IpLiveStats { Ip = ip });
+
+            Interlocked.Increment(ref ipStats.ActiveSessions);
+
+            // ---- Evaluate enforcement after login --------------------
+            if (_ipKey is not null && Server is not null)
+            {
+                Server.EvaluateIp(_ipKey);
+            }
+        }
     }
     /// <summary>
     /// Updates the <see cref="LastActivity"/> property to the current UTC date and time.
@@ -371,7 +420,13 @@ public sealed class FtpSession : IAsyncDisposable
         if (_data is not null)
             await _data.DisposeAsync();
 
-        _data = new FtpDataConnection(_log, _tls, TlsActive, Protection);
+        _data = new FtpDataConnection(
+            _log,
+            _tls,
+            TlsActive,
+            Protection,
+            Server!.Runtime
+        );
 
         var local = (IPEndPoint)Control.Client.LocalEndPoint!;
         var bindAddress = local.Address;
@@ -407,7 +462,7 @@ public sealed class FtpSession : IAsyncDisposable
         // If nothing was parsed, fall back to the main listening port (or pick whatever default you like)
         if (portsToTry.Count == 0)
         {
-            portsToTry.Add((int)_cfg.Port);
+            portsToTry.Add(_cfg.Port);
         }
 
         var chosenPort = -1;
@@ -424,10 +479,7 @@ public sealed class FtpSession : IAsyncDisposable
             }
         }
 
-        if (chosenPort < 0)
-            throw new InvalidOperationException("No passive port available.");
-
-        return chosenPort;
+        return chosenPort < 0 ? throw new InvalidOperationException("No passive port available.") : chosenPort;
     }
     /// <summary>
     /// Establishes an active FTP data connection to the specified IP address and port.
@@ -443,7 +495,14 @@ public sealed class FtpSession : IAsyncDisposable
         if (_data is not null)
             await _data.DisposeAsync();
 
-        _data = new FtpDataConnection(_log, _tls, TlsActive, Protection);
+        _data = new FtpDataConnection(
+            _log,
+            _tls,
+            TlsActive,
+            Protection,
+            Server!.Runtime
+        );
+
         await _data.SetActiveAsync(new IPEndPoint(ip, port), ct);
     }
     /// <summary>
@@ -453,14 +512,18 @@ public sealed class FtpSession : IAsyncDisposable
     /// proper disposal of the stream after execution. If the underlying data stream is <c>null</c>, the method returns
     /// immediately without invoking the action.</remarks>
     /// <param name="action">A delegate that defines the asynchronous operation to perform on the data stream.</param>
+    /// <param name="isUpload">A boolean indicating whether the operation is an upload (true) or download (false).</param>
+    /// <param name="countBandwidth">A boolean indicating whether to count the bandwidth used during the transfer.</param>
     /// <param name="ct">A <see cref="CancellationToken"/> used to observe cancellation requests.</param>
     /// <returns></returns>
-    public async Task WithDataAsync(Func<Stream, Task> action, CancellationToken ct)
+    public async Task WithDataAsync(
+        Func<Stream, Task<long>> action,
+        bool isUpload,
+        bool countBandwidth,
+        CancellationToken ct)
     {
-        // No data connection set up (no PASV/EPSV/PORT/EPRT).
         if (_data is null)
         {
-            // Be explicit instead of silently returning.
             await WriteAsync("425 Can't open data connection.\r\n", ct);
             return;
         }
@@ -469,60 +532,51 @@ public sealed class FtpSession : IAsyncDisposable
 
         try
         {
-            // Create a CTS linked to the session token, so we can cancel just the transfer.
             linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
             lock (_dataLock)
             {
-                // If a previous CTS somehow exists, cancel + dispose it.
                 _dataTransferCts?.Cancel();
                 _dataTransferCts?.Dispose();
                 _dataTransferCts = linkedCts;
             }
 
-            await _data.SendAsync(action, linkedCts.Token);
+            var bytesTransferred =
+                await _data.SendAsync(action, linkedCts.Token);
+
+            if (bytesTransferred > 0)
+            {
+                if (countBandwidth && _ipKey is not null && Server is not null)
+                {
+                    Server.NotifyIpBandwidth(_ipKey, bytesTransferred, isUpload);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
-            // Cancelled → typically ABOR or session shutdown.
-            // ABOR will send its own reply, so stay quiet here.
+            // ABOR or shutdown – do not count twice
         }
         catch (IOException)
         {
-            // Network-level error on data connection.
-            // Count this as an aborted transfer as well.
             NotifyTransferAborted();
-
-            // Return a proper 426 so clients know the transfer was aborted.
             await WriteAsync("426 Connection closed; transfer aborted.\r\n", ct);
         }
         catch (Exception ex)
         {
-            // Log unexpected data-channel errors and still send a control reply.
             _log.Log(FtpLogLevel.Error, "Data connection error.", ex);
-            await WriteAsync("451 Requested action aborted. Local error in processing.\r\n", ct);
+            await WriteAsync("451 Requested action aborted. Local error.\r\n", ct);
         }
         finally
         {
             lock (_dataLock)
             {
                 if (ReferenceEquals(_dataTransferCts, linkedCts))
-                {
                     _dataTransferCts = null;
-                }
             }
 
             linkedCts?.Dispose();
 
-            try
-            {
-                await _data.DisposeAsync();
-            }
-            catch
-            {
-                // ignore dispose failures
-            }
-
+            try { await _data.DisposeAsync(); } catch { }
             _data = null;
         }
     }
@@ -539,6 +593,20 @@ public sealed class FtpSession : IAsyncDisposable
     /// <returns></returns>
     public async Task RunAsync(FtpCommandRouter router, CancellationToken ct)
     {
+        TryDecayReputation(DateTimeOffset.UtcNow);
+
+        // ---- IP enforcement (early) -------------------------------
+        if (_ipKey is not null &&
+            Server is not null &&
+            Server.IsIpBlocked(_ipKey, out var reason))
+        {
+            await WriteAsync(
+                $"421 Connection blocked: {reason}\r\n",
+                ct);
+
+            return;
+        }
+
         if (_cfg.WelcomeMessage != null) await WriteAsync(FtpResponses.Banner(_cfg.WelcomeMessage), ct);
 
         var buffer = new byte[8192];
@@ -692,6 +760,8 @@ public sealed class FtpSession : IAsyncDisposable
     /// </summary>
     public void NotifyCommandExecuted()
     {
+        TryDecayReputation(DateTimeOffset.UtcNow);
+
         lock (_statsLock)
         {
             TotalCommandCount++;
@@ -699,9 +769,21 @@ public sealed class FtpSession : IAsyncDisposable
             TrimOldCommandTimestamps();
         }
 
-        // Global perf counters for monitoring
         PerfCounters.CommandExecuted();
+
+        // ---- Rolling command rates ----------------------------
+        var rs = Server?.Runtime.RollingStats;
+        if (rs is not null) 
+        { 
+            rs.Commands5s.Add(1);
+            rs.Commands1m.Add(1);
+            rs.Commands5m.Add(1);
+        }
+
+        // ---- IP command-rate enforcement -----------------------------
+        if (_ipKey is not null && Server is not null) Server.EvaluateIpCommandRate(_ipKey);
     }
+
     /// <summary>
     /// Attempts to cancel the currently active data transfer (LIST/RETR/STOR/etc.).
     /// Returns true if a transfer was in progress and has been cancelled.
@@ -737,11 +819,17 @@ public sealed class FtpSession : IAsyncDisposable
     /// </summary>
     public void NotifyLoginFailed()
     {
+        _lastViolationUtc = DateTimeOffset.UtcNow;
         var newValue = Interlocked.Increment(ref _failedLoginAttempts);
         EvaluateReputationAfterLoginFailure(newValue);
 
         // Global failed-login counter
         PerfCounters.FailedLogin();
+
+        if (_ipKey is not null && Server is not null)
+        {
+            Server.NotifyIpLoginFailed(_ipKey);
+        }
     }
 
     /// <summary>
@@ -749,6 +837,8 @@ public sealed class FtpSession : IAsyncDisposable
     /// </summary>
     public void NotifyTransferAborted()
     {
+        _lastViolationUtc = DateTimeOffset.UtcNow;
+
         var newValue = Interlocked.Increment(ref _abortedTransfers);
         EvaluateReputationAfterTransferAbort(newValue);
 
@@ -756,6 +846,65 @@ public sealed class FtpSession : IAsyncDisposable
         PerfCounters.TransferAborted();
     }
 
+    /// <summary>
+    /// Attempts to enter the abort state if it has not already been entered.
+    /// </summary>
+    /// <remarks>This method is typically used to ensure that abort logic is executed only once, such as in
+    /// response to a single ABOR command in FTP scenarios. Subsequent calls after the first successful entry will
+    /// return false.</remarks>
+    /// <returns>true if the abort state was successfully entered; otherwise, false.</returns>
+    public bool TryEnterAbort() =>
+        // Returns true only for the first ABOR
+        Interlocked.CompareExchange(ref _abortState, 1, 0) == 0;
+
+    /// <summary>
+    /// Clears any pending abort request, allowing normal operation to continue.
+    /// </summary>
+    /// <remarks>Call this method to cancel a previously requested abort operation. After calling ResetAbort,
+    /// the abort state is reset and the operation will not be aborted unless a new abort is requested.</remarks>
+    public void ResetAbort() => Interlocked.Exchange(ref _abortState, 0);
+
+    /// <summary>
+    /// Updates the reputation state based on the current time.
+    /// </summary>
+    /// <remarks>This method should be called periodically to ensure that reputation decay or related
+    /// time-based logic is applied as expected. The exact effects depend on the implementation of the reputation
+    /// system.</remarks>
+    public void TickReputation() => TryDecayReputation(DateTimeOffset.UtcNow);
+
+    internal bool TryGetIpKey(out string? key)
+    {
+        key = _ipKey;
+        return key is not null;
+    }
+
+    private void TryDecayReputation(DateTimeOffset now)
+    {
+        if (Reputation == FtpSessionReputation.Good)
+            return;
+
+        var suspectCooldown = TimeSpan.FromMinutes(10);
+        var blockCooldown = TimeSpan.FromMinutes(30);
+
+        if (Reputation == FtpSessionReputation.Blocked)
+        {
+            if (_blockedUntilUtc.HasValue && now >= _blockedUntilUtc.Value)
+            {
+                Reputation = FtpSessionReputation.Suspect;
+                _blockedUntilUtc = null;
+                _lastViolationUtc = now;
+            }
+
+            return;
+        }
+
+        if (Reputation == FtpSessionReputation.Suspect &&
+            now - _lastViolationUtc >= suspectCooldown)
+        {
+            Reputation = FtpSessionReputation.Good;
+            _lastViolationUtc = default;
+        }
+    }
     private void EvaluateReputationAfterLoginFailure(int failedCount)
     {
         lock (_statsLock)
@@ -781,18 +930,15 @@ public sealed class FtpSession : IAsyncDisposable
             if (failedCount >= blockThreshold)
             {
                 Reputation = FtpSessionReputation.Blocked;
+                _blockedUntilUtc = DateTimeOffset.UtcNow.AddMinutes(30);
+                _lastViolationUtc = DateTimeOffset.UtcNow;
             }
-            else if (failedCount >= suspectThreshold && Reputation == FtpSessionReputation.Good)
-            {
-                Reputation = FtpSessionReputation.Suspect;
-            }
+            else if (failedCount >= suspectThreshold && Reputation == FtpSessionReputation.Good) Reputation = FtpSessionReputation.Suspect;
 
             if (Reputation != old)
-            {
                 _log.Log(
                     FtpLogLevel.Warn,
                     $"Session from {RemoteEndPoint} reputation changed {old} -> {Reputation} ({failedCount} failed logins).");
-            }
         }
     }
     private void EvaluateReputationAfterTransferAbort(int abortedCount)
@@ -816,20 +962,13 @@ public sealed class FtpSession : IAsyncDisposable
                 blockThreshold = suspectThreshold + 1;
 
             if (abortedCount >= blockThreshold)
-            {
                 Reputation = FtpSessionReputation.Blocked;
-            }
-            else if (abortedCount >= suspectThreshold && Reputation == FtpSessionReputation.Good)
-            {
-                Reputation = FtpSessionReputation.Suspect;
-            }
+            else if (abortedCount >= suspectThreshold && Reputation == FtpSessionReputation.Good) Reputation = FtpSessionReputation.Suspect;
 
             if (Reputation != old)
-            {
                 _log.Log(
                     FtpLogLevel.Warn,
                     $"Session from {RemoteEndPoint} reputation changed {old} -> {Reputation} ({abortedCount} aborted transfers).");
-            }
         }
     }
     private void TrimOldCommandTimestamps()
@@ -848,13 +987,30 @@ public sealed class FtpSession : IAsyncDisposable
     {
         _sessions.TryRemove(SessionId, out _);
 
+        var live = Server?.Runtime.LiveStats;
+
+        if (Account is not null && live is not null)
+        {
+            // ---- User active sessions ----------------------------------
+            if (live.Users.TryGetValue(Account.UserName, out var user)) Interlocked.Decrement(ref user.ActiveSessions);
+
+            // ---- Section active users ----------------------------------
+            lock (_sectionsTouched)
+                foreach (var sectionName in _sectionsTouched)
+                    if (live.Sections.TryGetValue(sectionName, out var sec))
+                        Interlocked.Decrement(ref sec.ActiveUsers);
+
+            var ip = RemoteEndPoint?.Address.ToString();
+            if (ip is not null && live is not null &&
+                live.Ips.TryGetValue(ip, out var ipStats)) Interlocked.Decrement(ref ipStats.ActiveSessions);
+        }
+
         if (Account is not null)
-            try { Users.OnLogout(Account); } catch { /* ignore */ }
+            try { Users.OnLogout(Account); } catch { }
 
         if (_data is not null)
             await _data.DisposeAsync();
 
-        try { Control.Close(); } catch { /* ignore */ }
-        await Task.CompletedTask;
+        try { Control.Close(); } catch { }
     }
 }

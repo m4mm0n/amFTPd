@@ -71,10 +71,7 @@ namespace amFTPd.Core.Ratio
         /// Computes the effective ratio rule for a user + virtual path.
         /// Purely SectionRule, DirectoryRule, RatioRule based.
         /// </summary>
-        public RatioRule Resolve(string virtualPath, string? primaryGroup, RatioResolutionPipeline pipeline)
-        {
-            return pipeline.Resolve(virtualPath, primaryGroup);
-        }
+        public RatioRule Resolve(string virtualPath, string? primaryGroup, RatioResolutionPipeline pipeline) => pipeline.Resolve(virtualPath, primaryGroup);
 
         /// <summary>
         /// Evaluates login-specific policy for the provided context.

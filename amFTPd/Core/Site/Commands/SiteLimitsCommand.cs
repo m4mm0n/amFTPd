@@ -120,7 +120,7 @@ public sealed class SiteLimitsCommand : SiteCommandBase
                 return;
             }
 
-            idleTimeout = idleSeconds <= 0 ? (TimeSpan?)null : TimeSpan.FromSeconds(idleSeconds);
+            idleTimeout = idleSeconds <= 0 ? null : TimeSpan.FromSeconds(idleSeconds);
         }
 
         var updated = user with

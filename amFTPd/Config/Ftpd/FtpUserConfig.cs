@@ -36,10 +36,7 @@ public sealed record FtpUserConfig
     {
     }
 
-    public FtpUserConfig(IReadOnlyList<FtpUserConfigUser> users)
-    {
-        Users = users ?? [];
-    }
+    public FtpUserConfig(IReadOnlyList<FtpUserConfigUser> users) => Users = users ?? [];
 
     public FtpUserConfigUser? FindConfigUser(string username)
         => Users.FirstOrDefault(u =>

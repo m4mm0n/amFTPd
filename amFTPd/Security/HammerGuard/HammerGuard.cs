@@ -41,10 +41,7 @@ public sealed class HammerGuard
     private static readonly TimeSpan DefaultBanDuration = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan CommandWindow = TimeSpan.FromMinutes(1);
 
-    public HammerGuard(FtpConfig config)
-    {
-        _config = config;
-    }
+    public HammerGuard(FtpConfig config) => _config = config;
 
     /// <summary>
     /// Registers a failed login attempt for the given IP.

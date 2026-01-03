@@ -1,63 +1,84 @@
-﻿/*
- * ====================================================================================================
- *  Project:        amFTPd - a managed FTP daemon
- *  File:           StatsSnapshot.cs
- *  Author:         Geir Gustavsen, ZeroLinez Softworx
- *  Created:        2025-12-14 20:12:08
- *  Last Modified:  2025-12-14 20:12:31
- *  CRC32:          0xE7E4B719
- *  
- *  Description:
- *      Represents a point-in-time snapshot of overall server stats.
- * 
- *  License:
- *      MIT License
- *      https://opensource.org/licenses/MIT
- *
- *  Notes:
- *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
- * ====================================================================================================
- */
-namespace amFTPd.Core.Stats
-{
-    /// <summary>
-    /// Represents a point-in-time snapshot of overall server stats.
-    /// </summary>
-    public sealed record StatsSnapshot(
-        DateTimeOffset CapturedAtUtc,
-        long ActiveConnections,
-        long TotalConnections,
-        long TotalCommands,
-        long FailedLogins,
-        long AbortedTransfers,
-        long BytesUploaded,
-        long BytesDownloaded,
-        long ActiveTransfers,
-        long TotalTransfers,
-        double AverageTransferMilliseconds,
-        long MaxConcurrentTransfers)
-    {
-        /// <summary>
-        /// Captures a snapshot using the current <see cref="PerfCounters"/> state.
-        /// </summary>
-        public static StatsSnapshot Capture()
-        {
-            var perf = PerfCounters.GetSnapshot();
+﻿namespace amFTPd.Core.Stats;
 
-            return new StatsSnapshot(
-                CapturedAtUtc: DateTimeOffset.UtcNow,
-                ActiveConnections: perf.ActiveConnections,
-                TotalConnections: perf.TotalConnections,
-                TotalCommands: perf.TotalCommands,
-                FailedLogins: perf.FailedLogins,
-                AbortedTransfers: perf.AbortedTransfers,
-                BytesUploaded: perf.BytesUploaded,
-                BytesDownloaded: perf.BytesDownloaded,
-                ActiveTransfers: perf.ActiveTransfers,
-                TotalTransfers: perf.TotalTransfers,
-                AverageTransferMilliseconds: perf.AverageTransferMilliseconds,
-                MaxConcurrentTransfers: perf.MaxConcurrentTransfers
-            );
-        }
+/// <summary>
+/// Represents an immutable snapshot of server statistics at a specific point in time.
+/// </summary>
+/// <remarks>This record provides a consistent view of various server metrics, including connection counts,
+/// command activity, transfer statistics, and security-related events. All properties are initialized at the time the
+/// snapshot is created and do not change thereafter. Use this type to capture and analyze server state for monitoring,
+/// diagnostics, or reporting purposes.</remarks>
+public sealed record StatsSnapshot
+{
+    public DateTimeOffset Timestamp { get; init; }
+
+    // --- connections ---
+    public long ActiveConnections { get; init; }
+    public long TotalConnections { get; init; }
+
+    // --- commands ---
+    public long TotalCommands { get; init; }
+    public double CommandsPerSecond { get; init; }
+
+    // --- transfers ---
+    public long ActiveTransfers { get; init; }
+    public long TotalTransfers { get; init; }
+    public double AverageTransferDurationMs { get; init; }
+
+    // --- abuse / security ---
+    public long FailedLogins { get; init; }
+    public long AbortedTransfers { get; init; }
+
+    // --- volume ---
+    public long BytesUploaded { get; init; }
+    public long BytesDownloaded { get; init; }
+
+    // --- rates ---
+    public double UploadBytesPerSecond { get; init; }
+    public double DownloadBytesPerSecond { get; init; }
+
+    // --- utilization ---
+    public int OnlineUsers { get; init; }
+
+    public static StatsSnapshot Empty { get; } = new()
+    {
+        Timestamp = DateTimeOffset.MinValue
+    };
+
+    public static StatsSnapshot FromCounters(
+        PerfSnapshot current,
+        PerfSnapshot? previous,
+        TimeSpan window)
+    {
+        var cmdDelta = previous is null
+            ? 0
+            : current.TotalCommands - previous.TotalCommands;
+        var upDelta = previous is null ? 0 : current.BytesUploaded - previous.BytesUploaded;
+        var downDelta = previous is null ? 0 : current.BytesDownloaded - previous.BytesDownloaded;
+
+        return new StatsSnapshot
+        {
+            Timestamp = DateTimeOffset.UtcNow,
+
+            ActiveConnections = current.ActiveConnections,
+            TotalConnections = current.TotalConnections,
+
+            TotalCommands = current.TotalCommands,
+            CommandsPerSecond = window.TotalSeconds > 0
+                ? cmdDelta / window.TotalSeconds
+                : 0,
+
+            ActiveTransfers = current.ActiveTransfers,
+            TotalTransfers = current.TotalTransfers,
+            AverageTransferDurationMs = current.AverageTransferMilliseconds,
+
+            FailedLogins = current.FailedLogins,
+            AbortedTransfers = current.AbortedTransfers,
+
+            BytesUploaded = current.BytesUploaded,
+            BytesDownloaded = current.BytesDownloaded,
+
+            UploadBytesPerSecond = window.TotalSeconds > 0 ? upDelta / window.TotalSeconds : 0,
+            DownloadBytesPerSecond = window.TotalSeconds > 0 ? downDelta / window.TotalSeconds : 0
+        };
     }
 }

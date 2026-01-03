@@ -22,8 +22,6 @@
 
 using amFTPd.Config.Daemon;
 using amFTPd.Core;
-using amFTPd.Core.Irc;
-using amFTPd.Core.Monitoring;
 using amFTPd.Logging;
 using amFTPd.Properties;
 using amFTPd.Utils;
@@ -38,56 +36,18 @@ namespace amFTPd
     /// the server lifecycle, including graceful shutdown on cancellation requests.</remarks>
     internal class Program
     {
-        /// <summary>
-        /// The entry point of the application that initializes and starts the FTP server.
-        /// </summary>
-        /// <remarks>This method configures logging, loads the server configuration, and starts the FTP
-        /// server. It also handles graceful shutdown on receiving a cancellation signal (e.g., Ctrl+C). The
-        /// configuration file path can be provided as a command-line argument; otherwise, a default configuration file
-        /// named "amftpd.json" is used.</remarks>
-        /// <param name="args">An array of command-line arguments. The first argument, if provided, specifies the path to the server
-        /// configuration file.</param>
-        /// <returns>A task that represents the asynchronous operation of the server.</returns>
         static async Task Main(string[] args)
         {
             PrintBanner();
 
             var logger = new CombinedFtpLogger(new ConsoleFtpLogger(),
                 new FileFtpLogger(new FileFtpLoggerOptions
-                    { FilePath = "logs/amftpd.log", MinLevel = FtpLogLevel.Trace }));
+                { FilePath = "logs/amftpd.log", MinLevel = FtpLogLevel.Trace }));
             var configFile = args.Length > 0 ? args[0] : "amftpd.json";
 
             var runtime = await AmFtpdConfigLoader.LoadAsync(configFile, logger);
 
             var server = new FtpServer(runtime, logger);
-
-            // Optional IRC announcer wired to EventBus
-            IrcAnnouncer? irc = null;
-            if (runtime.IrcConfig is { Enabled: true } ircCfg)
-            {
-                irc = new IrcAnnouncer(
-                    ircCfg,
-                    logger,
-                    runtime.EventBus,
-                    fish: null,
-                    scriptHook: null);
-                irc.Start();
-            }
-
-            // Optional HTTP status endpoint (controlled by config)
-            StatusEndpoint? statusEndpoint = null;
-            if (runtime.StatusConfig is { Enabled: true } statusCfg)
-            {
-                try
-                {
-                    statusEndpoint = new StatusEndpoint(runtime, logger, statusCfg);
-                    statusEndpoint.Start();
-                }
-                catch (Exception ex)
-                {
-                    logger.Log(FtpLogLevel.Warn, "[amFTPd] Failed to start HTTP status endpoint.", ex);
-                }
-            }
 
             var serverTask = server.StartAsync();
 
@@ -97,30 +57,6 @@ namespace amFTPd
                 e.Cancel = true;
                 logger.Log(FtpLogLevel.Info, "[amFTPd] Shutdown requested, stopping server...");
                 server.Stop();
-
-                if (statusEndpoint is not null)
-                {
-                    try
-                    {
-                        await statusEndpoint.DisposeAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.Log(FtpLogLevel.Warn, "[amFTPd] Failed to stop HTTP status endpoint cleanly.", ex);
-                    }
-                }
-
-                if (irc is not null)
-                {
-                    try
-                    {
-                        await irc.DisposeAsync();
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.Log(FtpLogLevel.Warn, "[amFTPd] Failed to dispose IRC announcer cleanly.", ex);
-                    }
-                }
             };
 
             try

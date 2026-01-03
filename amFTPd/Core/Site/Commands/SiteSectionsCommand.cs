@@ -45,25 +45,45 @@ public sealed class SiteSectionsCommand : SiteCommandBase
             return;
         }
 
-        var secs = context.Sections.GetSections()
+        var full = argument?.Trim()
+            .Equals("FULL", StringComparison.OrdinalIgnoreCase) == true;
+
+        var sections = context.Sections.GetSections()
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var sb = new StringBuilder();
-        sb.AppendLine("211-Configured sections:");
+        var live = context.Runtime.LiveStats;
 
-        foreach (var s in secs)
+        var sb = new StringBuilder();
+        sb.AppendLine(full
+            ? "211-Section statistics (live):"
+            : "211-Configured sections:");
+
+        foreach (var s in sections)
         {
             sb.Append(" NAME=").Append(s.Name);
             sb.Append(" ROOT=").Append(s.VirtualRoot);
             sb.Append(" FREE=").Append(s.FreeLeech ? "Y" : "N");
-            sb.Append(" RATIO=").Append(s.RatioUploadUnit).Append(':').Append(s.RatioDownloadUnit);
+            sb.Append(" RATIO=").Append(s.RatioUploadUnit)
+                .Append(':').Append(s.RatioDownloadUnit);
+
+            if (full &&
+                live.Sections.TryGetValue(s.Name, out var ls))
+            {
+                sb.Append(" UL=").Append(ls.Uploads);
+                sb.Append(" DL=").Append(ls.Downloads);
+                sb.Append(" UP=").Append(ls.BytesUploaded);
+                sb.Append(" DN=").Append(ls.BytesDownloaded);
+                sb.Append(" USERS=").Append(ls.ActiveUsers);
+            }
+
             sb.AppendLine();
         }
 
         sb.AppendLine("211 End");
 
-        var text = sb.ToString().Replace("\n", "\r\n");
-        await context.Session.WriteAsync(text, cancellationToken);
+        await context.Session.WriteAsync(
+            sb.ToString().Replace("\n", "\r\n"),
+            cancellationToken);
     }
 }

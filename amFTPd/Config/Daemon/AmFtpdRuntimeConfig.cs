@@ -19,7 +19,6 @@
  * ====================================================================================================
  */
 
-
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Config.Ident;
@@ -28,8 +27,14 @@ using amFTPd.Config.Vfs;
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
+using amFTPd.Core.Pre;
 using amFTPd.Core.Race;
 using amFTPd.Core.Ratio;
+using amFTPd.Core.ReleaseSystem;
+using amFTPd.Core.Runtime;
+using amFTPd.Core.Stats;
+using amFTPd.Core.Stats.Live;
+using amFTPd.Core.Stats.Rolling;
 using amFTPd.Core.Zipscript;
 using amFTPd.Credits;
 using amFTPd.Db;
@@ -170,5 +175,39 @@ namespace amFTPd.Config.Daemon
         /// Timestamp (UTC) when this runtime snapshot was constructed.
         /// </summary>
         public DateTimeOffset LoadedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+        /// <summary>
+        /// Gets the statistics collector used to gather and report runtime metrics for this instance.
+        /// </summary>
+        public StatsCollector StatsCollector { get; init; } =
+            new StatsCollector(TimeSpan.FromSeconds(1));
+        /// <summary>
+        /// Gets the registry that provides access to live application statistics.
+        /// </summary>
+        public LiveStatsRegistry LiveStats { get; } = new();
+        /// <summary>
+        /// Gets the rolling statistical calculations for the current data set.
+        /// </summary>
+        public RollingStats RollingStats { get; } = new();
+        /// <summary>
+        /// Registry backing the virtual /PRE hierarchy.
+        /// </summary>
+        public PreRegistry PreRegistry { get; } = new();
+        /// <summary>
+        /// Time-to-live for PRE entries.
+        /// Default: 48 hours.
+        /// </summary>
+        public TimeSpan PreTtl { get; init; } = TimeSpan.FromHours(48);
+        /// <summary>
+        /// Coordinates startup recovery and persistence.
+        /// </summary>
+        public RuntimeRecoveryManager Recovery { get; internal set; } = null!;
+        /// <summary>
+        /// True while the daemon is restoring persistent state.
+        /// </summary>
+        public bool IsRecovering => Recovery?.IsRecovering ?? false;
+        /// <summary>
+        /// Gets the registry that provides access to available releases.
+        /// </summary>
+        public ReleaseRegistry ReleaseRegistry { get; } = new();
     }
 }

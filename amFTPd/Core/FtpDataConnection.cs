@@ -20,6 +20,7 @@
  */
 
 
+using amFTPd.Config.Daemon;
 using amFTPd.Core.Stats;
 using amFTPd.Logging;
 using amFTPd.Security;
@@ -28,6 +29,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using amFTPd.Utils;
 
 namespace amFTPd.Core;
 
@@ -47,6 +49,7 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     private readonly TlsConfig _tls;
     private readonly bool _controlTlsActive;
     private readonly string _prot; // "C" or "P"
+    private readonly AmFtpdRuntimeConfig _runtime;
 
     private TcpClient? _client;
     private TcpListener? _listener;
@@ -61,7 +64,13 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     internal const int TransferBufferSize = 64 * 1024;
 
+    private long _bytesTransferred;
     #endregion
+
+    /// <summary>
+    /// Gets the total number of bytes that have been transferred.
+    /// </summary>
+    public long BytesTransferred => _bytesTransferred;
 
     /// <summary>
     /// Gets the current transfer mode for the FTP operation.
@@ -80,16 +89,18 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpDataConnection"/> class.
     /// </summary>
-    /// <param name="log">The logger instance used to record FTP data connection events.</param>
-    /// <param name="tls">The TLS configuration for securing the data connection.</param>
-    /// <param name="controlTlsActive">Indicates whether the control connection is currently secured with TLS.</param>
-    /// <param name="protectionMode">The protection mode for the data connection, specifying the level of security to apply ("C" or "P").</param>
-    public FtpDataConnection(IFtpLogger log, TlsConfig tls, bool controlTlsActive, string protectionMode)
+    public FtpDataConnection(
+        IFtpLogger log,
+        TlsConfig tls,
+        bool controlTlsActive,
+        string protectionMode,
+        AmFtpdRuntimeConfig runtime)
     {
-        _log = log;
-        _tls = tls;
+        _log = log ?? throw new ArgumentNullException(nameof(log));
+        _tls = tls ?? throw new ArgumentNullException(nameof(tls));
         _controlTlsActive = controlTlsActive;
-        _prot = protectionMode;
+        _prot = protectionMode ?? "C";
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
     }
 
     /// <summary>
@@ -97,9 +108,8 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     public async Task SetActiveAsync(IPEndPoint remoteEndPoint, CancellationToken ct)
     {
-        await DisposeAsync();
+        await DisposeAsync().ConfigureAwait(false);
 
-        // Optional TLS policy: refuse clear-text data when control is TLS.
         if (_controlTlsActive &&
             !_prot.Equals("P", StringComparison.OrdinalIgnoreCase) &&
             _tls.RefuseClearDataOnSecureControl)
@@ -109,15 +119,13 @@ internal sealed class FtpDataConnection : IAsyncDisposable
         }
 
         _log.Log(FtpLogLevel.Debug, $"DATA(ACTIVE): Connecting to {remoteEndPoint}...");
-        _client = new TcpClient
-        {
-            NoDelay = true
-        };
-        
-        await _client.ConnectAsync(remoteEndPoint.Address, remoteEndPoint.Port, ct);
+        _client = new TcpClient { NoDelay = true };
+
+        await _client.ConnectAsync(remoteEndPoint.Address, remoteEndPoint.Port, ct)
+            .ConfigureAwait(false);
 
         var baseStream = _client.GetStream();
-        _stream = await WrapAsync(baseStream, ct);
+        _stream = await WrapAsync(baseStream, ct).ConfigureAwait(false);
         Mode = FtpTransferMode.Active;
 
         _log.Log(FtpLogLevel.Debug, "DATA(ACTIVE): Connected.");
@@ -128,9 +136,8 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     public async Task<int> StartPassiveAsync(IPAddress bindAddress, int port, CancellationToken ct)
     {
-        await DisposeAsync();
+        await DisposeAsync().ConfigureAwait(false);
 
-        // Optional TLS policy: refuse clear-text data when control is TLS.
         if (_controlTlsActive &&
             !_prot.Equals("P", StringComparison.OrdinalIgnoreCase) &&
             _tls.RefuseClearDataOnSecureControl)
@@ -160,13 +167,16 @@ internal sealed class FtpDataConnection : IAsyncDisposable
                 throw new InvalidOperationException("Passive listener not started.");
 
             _log.Log(FtpLogLevel.Debug, "DATA(PASSIVE): Waiting for incoming data connection...");
-            var client = await _listener.AcceptTcpClientAsync(ct);
-            _log.Log(FtpLogLevel.Debug, $"DATA(PASSIVE): Client connected from {client.Client.RemoteEndPoint}.");
+            var client = await _listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+
+            _log.Log(FtpLogLevel.Debug,
+                $"DATA(PASSIVE): Client connected from {client.Client.RemoteEndPoint}.");
 
             client.NoDelay = true;
             _client = client;
+
             var baseStream = client.GetStream();
-            _stream = await WrapAsync(baseStream, ct);
+            _stream = await WrapAsync(baseStream, ct).ConfigureAwait(false);
         }
         else if (Mode == FtpTransferMode.Active)
         {
@@ -184,8 +194,9 @@ internal sealed class FtpDataConnection : IAsyncDisposable
         if (!UseTlsOnData)
             return baseStream;
 
-        if (_tls?.Certificate is null)
-            throw new InvalidOperationException("Data channel TLS requested but no certificate is configured.");
+        if (_tls.Certificate is null)
+            throw new InvalidOperationException(
+                "Data channel TLS requested but no certificate is configured.");
 
         var ssl = new SslStream(baseStream, leaveInnerStreamOpen: false);
 
@@ -193,16 +204,16 @@ internal sealed class FtpDataConnection : IAsyncDisposable
         {
             var options = _tls.CreateServerOptions();
             if (options.ServerCertificate is null)
-                throw new InvalidOperationException("TlsConfig returned no ServerCertificate for data channel.");
+                throw new InvalidOperationException(
+                    "TlsConfig returned no ServerCertificate for data channel.");
 
             await ssl.AuthenticateAsServerAsync(options, ct).ConfigureAwait(false);
             _log.Log(FtpLogLevel.Debug, "DATA: TLS handshake successful on data connection.");
             return ssl;
         }
-        catch (Exception ex)
+        catch
         {
-            _log.Log(FtpLogLevel.Error, $"DATA: TLS handshake failed on data connection: {ex}");
-            await ssl.DisposeAsync();
+            await ssl.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -210,25 +221,32 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// <summary>
     /// Sends data asynchronously over the established connection.
     /// </summary>
-    public async Task SendAsync(Func<Stream, Task> send, CancellationToken ct)
+    public async Task<long> SendAsync(
+        Func<Stream, Task<long>> send,
+        CancellationToken ct)
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
 
         if (_stream is null)
             throw new InvalidOperationException("Data stream not available.");
 
-        PerfCounters.OnTransferStarted();
+        PerfCounters.ObserveTransferStarted();
+        _runtime.RollingStats.Transfers5s.Add(1);
+        _runtime.RollingStats.Transfers1m.Add(1);
+        _runtime.RollingStats.Transfers5m.Add(1);
+
         var sw = Stopwatch.StartNew();
 
         try
         {
-            await send(_stream).ConfigureAwait(false);
+            var transferred = await send(_stream).ConfigureAwait(false);
             await _stream.FlushAsync(ct).ConfigureAwait(false);
+            return transferred;
         }
         finally
         {
             sw.Stop();
-            PerfCounters.OnTransferCompleted(sw.Elapsed);
+            PerfCounters.ObserveTransferCompleted(sw.Elapsed);
         }
     }
 
@@ -237,15 +255,13 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        try { _stream?.DisposeAsync(); } catch { /* ignore */ }
-        try { _client?.Close(); } catch { /* ignore */ }
-        try { _listener?.Stop(); } catch { /* ignore */ }
+        try { if (_stream != null) await _stream.DisposeAsync().ConfigureAwait(false); } catch { }
+        try { _client?.Close(); } catch { }
+        try { _listener?.Stop(); } catch { }
 
         _stream = null;
         _client = null;
         _listener = null;
         Mode = FtpTransferMode.None;
-
-        await Task.CompletedTask;
     }
 }

@@ -25,6 +25,14 @@ using System.Reflection;
 
 namespace amFTPd.Core.Site
 {
+    /// <summary>
+    /// Provides extension methods for retrieving all users from an implementation of <see cref="IUserStore"/>.
+    /// </summary>
+    /// <remarks>These extension methods use reflection to enumerate users from various <see
+    /// cref="IUserStore"/> implementations, such as InMemoryUserStore, BinaryUserStore, or BinaryUserStoreMmap. If the
+    /// underlying store does not expose user data in a recognizable way, the methods return an empty sequence. These
+    /// methods are intended for diagnostic or administrative scenarios where direct access to all users is required.
+    /// Performance may vary depending on the underlying store and the use of reflection.</remarks>
     public static class UserStoreExtensions
     {
         /// <summary>

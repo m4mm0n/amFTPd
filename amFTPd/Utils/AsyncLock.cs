@@ -59,10 +59,7 @@ namespace amFTPd.Utils
         {
             private SemaphoreSlim? _toRelease;
 
-            public Releaser(SemaphoreSlim toRelease)
-            {
-                _toRelease = toRelease;
-            }
+            public Releaser(SemaphoreSlim toRelease) => _toRelease = toRelease;
 
             public void Dispose()
             {

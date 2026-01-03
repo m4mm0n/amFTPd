@@ -22,6 +22,7 @@
 
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
+using amFTPd.Core.Pre;
 using amFTPd.Core.Sections;
 
 namespace amFTPd.Core.Site.Commands
@@ -32,7 +33,7 @@ namespace amFTPd.Core.Site.Commands
 
         // Often restricted to admins / prebot – tweak if you want
         public override bool RequiresAdmin => false;
-        public override bool RequiresSiteop => true;
+        public override bool RequiresSiteop => false;
 
         public override string HelpText => "PRE <section> <release>  - register a pre in DUPE DB";
 
@@ -99,6 +100,16 @@ namespace amFTPd.Core.Site.Commands
             }
 
             dupeStore.Upsert(entry);
+
+            context.Runtime.PreRegistry.TryAdd(
+                new PreEntry(
+                    sectionName,
+                    releaseName,
+                    virtPath,
+                    context.Session.Account?.UserName ?? "unknown",
+                    now));
+
+            context.SceneRegistry.MarkPre(sectionName, virtPath);
 
             // EventBus: announce PRE
             context.Runtime.EventBus?.Publish(new FtpEvent

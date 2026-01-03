@@ -34,12 +34,16 @@ namespace amFTPd.Credits
         long NewBalance);
 
     /// <summary>
-    /// Provides functionality for calculating and managing user credits based on file uploads and downloads.
+    /// Authoritative credit calculation engine.
     /// </summary>
-    /// <remarks>The <see cref="CreditEngine"/> class is designed to compute credits earned for file uploads
-    /// and credits  consumed for file downloads, based on configurable multipliers at the section and group levels. It
-    /// also  provides methods to check and update user credit balances. This class is intended for use in systems 
-    /// where user activity is tracked and rewarded or restricted based on credit balances.</remarks>
+    /// <remarks>
+    /// CreditEngine provides deterministic calculations for upload rewards
+    /// and download costs based on sections and group rules.
+    ///
+    /// This class does NOT mutate user state and MUST NOT be used to directly
+    /// enforce access decisions. Enforcement and state mutation must be handled
+    /// by higher-level components (e.g. FtpCommandRouter).
+    /// </remarks>
     public sealed class CreditEngine
     {
         private readonly IUserStore _users;
@@ -122,10 +126,10 @@ namespace amFTPd.Credits
         /// <summary>
         /// Check whether a user has enough credits to download a file.
         /// </summary>
-        public bool CanDownload(FtpUser user, string sectionName, long sizeBytes)
+        public long ComputeDownloadCostKb(FtpUser user, string sectionName, long sizeBytes)
         {
             var cost = ComputeDownloadCost(user, sectionName, sizeBytes);
-            return user.CreditsKb >= cost;
+            return user.CreditsKb - cost;
         }
 
         /// <summary>

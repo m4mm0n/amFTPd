@@ -20,15 +20,20 @@
  */
 
 
+using amFTPd.Config.Ftpd;
+using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
 using amFTPd.Core.Ident;
 using amFTPd.Core.Site;
+using amFTPd.Core.Stats.Live;
 using amFTPd.Core.Vfs;
 using amFTPd.Core.Zipscript;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
+using amFTPd.Utils.Cryptography;
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -1008,8 +1013,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule
-            if (_userScript is not null && _s.Account is not null)
+            if (_userScript is not null)
             {
                 var ctx = BuildUserContext("LIST", arg);
                 var res = _userScript.EvaluateUser(ctx);
@@ -1026,78 +1030,69 @@ namespace amFTPd.Core
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
             var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
-            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
+            if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Not found.\r\n", ct);
+                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            if (vfsResult != null)
-            {
-                var node = vfsResult.Node;
+            var node = vfsResult.Node;
 
-                if (node != null)
+            if (!_directoryAccess.Evaluate(node.VirtualPath).CanList)
+            {
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
+            }
+
+            await _s.WriteAsync(FtpResponses.FileOk, ct);
+
+            await _s.WithDataAsync(async stream =>
+            {
+                await using var wr = new StreamWriter(
+                    stream,
+                    new UTF8Encoding(false),
+                    64 * 1024,
+                    leaveOpen: true);
+
+                switch (node.Type)
                 {
-                    var access = _directoryAccess.Evaluate(node.VirtualPath);
-                    if (!access.CanList)
+                    case VfsNodeType.PhysicalDirectory:
+                        foreach (var dir in Directory.EnumerateDirectories(node.PhysicalPath!))
+                            await wr.WriteLineAsync(_fs.ToUnixListLine(new DirectoryInfo(dir)));
+
+                        foreach (var file in Directory.EnumerateFiles(node.PhysicalPath!))
+                            await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(file)));
+                        break;
+
+                    case VfsNodeType.PhysicalFile:
+                        await wr.WriteLineAsync(
+                            _fs.ToUnixListLine((FileInfo)node.FileSystemInfo!));
+                        break;
+
+                    case VfsNodeType.VirtualDirectory:
                     {
-                        await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
-                        return;
+                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                        if (string.IsNullOrEmpty(name)) name = "/";
+                        await wr.WriteLineAsync(
+                            $"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}");
+                        break;
+                    }
+
+                    case VfsNodeType.VirtualFile:
+                    {
+                        var name = Path.GetFileName(node.VirtualPath);
+                        var size = node.VirtualContent is null
+                            ? 0
+                            : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                        await wr.WriteLineAsync(
+                            $"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}");
+                        break;
                     }
                 }
 
-                await _s.WriteAsync(FtpResponses.FileOk, ct);
-
-                await _s.WithDataAsync(async stream =>
-                {
-                    await using var wr = new StreamWriter(
-                        stream,
-                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                        bufferSize: 64 * 1024,
-                        leaveOpen: true);
-
-                    if (node != null)
-                        switch (node.Type)
-                        {
-                            case VfsNodeType.PhysicalDirectory:
-                            {
-                                var dirPath = node.PhysicalPath!;
-                                foreach (var dir in Directory.EnumerateDirectories(dirPath))
-                                    await wr.WriteLineAsync(_fs.ToUnixListLine(new DirectoryInfo(dir)));
-
-                                foreach (var file in Directory.EnumerateFiles(dirPath))
-                                    await wr.WriteLineAsync(_fs.ToUnixListLine(new FileInfo(file)));
-                                break;
-                            }
-
-                            case VfsNodeType.PhysicalFile:
-                            {
-                                await wr.WriteLineAsync(_fs.ToUnixListLine((FileInfo)node.FileSystemInfo!));
-                                break;
-                            }
-
-                            case VfsNodeType.VirtualDirectory:
-                            {
-                                var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                                if (string.IsNullOrEmpty(name))
-                                    name = "/";
-                                // Simple synthetic directory listing line
-                                await wr.WriteLineAsync($"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}");
-                                break;
-                            }
-
-                            case VfsNodeType.VirtualFile:
-                            {
-                                var name = Path.GetFileName(node.VirtualPath);
-                                var size = node.VirtualContent is null
-                                    ? 0
-                                    : Encoding.UTF8.GetByteCount(node.VirtualContent);
-                                await wr.WriteLineAsync($"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}");
-                                break;
-                            }
-                        }
-                }, ct);
-            }
+                // REQUIRED
+                return 0L;
+            }, isUpload: false, countBandwidth: false, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1110,8 +1105,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule
-            if (_userScript is not null && _s.Account is not null)
+            if (_userScript is not null)
             {
                 var ctx = BuildUserContext("NLST", arg);
                 var res = _userScript.EvaluateUser(ctx);
@@ -1128,63 +1122,51 @@ namespace amFTPd.Core
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
             var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
-            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
+            if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Not found.\r\n", ct);
+                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 Not found.\r\n", ct);
                 return;
             }
 
-            if (vfsResult != null)
-            {
-                var node = vfsResult.Node;
+            var node = vfsResult.Node;
 
-                if (node != null)
+            if (!_directoryAccess.Evaluate(node.VirtualPath).CanList)
+            {
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
+            }
+
+            await _s.WriteAsync(FtpResponses.FileOk, ct);
+
+            await _s.WithDataAsync(async stream =>
+            {
+                await using var wr = new StreamWriter(
+                    stream,
+                    new UTF8Encoding(false),
+                    64 * 1024,
+                    leaveOpen: true);
+
+                switch (node.Type)
                 {
-                    var access = _directoryAccess.Evaluate(node.VirtualPath);
-                    if (!access.CanList)
+                    case VfsNodeType.PhysicalDirectory:
+                        foreach (var dir in Directory.EnumerateDirectories(node.PhysicalPath!))
+                            await wr.WriteLineAsync(Path.GetFileName(dir));
+
+                        foreach (var file in Directory.EnumerateFiles(node.PhysicalPath!))
+                            await wr.WriteLineAsync(Path.GetFileName(file));
+                        break;
+
+                    default:
                     {
-                        await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
-                        return;
+                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                        if (string.IsNullOrEmpty(name)) name = "/";
+                        await wr.WriteLineAsync(name);
+                        break;
                     }
                 }
 
-                await _s.WriteAsync(FtpResponses.FileOk, ct);
-
-                await _s.WithDataAsync(async stream =>
-                {
-                    await using var wr = new StreamWriter(
-                        stream,
-                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                        bufferSize: 64 * 1024,
-                        leaveOpen: true);
-
-                    if (node != null)
-                        switch (node.Type)
-                        {
-                            case VfsNodeType.PhysicalDirectory:
-                            {
-                                var dirPath = node.PhysicalPath!;
-                                foreach (var dir in Directory.EnumerateDirectories(dirPath))
-                                    await wr.WriteLineAsync(Path.GetFileName(dir));
-
-                                foreach (var file in Directory.EnumerateFiles(dirPath))
-                                    await wr.WriteLineAsync(Path.GetFileName(file));
-                                break;
-                            }
-
-                            case VfsNodeType.PhysicalFile:
-                            case VfsNodeType.VirtualFile:
-                            case VfsNodeType.VirtualDirectory:
-                            {
-                                var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                                if (string.IsNullOrEmpty(name))
-                                    name = "/";
-                                await wr.WriteLineAsync(name);
-                                break;
-                            }
-                        }
-                }, ct);
-            }
+                return 0L;
+            }, isUpload: false, countBandwidth: false, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1197,8 +1179,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule
-            if (_userScript is not null && _s.Account is not null)
+            if (_userScript is not null)
             {
                 var ctx = BuildUserContext("MLSD", arg);
                 var res = _userScript.EvaluateUser(ctx);
@@ -1215,22 +1196,18 @@ namespace amFTPd.Core
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
 
             var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
-            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
+            if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 MLSD failed.\r\n", ct);
+                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 MLSD failed.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult?.Node;
+            var node = vfsResult.Node;
 
-            if (node?.VirtualPath != null)
+            if (!_directoryAccess.Evaluate(node.VirtualPath).CanList)
             {
-                var access = _directoryAccess.Evaluate(node?.VirtualPath);
-                if (!access.CanList)
-                {
-                    await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
-                    return;
-                }
+                await _s.WriteAsync("550 Listing not allowed in this directory.\r\n", ct);
+                return;
             }
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
@@ -1239,47 +1216,46 @@ namespace amFTPd.Core
             {
                 await using var wr = new StreamWriter(
                     stream,
-                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                    bufferSize: 64 * 1024,
+                    new UTF8Encoding(false),
+                    64 * 1024,
                     leaveOpen: true);
 
-                switch (node?.Type)
+                switch (node.Type)
                 {
                     case VfsNodeType.PhysicalDirectory:
-                        {
-                            var dirPath = node.PhysicalPath!;
-                            foreach (var dir in Directory.EnumerateDirectories(dirPath))
-                                await wr.WriteLineAsync(_fs.ToMlsdLine(new DirectoryInfo(dir)));
+                        foreach (var dir in Directory.EnumerateDirectories(node.PhysicalPath!))
+                            await wr.WriteLineAsync(_fs.ToMlsdLine(new DirectoryInfo(dir)));
 
-                            foreach (var file in Directory.EnumerateFiles(dirPath))
-                                await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(file)));
-                            break;
-                        }
+                        foreach (var file in Directory.EnumerateFiles(node.PhysicalPath!))
+                            await wr.WriteLineAsync(_fs.ToMlsdLine(new FileInfo(file)));
+                        break;
 
                     case VfsNodeType.PhysicalFile:
-                        {
-                            await wr.WriteLineAsync(_fs.ToMlsdLine((FileInfo)node.FileSystemInfo!));
-                            break;
-                        }
+                        await wr.WriteLineAsync(
+                            _fs.ToMlsdLine((FileInfo)node.FileSystemInfo!));
+                        break;
 
                     case VfsNodeType.VirtualDirectory:
-                        {
-                            var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                            if (string.IsNullOrEmpty(name))
-                                name = "/";
-                            await wr.WriteLineAsync($"type=dir;perm=el; {name}");
-                            break;
-                        }
+                    {
+                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                        if (string.IsNullOrEmpty(name)) name = "/";
+                        await wr.WriteLineAsync($"type=dir;perm=el; {name}");
+                        break;
+                    }
 
                     case VfsNodeType.VirtualFile:
-                        {
-                            var name = Path.GetFileName(node.VirtualPath);
-                            var size = node.VirtualContent is null ? 0 : Encoding.UTF8.GetByteCount(node.VirtualContent);
-                            await wr.WriteLineAsync($"type=file;size={size};perm=rl; {name}");
-                            break;
-                        }
+                    {
+                        var name = Path.GetFileName(node.VirtualPath);
+                        var size = node.VirtualContent is null
+                            ? 0
+                            : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                        await wr.WriteLineAsync($"type=file;size={size};perm=rl; {name}");
+                        break;
+                    }
                 }
-            }, ct);
+
+                return 0L;
+            }, isUpload: false, countBandwidth: false, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1375,8 +1351,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule
-            if (_userScript is not null && _s.Account is not null)
+            if (_userScript is not null)
             {
                 var ctx = BuildUserContext("RETR", arg);
                 var res = _userScript.EvaluateUser(ctx);
@@ -1397,52 +1372,42 @@ namespace amFTPd.Core
             }
 
             var vfsResult = _s.VfsManager?.Resolve(arg, _s.Account);
-            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
+            if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
+                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 File not found.\r\n", ct);
                 return;
             }
 
-            var node = vfsResult?.Node;
-
-            if (node != null && node.Type != VfsNodeType.PhysicalFile && node.Type != VfsNodeType.VirtualFile)
+            var node = vfsResult.Node;
+            if (node.Type is not (VfsNodeType.PhysicalFile or VfsNodeType.VirtualFile))
             {
                 await _s.WriteAsync("550 File not found.\r\n", ct);
                 return;
             }
 
-            var virtTarget = node?.VirtualPath;
-
-            var access = _directoryAccess.Evaluate(virtTarget);
-            if (!access.CanDownload)
+            var virtTarget = node.VirtualPath;
+            if (!_directoryAccess.Evaluate(virtTarget).CanDownload)
             {
                 await _s.WriteAsync("550 Download not allowed in this directory.\r\n", ct);
                 return;
             }
 
-            long length;
             Stream sourceStream;
+            long length;
+
             try
             {
-                if (node != null && node.Type == VfsNodeType.PhysicalFile)
+                if (node.Type == VfsNodeType.PhysicalFile)
                 {
-                    var phys = node.PhysicalPath!;
-                    if (!File.Exists(phys))
-                    {
-                        await _s.WriteAsync("550 File not found.\r\n", ct);
-                        return;
-                    }
-
-                    var fi = new FileInfo(phys);
+                    var fi = new FileInfo(node.PhysicalPath!);
                     length = fi.Length;
-                    sourceStream = new FileStream(phys, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    sourceStream = fi.OpenRead();
                 }
                 else
                 {
-                    var content = node?.VirtualContent ?? string.Empty;
-                    var buffer = Encoding.UTF8.GetBytes(content);
-                    length = buffer.LongLength;
-                    sourceStream = new MemoryStream(buffer, writable: false);
+                    var buf = Encoding.UTF8.GetBytes(node.VirtualContent ?? "");
+                    length = buf.LongLength;
+                    sourceStream = new MemoryStream(buf, false);
                 }
             }
             catch
@@ -1452,35 +1417,99 @@ namespace amFTPd.Core
             }
 
             var rest = _s.RestOffset;
-            if (rest.HasValue && rest.Value > 0 && rest.Value < length)
+            if (rest is > 0 && rest < length)
                 length -= rest.Value;
 
             var section = GetSectionForVirtual(virtTarget);
+            if (Server!.IsSectionBlocked(section.Name, out var reason))
+            {
+                await _s.WriteAsync(
+                    $"550 Section temporarily unavailable: {reason}\r\n",
+                    ct);
+                await sourceStream.DisposeAsync();
+                return;
+            }
 
-            if (!await CheckDownloadCreditsAsync(virtTarget, section, length, ct))
+            if (_runtime.CreditEngine is not null &&
+                !await CheckDownloadCreditsAsync(virtTarget, section, length, ct))
             {
                 await sourceStream.DisposeAsync();
                 return;
             }
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
-
-            var offset = rest;
             _s.ClearRestOffset();
 
-            await _s.WithDataAsync(async s =>
+            await _s.WithDataAsync(async data =>
             {
                 await using (sourceStream)
                 {
-                    if (offset.HasValue && offset.Value > 0 && sourceStream.CanSeek)
-                        sourceStream.Seek(offset.Value, SeekOrigin.Begin);
+                    if (rest is > 0 && sourceStream.CanSeek)
+                        sourceStream.Seek(rest.Value, SeekOrigin.Begin);
 
-                    var maxKbps = _s.Account?.MaxDownloadKbps ?? 0;
-                    var transferred = await CopyWithThrottleAsync(sourceStream, s, maxKbps, isDownload: true, ct);
-                    ApplyDownloadCredits(virtTarget, section, transferred);
-                    if (transferred > 0) FireSiteEvent("onDownload", virtTarget, section, _s.Account?.UserName);
+                    var transferred = await CopyWithThrottleAsync(
+                        sourceStream,
+                        data,
+                        _s.Account.MaxDownloadKbps,
+                        isDownload: true,
+                        ct);
+
+                    if (transferred <= 0)
+                        return 0L;
+
+                    Server.NotifySectionBandwidth(
+                        section.Name,
+                        transferred,
+                        isUpload: false);
+
+                    // ---- Credits -------------------------------------------------
+                    _runtime.CreditEngine?.TryConsumeCredits(
+                        _s.Account,
+                        section?.Name ?? "",
+                        transferred,
+                        out _);
+
+                    // ---- Rolling stats ------------------------------------------
+                    var rs = _runtime.RollingStats;
+                    rs.DownloadBytes5s.Add(transferred);
+                    rs.DownloadBytes1m.Add(transferred);
+                    rs.DownloadBytes5m.Add(transferred);
+                    rs.Transfers5s.Add(1);
+                    rs.Transfers1m.Add(1);
+                    rs.Transfers5m.Add(1);
+
+                    // ---- Live user stats ----------------------------------------
+                    var live = _runtime.LiveStats;
+
+                    var user = live.Users.GetOrAdd(
+                        _s.Account.UserName,
+                        _ => new UserLiveStats { UserName = _s.Account.UserName });
+
+                    Interlocked.Increment(ref user.Downloads);
+                    Interlocked.Add(ref user.BytesDownloaded, transferred);
+
+                    // ---- Live section stats -------------------------------------
+                    if (section is not null)
+                    {
+                        var sec = live.Sections.GetOrAdd(
+                            section.Name,
+                            _ => new SectionLiveStats { SectionName = section.Name });
+
+                        Interlocked.Increment(ref sec.Downloads);
+                        Interlocked.Add(ref sec.BytesDownloaded, transferred);
+
+                        lock (_sectionsTouched)
+                        {
+                            if (_sectionsTouched.Add(section.Name))
+                                Interlocked.Increment(ref sec.ActiveUsers);
+                        }
+                    }
+
+                    FireSiteEvent("onDownload", virtTarget, section, _s.Account.UserName);
+
+                    return transferred;
                 }
-            }, ct);
+            }, isUpload: false, countBandwidth: true, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1499,8 +1528,7 @@ namespace amFTPd.Core
                 return;
             }
 
-            // AMScript user-based rule
-            if (_userScript is not null && _s.Account is not null)
+            if (_userScript is not null)
             {
                 var ctx = BuildUserContext("STOR", arg);
                 var res = _userScript.EvaluateUser(ctx);
@@ -1520,18 +1548,11 @@ namespace amFTPd.Core
                 return;
             }
 
-            // Normalize the virtual path using existing logic
             var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
-
-            // Resolve the parent directory through VFS so mounts/overlays are respected
-            var dirVirtRaw = Path.GetDirectoryName(virtTarget);
-            var dirVirt = string.IsNullOrEmpty(dirVirtRaw) || dirVirtRaw == "\\"
-                ? "/"
-                : dirVirtRaw.Replace('\\', '/');
+            var dirVirt = Path.GetDirectoryName(virtTarget)?.Replace('\\', '/') ?? "/";
             var fileName = Path.GetFileName(virtTarget);
 
-            var access = _directoryAccess.Evaluate(dirVirt);
-            if (!access.CanUpload)
+            if (!_directoryAccess.Evaluate(dirVirt).CanUpload)
             {
                 await _s.WriteAsync("550 Upload not allowed in this directory.\r\n", ct);
                 return;
@@ -1541,16 +1562,8 @@ namespace amFTPd.Core
             try
             {
                 var dirResult = _s.VfsManager?.Resolve(dirVirt, _s.Account);
-                if (dirResult != null && dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
-                {
-                    physDir = node.PhysicalPath!;
-                }
-                else
-                {
-                    // Fallback to legacy behaviour if VFS has no opinion
-                    physDir = Path.GetDirectoryName(_fs.MapToPhysical(virtTarget))
-                              ?? throw new UnauthorizedAccessException();
-                }
+                physDir = dirResult?.Node?.PhysicalPath
+                          ?? Path.GetDirectoryName(_fs.MapToPhysical(virtTarget))!;
             }
             catch
             {
@@ -1559,71 +1572,135 @@ namespace amFTPd.Core
             }
 
             var phys = Path.Combine(physDir, fileName);
-
-            Directory.CreateDirectory(Path.GetDirectoryName(phys)!);
+            Directory.CreateDirectory(physDir);
 
             var section = GetSectionForVirtual(virtTarget);
+            if (Server!.IsSectionBlocked(section.Name, out var reason))
+            {
+                await _s.WriteAsync(
+                    $"550 Section temporarily unavailable: {reason}\r\n",
+                    ct);
+                return;
+            }
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
             var rest = _s.RestOffset;
             _s.ClearRestOffset();
 
-            await _s.WithDataAsync(async s =>
+            await _s.WithDataAsync(async data =>
             {
-                var mode = rest.HasValue && rest.Value > 0 ? FileMode.OpenOrCreate : FileMode.Create;
+                var mode = rest is > 0 ? FileMode.OpenOrCreate : FileMode.Create;
 
-                await using var fs = new FileStream(phys, mode, FileAccess.Write, FileShare.None);
-                if (rest.HasValue && rest.Value > 0)
+                await using var fs = new FileStream(
+                    phys,
+                    mode,
+                    FileAccess.Write,
+                    FileShare.None);
+
+                // ============================================================
+                // CRC32 STREAM WRAPPER (ADDED)
+                // ============================================================
+                await using var crcStream = new Crc32WriteStream(fs);
+
+                if (rest is > 0)
                     fs.Seek(rest.Value, SeekOrigin.Begin);
 
-                var maxKbps = _s.Account?.MaxUploadKbps ?? 0;
-                var transferred = await CopyWithThrottleAsync(s, fs, maxKbps, isDownload: false, ct);
-                ApplyUploadCredits(virtTarget, section, transferred);
+                var transferred = await CopyWithThrottleAsync(
+                    data,
+                    crcStream,
+                    _s.Account.MaxUploadKbps,
+                    isDownload: false,
+                    ct);
 
-                if (transferred > 0)
+                if (transferred <= 0)
+                    return 0L;
+
+                Server.NotifySectionBandwidth(
+                    section.Name,
+                    transferred,
+                    isUpload: true);
+
+                // ---- Credits ---------------------------------------------------
+                if (_s.Account is not null)
                 {
-                    // AMScript / legacy hooks
-                    FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
-
-                    // Zipscript integration
-                    if (_runtime.Zipscript is not null)
-                    {
-                        var ctx = new ZipscriptUploadContext(
-                            section.Name,
-                            virtTarget,
-                            phys,
-                            transferred,
-                            _s.Account?.UserName,
-                            DateTimeOffset.UtcNow);
-
-                        _runtime.Zipscript.OnUploadComplete(ctx);
-                    }
-
-                    if (_s.Account is { } acc)
-                    {
-                        _raceEngine.RegisterUpload(acc.UserName, dirVirt, section.Name, transferred);
-                        UpdateDupeOnUpload(section, dirVirt, acc, transferred);
-                    }
-
-                    // EventBus: announce upload for IRC / other listeners
-                    var releaseName = Path.GetFileName(
-                        (dirVirt ?? string.Empty).TrimEnd('/', '\\'));
-
-                    _runtime.EventBus?.Publish(new FtpEvent
-                    {
-                        Type = FtpEventType.Upload,
-                        Timestamp = DateTimeOffset.UtcNow,
-                        SessionId = _s.SessionId,
-                        User = _s.Account?.UserName,
-                        Group = _s.Account?.GroupName,
-                        Section = section?.Name,
-                        VirtualPath = virtTarget,
-                        ReleaseName = string.IsNullOrEmpty(releaseName) ? virtTarget : releaseName,
-                        Bytes = transferred
-                    });
+                    CreditService.ApplyUpload(
+                        _s.Account,
+                        section.Name,
+                        transferred);
                 }
-            }, ct);
+
+                // ---- Rolling stats ---------------------------------------------
+                var rs = _runtime.RollingStats;
+                rs.UploadBytes5s.Add(transferred);
+                rs.UploadBytes1m.Add(transferred);
+                rs.UploadBytes5m.Add(transferred);
+                rs.Transfers5s.Add(1);
+                rs.Transfers1m.Add(1);
+                rs.Transfers5m.Add(1);
+
+                // ---- Live user stats -------------------------------------------
+                var live = _runtime.LiveStats;
+
+                var user = live.Users.GetOrAdd(
+                    _s.Account.UserName,
+                    _ => new UserLiveStats { UserName = _s.Account.UserName });
+
+                Interlocked.Increment(ref user.Uploads);
+                Interlocked.Add(ref user.BytesUploaded, transferred);
+
+                // ---- Live section stats ----------------------------------------
+                if (section is not null)
+                {
+                    var sec = live.Sections.GetOrAdd(
+                        section.Name,
+                        _ => new SectionLiveStats { SectionName = section.Name });
+
+                    Interlocked.Increment(ref sec.Uploads);
+                    Interlocked.Add(ref sec.BytesUploaded, transferred);
+
+                    lock (_sectionsTouched)
+                    {
+                        if (_sectionsTouched.Add(section.Name))
+                            Interlocked.Increment(ref sec.ActiveUsers);
+                    }
+                }
+
+                // ============================================================
+                // BINARY DUPE STORE UPDATE (ADDED)
+                // ============================================================
+                if (_runtime.DupeStore is BinaryDupeStore dupe)
+                {
+                    var release = Path.GetFileName(dirVirt.TrimEnd('/'));
+
+                    dupe.AddOrUpdateFile(
+                        section.Name,
+                        release,
+                        fileName,
+                        crcStream.Hash,
+                        transferred,
+                        _s.Account!.UserName,
+                        _s.Account.GroupName);
+                }
+
+                // ---- Zipscript -------------------------------------------------
+                if (_runtime.Zipscript is not null)
+                {
+                    var ctx = new ZipscriptUploadContext(
+                        section.Name,
+                        virtTarget,
+                        phys,
+                        transferred,
+                        _s.Account?.UserName,
+                        DateTimeOffset.UtcNow);
+
+                    _runtime.Zipscript.OnUploadComplete(ctx);
+                }
+
+                FireSiteEvent("onUpload", virtTarget, section, _s.Account.UserName);
+
+                return transferred;
+            }, isUpload: true, countBandwidth: true, ct);
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1663,10 +1740,8 @@ namespace amFTPd.Core
                 return;
             }
 
-            // Normalize the virtual path
             var virtTarget = FtpPath.Normalize(_s.Cwd, arg);
 
-            // Resolve parent dir through VFS
             var dirVirtRaw = Path.GetDirectoryName(virtTarget);
             var dirVirt = string.IsNullOrEmpty(dirVirtRaw) || dirVirtRaw == "\\"
                 ? "/"
@@ -1684,13 +1759,14 @@ namespace amFTPd.Core
             try
             {
                 var dirResult = _s.VfsManager?.Resolve(dirVirt, _s.Account);
-                if (dirResult != null && dirResult.Success && dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
+                if (dirResult != null &&
+                    dirResult.Success &&
+                    dirResult.Node is { Type: VfsNodeType.PhysicalDirectory } node)
                 {
                     physDir = node.PhysicalPath!;
                 }
                 else
                 {
-                    // Fallback to legacy behaviour if VFS has no opinion
                     physDir = Path.GetDirectoryName(_fs.MapToPhysical(virtTarget))
                               ?? throw new UnauthorizedAccessException();
                 }
@@ -1708,62 +1784,97 @@ namespace amFTPd.Core
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
-            // APPE ignores REST by convention
+            // APPE ignores REST
             _s.ClearRestOffset();
+
+            long transferredTotal = 0;
 
             await _s.WithDataAsync(async s =>
             {
-                await using var fs = new FileStream(phys, FileMode.Append, FileAccess.Write, FileShare.None);
+                await using var fs = new FileStream(
+                    phys,
+                    FileMode.Append,
+                    FileAccess.Write,
+                    FileShare.None);
 
                 var maxKbps = _s.Account?.MaxUploadKbps ?? 0;
-                var transferred = await CopyWithThrottleAsync(s, fs, maxKbps, isDownload: false, ct);
+
+                var transferred = await CopyWithThrottleAsync(
+                    s,
+                    fs,
+                    maxKbps,
+                    isDownload: false,
+                    ct);
+
+                if (transferred <= 0)
+                    return 0L;
+
+                transferredTotal = transferred;
+
+                Server.NotifySectionBandwidth(
+                    section.Name,
+                    transferred,
+                    isUpload: true);
+
                 ApplyUploadCredits(virtTarget, section, transferred);
 
-                if (transferred > 0)
+                FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
+
+                if (_runtime.Zipscript is not null)
                 {
-                    // AMScript / legacy hooks
-                    FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
+                    var ctx = new ZipscriptUploadContext(
+                        section.Name,
+                        virtTarget,
+                        phys,
+                        transferred,
+                        _s.Account?.UserName,
+                        DateTimeOffset.UtcNow);
 
-                    // Zipscript integration
-                    if (_runtime.Zipscript is not null)
-                    {
-                        var ctx = new ZipscriptUploadContext(
-                            section.Name,
-                            virtTarget,
-                            phys,
-                            transferred,
-                            _s.Account?.UserName,
-                            DateTimeOffset.UtcNow);
-
-                        _runtime.Zipscript.OnUploadComplete(ctx);
-                    }
-
-
-                    if (_s.Account is { } acc)
-                    {
-                        // Use the directory virtual path as race key, same as STOR
-                        _raceEngine.RegisterUpload(acc.UserName, dirVirt, section.Name, transferred);
-                        UpdateDupeOnUpload(section, dirVirt, acc, transferred);
-                    }
-
-                    // EventBus: announce upload for IRC / other listeners
-                    var releaseName = Path.GetFileName(
-                        (dirVirt ?? string.Empty).TrimEnd('/', '\\'));
-
-                    _runtime.EventBus?.Publish(new FtpEvent
-                    {
-                        Type = FtpEventType.Upload,
-                        Timestamp = DateTimeOffset.UtcNow,
-                        SessionId = _s.SessionId,
-                        User = _s.Account?.UserName,
-                        Group = _s.Account?.GroupName,
-                        Section = section?.Name,
-                        VirtualPath = virtTarget,
-                        ReleaseName = string.IsNullOrEmpty(releaseName) ? virtTarget : releaseName,
-                        Bytes = transferred
-                    });
+                    _runtime.Zipscript.OnUploadComplete(ctx);
                 }
-            }, ct);
+
+                if (_s.Account is { } acc)
+                {
+                    _raceEngine.RegisterUpload(
+                        acc.UserName,
+                        dirVirt,
+                        section.Name,
+                        transferred);
+                }
+
+                return transferred;
+            }, isUpload: true, countBandwidth: true, ct);
+
+            // ============================================================
+            // RECOMPUTE CRC FOR FULL FILE (CORRECT FOR APPE)
+            // ============================================================
+            if (transferredTotal > 0 &&
+                _runtime.DupeStore is BinaryDupeStore dupe &&
+                _s.Account is { } account)
+            {
+                uint crc;
+                try
+                {
+                    crc = Crc32.Compute(phys);
+                }
+                catch
+                {
+                    // CRC failure should not abort APPE
+                    crc = 0;
+                }
+
+                var release = Path.GetFileName(dirVirt.TrimEnd('/'));
+                var fileSize = new FileInfo(phys).Length;
+
+                dupe.AddOrUpdateFile(
+                    section.Name,
+                    release,
+                    fileName,
+                    crc,
+                    fileSize,
+                    account.UserName,
+                    account.GroupName);
+            }
 
             await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
@@ -1861,7 +1972,27 @@ namespace amFTPd.Core
                 if (File.Exists(phys))
                 {
                     File.Delete(phys);
+
+                    // ============================================================
+                    // BINARY DUPE STORE UPDATE (ADDED)
+                    // ============================================================
+                    if (_runtime.DupeStore is BinaryDupeStore dupe &&
+                        node?.VirtualPath is not null)
+                    {
+                        var dirVirt = Path.GetDirectoryName(node.VirtualPath)
+                                      ?.Replace('\\', '/') ?? "/";
+
+                        var release = Path.GetFileName(dirVirt.TrimEnd('/'));
+                        var fileName = Path.GetFileName(node.VirtualPath);
+
+                        dupe.RemoveFile(
+                            section.Name,
+                            release,
+                            fileName);
+                    }
+
                     FireSiteEvent("onDelete", node?.VirtualPath, section, _s.Account?.UserName);
+
                     if (_runtime.Zipscript is not null && node?.VirtualPath is not null)
                     {
                         var delCtx = new ZipscriptDeleteContext(
@@ -1874,6 +2005,7 @@ namespace amFTPd.Core
 
                         _runtime.Zipscript.OnDelete(delCtx);
                     }
+
                     await _s.WriteAsync(FtpResponses.ActionOk, ct);
                 }
                 else
@@ -2111,14 +2243,14 @@ namespace amFTPd.Core
             try
             {
                 var toDirResult = _s.VfsManager?.Resolve(toDirVirt, _s.Account);
-                if (toDirResult != null && toDirResult.Success && toDirResult.Node is { Type: VfsNodeType.PhysicalDirectory } toDirNode)
+                if (toDirResult != null && toDirResult.Success &&
+                    toDirResult.Node is { Type: VfsNodeType.PhysicalDirectory } toDirNode)
                 {
                     var physDir = toDirNode.PhysicalPath!;
                     toPhys = Path.Combine(physDir, toName);
                 }
                 else
                 {
-                    // fallback: old behaviour
                     toPhys = _fs.MapToPhysical(toVirt);
                 }
             }
@@ -2162,6 +2294,49 @@ namespace amFTPd.Core
                 return;
             }
 
+            // ============================================================
+            // BINARY DUPE STORE UPDATE (FILES ONLY)  <-- ADDED
+            // ============================================================
+            if (isFile &&
+                _runtime.DupeStore is BinaryDupeStore dupe &&
+                _s.Account is { } acc)
+            {
+                var section = GetSectionForVirtual(toVirt);
+
+                var fromDir = Path.GetDirectoryName(fromVirt)
+                              ?.Replace('\\', '/') ?? "/";
+
+                var toDir = Path.GetDirectoryName(toVirt)
+                            ?.Replace('\\', '/') ?? "/";
+
+                var fromRelease = Path.GetFileName(fromDir.TrimEnd('/'));
+                var toRelease = Path.GetFileName(toDir.TrimEnd('/'));
+
+                var oldName = Path.GetFileName(fromVirt);
+                var newName = Path.GetFileName(toVirt);
+
+                // Remove old entry
+                dupe.RemoveFile(section.Name, fromRelease, oldName);
+
+                // Re-add under new location/name
+                uint crc;
+                try { crc = Crc32.Compute(toPhys); }
+                catch { crc = 0; }
+
+                long size = 0;
+                try { size = new FileInfo(toPhys).Length; }
+                catch { }
+
+                dupe.AddOrUpdateFile(
+                    section.Name,
+                    toRelease,
+                    newName,
+                    crc,
+                    size,
+                    acc.UserName,
+                    acc.GroupName);
+            }
+
             // Zipscript integration for renames
             try
             {
@@ -2173,7 +2348,6 @@ namespace amFTPd.Core
 
                     if (isDir)
                     {
-                        // Directory rename: remove old release state and rescan new path
                         var delCtx = new ZipscriptDeleteContext(
                             section.Name,
                             fromVirt,
@@ -2196,7 +2370,6 @@ namespace amFTPd.Core
                     }
                     else if (isFile)
                     {
-                        // File rename: delete old file entry, then treat new path as uploaded
                         var delCtx = new ZipscriptDeleteContext(
                             section.Name,
                             fromVirt,
@@ -2208,15 +2381,7 @@ namespace amFTPd.Core
                         _runtime.Zipscript.OnDelete(delCtx);
 
                         long size = 0;
-                        try
-                        {
-                            var fi = new FileInfo(toPhys);
-                            size = fi.Length;
-                        }
-                        catch
-                        {
-                            // ignore size failure, still notify zipscript
-                        }
+                        try { size = new FileInfo(toPhys).Length; } catch { }
 
                         var upCtx = new ZipscriptUploadContext(
                             section.Name,
@@ -2232,7 +2397,7 @@ namespace amFTPd.Core
             }
             catch
             {
-                // zipscript is best-effort; don't fail RNTO if it blows up
+                // zipscript is best-effort
             }
 
             _s.RenameFrom = null;
@@ -2484,9 +2649,21 @@ namespace amFTPd.Core
             // --------------------------------------------------------------------------------------------------
 
             var account = _s.Account;
-            if (account is null)
+            // ------------------------------------------------------------------
+            // Centralized SITE hardening (router-level, post-script)
+            // ------------------------------------------------------------------
+
+            // Must be logged in
+            if (_s.Account is null)
             {
                 await _s.WriteAsync("530 Please login first.\r\n", ct);
+                return;
+            }
+
+            // Reputation gate: SITE is privileged and sensitive
+            if (_s.Reputation != FtpSessionReputation.Good)
+            {
+                await _s.WriteAsync("550 SITE disabled for this session.\r\n", ct);
                 return;
             }
 

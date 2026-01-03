@@ -47,9 +47,28 @@ namespace amFTPd.Config.Daemon;
 /// for invalid configurations, missing files, or other critical errors during initialization.</remarks>
 public static class AmFtpdConfigLoader
 {
+    /// <summary>
+    /// Asynchronously loads the runtime configuration for amFTPd from the specified JSON file, creating a default
+    /// configuration file if one does not exist.
+    /// </summary>
+    /// <remarks>If the configuration file does not exist at the specified path, a default configuration is
+    /// created and written to disk. The method initializes all required runtime services, including user and group
+    /// storage, TLS configuration, and optional engines such as zipscript and FXP policy. The logger is used throughout
+    /// the process to provide feedback and error reporting. This method is typically called during application startup
+    /// to prepare the server for operation.</remarks>
+    /// <param name="configPath">The path to the configuration file to load. If the file does not exist, a default configuration will be
+    /// generated at this location.</param>
+    /// <param name="logger">The logger instance used to record informational, warning, and error messages during the loading process.</param>
+    /// <param name="reuseDatabase">An optional existing DatabaseManager instance to reuse for user, group, and section storage. If null, a new
+    /// instance will be created as needed.</param>
+    /// <returns>A task that represents the asynchronous operation. The task result contains an AmFtpdRuntimeConfig object with
+    /// the loaded configuration and initialized runtime services.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the configuration file exists but is in an invalid format, or if required configuration paths are
+    /// invalid.</exception>
     public static async Task<AmFtpdRuntimeConfig> LoadAsync(
             string configPath,
-            IFtpLogger logger)
+            IFtpLogger logger,
+            DatabaseManager? reuseDatabase = null)
     {
         // ------------------------------------------
         // Ensure JSON config exists (generate default on first run)
@@ -120,7 +139,7 @@ public static class AmFtpdConfigLoader
                 Vfs = new
                 {
                     Mounts = new[]
-        {
+                    {
                         new
                         {
                             VirtualPath  = "/",              // exposed to FTP clients
@@ -139,7 +158,7 @@ public static class AmFtpdConfigLoader
                 Groups = new { },  // Dictionary<string, GroupConfig>
                 FxpPolicy = (object?)null,
                 Irc = (object?)null,
-                
+
                 Zipscript = new
                 {
                     Enabled = true,
@@ -207,7 +226,7 @@ public static class AmFtpdConfigLoader
         var bindAddress = string.IsNullOrWhiteSpace(root.Server.BindAddress) ? null : root.Server.BindAddress;
 
         // Passive ports as tuple (Start, End)
-        string? passivePorts = null; 
+        string? passivePorts = null;
         if (root.Server.PassivePortStart > 0 && root.Server.PassivePortEnd >= root.Server.PassivePortStart)
             passivePorts = $"{root.Server.PassivePortStart}-{root.Server.PassivePortEnd}";
 
@@ -264,20 +283,33 @@ public static class AmFtpdConfigLoader
         ISectionStore? sectionStore = null;
 
         var backend = root.Storage.UserStoreBackend?.Trim() ?? "json";
-        var useBinary =
-            backend.Equals("binary", StringComparison.OrdinalIgnoreCase);
+        var useBinary = backend.Equals("binary", StringComparison.OrdinalIgnoreCase);
 
         if (useBinary)
+        {
             try
             {
-                var dbBaseDir = Path.GetDirectoryName(root.Storage.UsersDbPath)
-                                ?? throw new InvalidOperationException("Invalid UsersDbPath base directory.");
+                if (reuseDatabase is not null)
+                {
+                    // 🔒 REHASH PATH — DO NOT RE-ACQUIRE LOCK
+                    logger.Log(FtpLogLevel.Debug,
+                        "[DB-MANAGER] Reusing existing database instance (REHASH).");
 
-                db = DatabaseManager.Load(
-                    baseDir: dbBaseDir,
-                    masterPassword: root.Storage.MasterPassword,
-                    useMmapForUsers: root.Storage.UseMmap,
-                    debugLog: msg => logger.Log(FtpLogLevel.Debug, msg));
+                    db = reuseDatabase;
+                }
+                else
+                {
+                    // 🚀 FIRST STARTUP ONLY
+                    var dbBaseDir = Path.GetDirectoryName(root.Storage.UsersDbPath)
+                                    ?? throw new InvalidOperationException(
+                                        "Invalid UsersDbPath base directory.");
+
+                    db = DatabaseManager.Load(
+                        baseDir: dbBaseDir,
+                        masterPassword: root.Storage.MasterPassword,
+                        useMmapForUsers: root.Storage.UseMmap,
+                        debugLog: msg => logger.Log(FtpLogLevel.Debug, msg));
+                }
 
                 userStore = db.Users;
                 groupStore = db.Groups;
@@ -285,32 +317,62 @@ public static class AmFtpdConfigLoader
             }
             catch (Exception ex)
             {
-                logger.Log(FtpLogLevel.Error,
-                    $"Failed to initialize binary database backend: {ex.Message}");
+                logger.Log(
+                    FtpLogLevel.Error,
+                    $"Failed to initialize binary database backend: {ex.Message}",
+                    ex);
                 throw;
             }
+        }
         else
         {
-            logger.Log(FtpLogLevel.Info,
+            logger.Log(
+                FtpLogLevel.Info,
                 "Using JSON/config backend for users/groups/sections (UserStoreBackend != 'binary').");
 
             userStore = InMemoryUserStore.LoadFromFile(root.Storage.UsersDbPath);
-
             groupStore = null;
             sectionStore = null;
         }
 
-        // Dupe store (file-based)
+        // ------------------------------------------------------------------
+        // Dupe store
+        // ------------------------------------------------------------------
+        // Default location is next to the user DB.
         IDupeStore? dupeStore;
         var usersDbPath = root.Storage.UsersDbPath;
         var dbBaseDir_ = Path.GetDirectoryName(usersDbPath);
         if (string.IsNullOrWhiteSpace(dbBaseDir_))
-        {
             dbBaseDir_ = AppContext.BaseDirectory;
-        }
 
-        var dupePath = Path.Combine(dbBaseDir_!, "amftpd-dupe.json");
-        dupeStore = new FileDupeStore(dupePath);
+        var dupeBackend = (root.Storage.DupeStoreBackend ?? "file").Trim();
+        var dupeLocation = root.Storage.DupeStorePath;
+
+        if (dupeBackend.Equals("binary", StringComparison.OrdinalIgnoreCase))
+        {
+            var baseDir = string.IsNullOrWhiteSpace(dupeLocation)
+                ? Path.Combine(dbBaseDir_!, "amftpd-dupe")
+                : Path.GetFullPath(dupeLocation);
+
+            dupeStore = new BinaryDupeStore(baseDir);
+            logger.Log(FtpLogLevel.Info, $"Using binary dupe store. BaseDir: {baseDir}");
+        }
+        else
+        {
+            if (!dupeBackend.Equals("file", StringComparison.OrdinalIgnoreCase))
+            {
+                logger.Log(
+                    FtpLogLevel.Warn,
+                    $"Unknown DupeStoreBackend '{dupeBackend}'. Falling back to 'file'.");
+            }
+
+            var filePath = string.IsNullOrWhiteSpace(dupeLocation)
+                ? Path.Combine(dbBaseDir_!, "amftpd-dupe.json")
+                : Path.GetFullPath(dupeLocation);
+
+            dupeStore = new FileDupeStore(filePath);
+            logger.Log(FtpLogLevel.Info, $"Using file dupe store. Path: {filePath}");
+        }
 
         // ------------------------------------------
         // SectionManager (runtime FtpSection model)
@@ -424,7 +486,7 @@ public static class AmFtpdConfigLoader
             TlsConfig = tlsCfg,
             IdentConfig = root.Ident,
             VfsConfig = root.Vfs,
-            Database = db,
+            Database = reuseDatabase ?? db,
 
             SectionRules = root.Sections,
             DirectoryRules = root.DirectoryRules,
@@ -455,10 +517,31 @@ public static class AmFtpdConfigLoader
         };
     }
 
+    /// <summary>
+    /// Represents the result of reloading the AmFtpd server configuration, including the updated runtime configuration
+    /// and the list of configuration sections that were changed.
+    /// </summary>
+    /// <param name="Runtime">The updated runtime configuration after the reload operation completes.</param>
+    /// <param name="ChangedSections">A read-only list of configuration section names that were modified as a result of the reload. The list is empty
+    /// if no sections were changed.</param>
     public sealed record AmFtpdConfigReloadResult(
     AmFtpdRuntimeConfig Runtime,
     IReadOnlyList<string> ChangedSections);
 
+    /// <summary>
+    /// Asynchronously reloads the FTP server configuration from the specified file and determines which configuration
+    /// sections have changed compared to the current runtime configuration.
+    /// </summary>
+    /// <remarks>The method fully validates and loads the new configuration before comparing it to the current
+    /// configuration. If the comparison fails, the configuration is still reloaded, but the list of changed sections
+    /// may be incomplete. The operation logs progress and warnings using the provided logger.</remarks>
+    /// <param name="configPath">The path to the configuration file to load. Cannot be null.</param>
+    /// <param name="current">The current runtime configuration to compare against. Cannot be null.</param>
+    /// <param name="logger">The logger used to record informational and warning messages during the reload process. Cannot be null.</param>
+    /// <param name="cancellationToken">A cancellation token that can be used to cancel the reload operation.</param>
+    /// <returns>A task that represents the asynchronous reload operation. The task result contains an object describing the new
+    /// runtime configuration and a list of configuration sections that have changed.</returns>
+    /// <exception cref="ArgumentNullException">Thrown if configPath, current, or logger is null.</exception>
     public static async Task<AmFtpdConfigReloadResult> ReloadAsync(
         string configPath,
         AmFtpdRuntimeConfig current,
@@ -472,7 +555,11 @@ public static class AmFtpdConfigLoader
         logger.Log(FtpLogLevel.Info, $"Reloading configuration from '{configPath}'...");
 
         // Reuse existing loader to fully validate and build a new runtime snapshot.
-        var newRuntime = await LoadAsync(configPath, logger).ConfigureAwait(false);
+        var newRuntime = await LoadAsync(
+            configPath,
+            logger,
+            reuseDatabase: current.Database
+        ).ConfigureAwait(false);
 
         var changedSections = new List<string>();
 
@@ -545,7 +632,7 @@ public static class AmFtpdConfigLoader
 
         Directory.CreateDirectory(sectionsPath);
 
-        log.Log(FtpLogLevel.Info,$"No config file found at '{configPath}'. Generating default configuration.");
+        log.Log(FtpLogLevel.Info, $"No config file found at '{configPath}'. Generating default configuration.");
 
         // We use an anonymous object here so we don't need constructors
         // for AmFtpdTlsConfig, IdentConfig, etc. Property names match
@@ -641,6 +728,6 @@ public static class AmFtpdConfigLoader
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
         await File.WriteAllTextAsync(configPath, json, Encoding.UTF8, ct);
 
-        log.Log(FtpLogLevel.Info,$"Default configuration written to '{configPath}'. Edit it and restart amFTPd if needed.");
+        log.Log(FtpLogLevel.Info, $"Default configuration written to '{configPath}'. Edit it and restart amFTPd if needed.");
     }
 }

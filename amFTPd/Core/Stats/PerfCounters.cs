@@ -21,9 +21,18 @@
 namespace amFTPd.Core.Stats
 {
     /// <summary>
-    /// Simple, lock-free-ish performance counters for server and transfer stats.
-    /// Intended for stats/monitoring; no guarantees on perfect precision.
+    /// Best-effort, non-authoritative runtime telemetry.
     /// </summary>
+    /// <remarks>
+    /// PerfCounters are intended strictly for observability, monitoring,
+    /// diagnostics, and external reporting.
+    ///
+    /// Values are approximate, may be temporarily inconsistent, and MUST NOT
+    /// be used for enforcement, security decisions, throttling, or policy logic.
+    /// 
+    /// All behavioral decisions must be made by authoritative components
+    /// (e.g. FtpServer, HammerGuard, session state).
+    /// </remarks>
     public static class PerfCounters
     {
         // --- Connection / command level ------------------------------------
@@ -40,6 +49,7 @@ namespace amFTPd.Core.Stats
         private static long _totalTransfers;
         private static long _totalTransferMilliseconds;
         private static long _maxConcurrentTransfers;
+        private static long _transferTimeTicks;
 
         // --------------------------------------------------------------------
         // Connection counters
@@ -55,15 +65,7 @@ namespace amFTPd.Core.Stats
         /// <summary>Call when a control connection is closed (normal or error).</summary>
         public static void ConnectionClosed()
         {
-            while (true)
-            {
-                var current = Volatile.Read(ref _activeConnections);
-                if (current <= 0)
-                    return;
-
-                if (Interlocked.CompareExchange(ref _activeConnections, current - 1, current) == current)
-                    return;
-            }
+            Interlocked.Decrement(ref _activeConnections);
         }
 
         /// <summary>Call after a successfully parsed + dispatched command.</summary>
@@ -83,28 +85,29 @@ namespace amFTPd.Core.Stats
         // --------------------------------------------------------------------
 
         /// <summary>Called when a data transfer (upload or download) starts.</summary>
-        public static void OnTransferStarted()
+        public static void ObserveTransferStarted()
         {
             var current = Interlocked.Increment(ref _activeTransfers);
+            Interlocked.Increment(ref _totalTransfers);
 
-            // Track peak concurrent transfers
-            while (true)
+            long prev;
+            do
             {
-                var snapshot = Volatile.Read(ref _maxConcurrentTransfers);
-                if (current <= snapshot)
-                    break;
-
-                if (Interlocked.CompareExchange(ref _maxConcurrentTransfers, current, snapshot) == snapshot)
+                prev = Interlocked.Read(ref _maxConcurrentTransfers);
+                if (current <= prev)
                     break;
             }
+            while (Interlocked.CompareExchange(
+                       ref _maxConcurrentTransfers,
+                       current,
+                       prev) != prev);
         }
 
         /// <summary>Called when a data transfer completes.</summary>
-        public static void OnTransferCompleted(TimeSpan duration)
+        public static void ObserveTransferCompleted(TimeSpan elapsed)
         {
             Interlocked.Decrement(ref _activeTransfers);
-            Interlocked.Increment(ref _totalTransfers);
-            Interlocked.Add(ref _totalTransferMilliseconds, (long)duration.TotalMilliseconds);
+            Interlocked.Add(ref _transferTimeTicks, elapsed.Ticks);
         }
 
         /// <summary>Adds bytes for a completed transfer.</summary>
@@ -119,50 +122,62 @@ namespace amFTPd.Core.Stats
         }
 
         /// <summary>
-        /// Represents an immutable snapshot of statistics at a specific point in time.
+        /// Adds the specified number of bytes to the total uploaded bytes counter in a thread-safe manner.
         /// </summary>
-        public readonly struct Snapshot
+        /// <param name="bytes">The number of bytes to add to the uploaded bytes total. Must be greater than zero; values less than or equal
+        /// to zero are ignored.</param>
+        public static void AddUploadedBytes(long bytes)
         {
-            // Connections / commands
-            public long ActiveConnections { get; init; }
-            public long TotalConnections { get; init; }
-            public long TotalCommands { get; init; }
-            public long FailedLogins { get; init; }
-            public long AbortedTransfers { get; init; }
-
-            // Transfers
-            public long BytesUploaded { get; init; }
-            public long BytesDownloaded { get; init; }
-            public long ActiveTransfers { get; init; }
-            public long TotalTransfers { get; init; }
-            public double AverageTransferMilliseconds { get; init; }
-            public long MaxConcurrentTransfers { get; init; }
+            if (bytes > 0)
+                Interlocked.Add(ref _bytesUploaded, bytes);
+        }
+        
+        /// <summary>
+        /// Adds the specified number of bytes to the total downloaded byte count in a thread-safe manner.
+        /// </summary>
+        /// <param name="bytes">The number of bytes to add to the total downloaded count. Must be greater than 0 to have an effect.</param>
+        public static void AddDownloadedBytes(long bytes)
+        {
+            if (bytes > 0)
+                Interlocked.Add(ref _bytesDownloaded, bytes);
         }
 
         /// <summary>
-        /// Returns a snapshot of the current statistics.
+        /// Returns a point-in-time snapshot of telemetry counters.
         /// </summary>
-        public static Snapshot GetSnapshot()
+        /// <remarks>
+        /// Snapshot values are not guaranteed to be internally consistent
+        /// and should be treated as approximate.
+        /// </remarks>
+        public static PerfSnapshot GetSnapshot()
         {
-            var transfers = Volatile.Read(ref _totalTransfers);
-            var totalMs = Volatile.Read(ref _totalTransferMilliseconds);
+            var transfers = Interlocked.Read(ref _totalTransfers);
 
-            return new Snapshot
+            return new PerfSnapshot
             {
-                // connections / commands
-                ActiveConnections = Volatile.Read(ref _activeConnections),
-                TotalConnections = Volatile.Read(ref _totalConnections),
-                TotalCommands = Volatile.Read(ref _totalCommands),
-                FailedLogins = Volatile.Read(ref _failedLogins),
-                AbortedTransfers = Volatile.Read(ref _abortedTransfers),
+                ActiveConnections = Interlocked.Read(ref _activeConnections),
+                TotalConnections = Interlocked.Read(ref _totalConnections),
 
-                // transfers
-                BytesUploaded = Volatile.Read(ref _bytesUploaded),
-                BytesDownloaded = Volatile.Read(ref _bytesDownloaded),
-                ActiveTransfers = Volatile.Read(ref _activeTransfers),
+                ActiveTransfers = Interlocked.Read(ref _activeTransfers),
                 TotalTransfers = transfers,
-                AverageTransferMilliseconds = transfers == 0 ? 0.0 : (double)totalMs / transfers,
-                MaxConcurrentTransfers = Volatile.Read(ref _maxConcurrentTransfers)
+
+                BytesUploaded = Interlocked.Read(ref _bytesUploaded),
+                BytesDownloaded = Interlocked.Read(ref _bytesDownloaded),
+
+                FailedLogins = Interlocked.Read(ref _failedLogins),
+                AbortedTransfers = Interlocked.Read(ref _abortedTransfers),
+
+                TotalCommands = Interlocked.Read(ref _totalCommands),
+
+                AverageTransferMilliseconds =
+                    transfers > 0
+                        ? TimeSpan.FromTicks(
+                                Interlocked.Read(ref _transferTimeTicks) / transfers)
+                            .TotalMilliseconds
+                        : 0.0,
+
+                MaxConcurrentTransfers =
+                    Interlocked.Read(ref _maxConcurrentTransfers)
             };
         }
     }
