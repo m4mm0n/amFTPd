@@ -92,6 +92,10 @@ public sealed class PhysicalVfsProvider : IVfsProvider
         var rootFull = Path.GetFullPath(root);
         var combined = Path.GetFullPath(Path.Combine(rootFull, relative));
 
+        // Allow the root itself as a valid resolved path.
+        if (string.IsNullOrWhiteSpace(relative))
+            return rootFull;
+
         var rootPrefix = EnsureTrailingSeparator(rootFull);
         var comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
@@ -130,6 +134,11 @@ public sealed class PhysicalVfsProvider : IVfsProvider
             fsi = new DirectoryInfo(physicalPath);
         else if (File.Exists(physicalPath))
             fsi = new FileInfo(physicalPath);
+
+        // If the resolved physical target does not exist, treat it as not found.
+        // This allows later providers (e.g. section shortcuts) to respond.
+        if (fsi is null)
+            return VfsResolveResult.NotFound();
 
         var node = new VfsNode(
             fsi is FileInfo ? VfsNodeType.PhysicalFile : VfsNodeType.PhysicalDirectory,

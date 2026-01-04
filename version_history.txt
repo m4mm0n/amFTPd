@@ -5,6 +5,16 @@
   ╲______╱╲________╱╲____╱___╱╲________╱ ╲________╱╲________╱╲__╱_____╱  
                            [ VERSION HISTORY ]
 
+[ v0.7.0.1 - 04.01.2026 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+** Check the full changelog on GitHub for details! **
+
+[ v0.7.0.0 - 03.01.2026 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+** Check the full changelog on GitHub for details! **
+
 [ v0.6.0.0 - 14.12.2025 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?

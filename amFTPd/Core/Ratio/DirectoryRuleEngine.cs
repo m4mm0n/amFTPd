@@ -17,12 +17,6 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
 
-
-
-
-
-
-
 using amFTPd.Config.Ftpd.RatioRules;
 
 namespace amFTPd.Core.Ratio

@@ -1,7 +1,5 @@
 ﻿using amFTPd.Config.Ftpd;
-using amFTPd.Core.Ratio;
 using amFTPd.Credits;
-using amFTPd.Db;
 
 namespace amFTPd.Core.Services;
 
@@ -15,14 +13,16 @@ namespace amFTPd.Core.Services;
 public sealed class CreditService : ICreditService
 {
     private readonly IUserStore _users;
-    private readonly CreditEngine _engine;
+    private readonly CreditEngine? _engine;
 
     public CreditService(
         IUserStore users,
-        CreditEngine engine)
+        CreditEngine? engine)
     {
         _users = users ?? throw new ArgumentNullException(nameof(users));
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        // NOTE: JSON / config-only mode may not have a CreditEngine yet.
+        // In that case we operate in "no-ratio" mode (always allow, no adjustments).
+        _engine = engine;
     }
 
     public long GetCreditsKb(FtpUser user)
@@ -38,6 +38,10 @@ public sealed class CreditService : ICreditService
         out string? denialReason)
     {
         denialReason = null;
+
+        // No engine wired => treat as no-ratio.
+        if (_engine is null)
+            return true;
 
         if (user.IsNoRatio)
             return true;
@@ -62,6 +66,9 @@ public sealed class CreditService : ICreditService
         long sizeBytes,
         string? reason = null)
     {
+        if (_engine is null)
+            return;
+
         if (user.IsNoRatio)
             return;
 
@@ -83,6 +90,9 @@ public sealed class CreditService : ICreditService
         long sizeBytes,
         string? reason = null)
     {
+        if (_engine is null)
+            return;
+
         var newCredits = _engine.AwardCredits(
             user,
             sectionName,

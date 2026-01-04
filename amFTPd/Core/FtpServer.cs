@@ -28,7 +28,6 @@ using amFTPd.Core.Pre;
 using amFTPd.Core.ReleaseSystem;
 using amFTPd.Core.Runtime;
 using amFTPd.Core.Scene;
-using amFTPd.Core.Sections;
 using amFTPd.Core.Services;
 using amFTPd.Core.Stats;
 using amFTPd.Core.Stats.Live;
@@ -40,8 +39,10 @@ using amFTPd.Security.HammerGuard;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
-
-namespace amFTPd.Core;
+using amFTPd.Config.Ftpd.RatioRules;
+using amFTPd.Core;
+using SectionResolver = amFTPd.Core.Sections.SectionResolver;
+using FtpSection = amFTPd.Config.Ftpd.FtpSection;
 
 /// <summary>
 /// Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file
@@ -73,6 +74,8 @@ public sealed class FtpServer
     private readonly BanList _banList;
 
     private readonly Lock _connectionLock = new();
+    private readonly Lock _monitoringLock = new();
+
     // Active connections per IP
     private readonly ConcurrentDictionary<IPAddress, int> _connectionsPerIp = new();
     // Commands seen per IP (rolling, policy applied later)
@@ -82,7 +85,6 @@ public sealed class FtpServer
     private AmFtpdRuntimeConfig _runtime;
     private readonly string _configPath;
     private readonly Lock _configLock = new();
-    private readonly Lock _monitoringLock = new();
 
     // Release registry persistence (debounced) - avoids losing all release state on crash.
     private Timer? _releasePersistTimer;
@@ -318,10 +320,7 @@ public sealed class FtpServer
     {
         _cts = new();
 
-        var ip = string.IsNullOrWhiteSpace(Runtime.FtpConfig
-            .BindAddress)
-            ? IPAddress.Any
-            : IPAddress.Parse(Runtime.FtpConfig.BindAddress);
+        var ip = ResolveListenAddress(Runtime.FtpConfig.BindAddress);
 
         Runtime.Recovery.BeginRecovery();
         Runtime.Recovery.LoadAll();
@@ -350,6 +349,32 @@ public sealed class FtpServer
                 ex);
         }
 
+        // ---------------------------------------------------------------------------------
+        // Determine the physical root used by the legacy filesystem helpers (CWD/MKD/etc.).
+        // Prefer the "/" mount from VFS config if present; otherwise fall back to Server.RootPath.
+        // Also ensure the directory structure exists (useful for a fresh "test-site" layout).
+        // ---------------------------------------------------------------------------------
+        var baseDir = Path.GetDirectoryName(Runtime.ConfigFilePath) ?? AppContext.BaseDirectory;
+        var fsRoot = Runtime.FtpConfig.RootPath;
+
+        try
+        {
+            var rootMount = Runtime.VfsConfig.Mounts
+                .FirstOrDefault(m => string.Equals(m.VirtualRoot, "/", StringComparison.Ordinal));
+
+            if (rootMount is not null && !string.IsNullOrWhiteSpace(rootMount.PhysicalPath))
+                fsRoot = rootMount.PhysicalPath;
+
+            if (!Path.IsPathRooted(fsRoot))
+                fsRoot = Path.GetFullPath(Path.Combine(baseDir, fsRoot));
+
+            EnsureSiteLayout(fsRoot, Runtime.Sections.GetSections(), Runtime.DirectoryRules);
+        }
+        catch (Exception ex)
+        {
+            _log.Log(FtpLogLevel.Warn, "Failed to ensure site directory layout. Continuing.", ex);
+        }
+
         _listener = new(new IPEndPoint(ip, Runtime.FtpConfig.Port));
         _listener.Start();
         _log.Log(FtpLogLevel.Info, $"Server listening on {Runtime.FtpConfig.BindAddress}:{Runtime.FtpConfig.Port}");
@@ -360,8 +385,8 @@ public sealed class FtpServer
             _log.Log(FtpLogLevel.Info, "[IRC] IRC announcer started.");
         }
 
-        // Shared filesystem instance
-        var fs = new FtpFileSystem(Runtime.FtpConfig.RootPath);
+        // Shared filesystem instance (legacy path mapper)
+        var fs = new FtpFileSystem(fsRoot);
 
         ReloadScriptsForCurrentConfig();
 
@@ -535,6 +560,49 @@ public sealed class FtpServer
     }
 
 
+
+
+    private static IPAddress ResolveListenAddress(string? bindAddress)
+    {
+        if (string.IsNullOrWhiteSpace(bindAddress))
+            return IPAddress.Any;
+
+        var v = bindAddress.Trim();
+
+        // Common "all interfaces" values
+        if (v.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase))
+            return IPAddress.Any;
+
+        if (v.Equals("::", StringComparison.OrdinalIgnoreCase))
+            return IPAddress.IPv6Any;
+
+        // Direct IP?
+        if (IPAddress.TryParse(v, out var ip))
+            return ip;
+
+        // Hostname (e.g. "localhost", "myhost")
+        try
+        {
+            var addrs = Dns.GetHostAddresses(v);
+
+            // Prefer IPv4 if available, otherwise first.
+            IPAddress? first = null;
+            foreach (var a in addrs)
+            {
+                first ??= a;
+                if (a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                    return a;
+            }
+            if (first is not null)
+                return first;
+        }
+        catch
+        {
+            // fall through
+        }
+
+        throw new ArgumentException($"Invalid BindAddress '{bindAddress}'. Use an IP (e.g. 0.0.0.0 or 127.0.0.1) or a resolvable hostname.", nameof(bindAddress));
+    }
 
     private void RestartMonitoringEndpoints(AmFtpdRuntimeConfig runtime)
     {
@@ -731,6 +799,60 @@ public sealed class FtpServer
 
             _ => "C"
         };
+
+    private static void EnsureSiteLayout(
+        string physicalRoot,
+        IReadOnlyList<FtpSection> sections,
+        Dictionary<string, DirectoryRule> dirRules)
+    {
+        if (string.IsNullOrWhiteSpace(physicalRoot))
+            return;
+
+        Directory.CreateDirectory(physicalRoot);
+
+        static string CombineUnderRoot(string root, string virtualPath)
+        {
+            var rel = virtualPath.Replace('\\', '/')
+                .Trim()
+                .TrimStart('/')
+                .Replace('/', Path.DirectorySeparatorChar);
+
+            if (string.IsNullOrWhiteSpace(rel))
+                return root;
+
+            // Avoid weird inputs (e.g. "..") from configs.
+            if (rel.Contains("..", StringComparison.Ordinal))
+                return root;
+
+            return Path.Combine(root, rel);
+        }
+
+        // Create section roots
+        foreach (var s in sections)
+        {
+            if (string.IsNullOrWhiteSpace(s.VirtualRoot))
+                continue;
+
+            if (s.VirtualRoot == "/")
+                continue;
+
+            var p = CombineUnderRoot(physicalRoot, s.VirtualRoot);
+            Directory.CreateDirectory(p);
+        }
+
+        // Create directory rule prefixes (often overlaps with section roots, but harmless)
+        foreach (var rule in dirRules.Values)
+        {
+            if (string.IsNullOrWhiteSpace(rule.PathPrefix))
+                continue;
+
+            if (rule.PathPrefix == "/")
+                continue;
+
+            var p = CombineUnderRoot(physicalRoot, rule.PathPrefix);
+            Directory.CreateDirectory(p);
+        }
+    }
 
     private bool TryRegisterConnection(IPEndPoint remoteEndPoint, out string? rejectMessage)
     {

@@ -33,7 +33,7 @@ public sealed class MetricsEndpoint : IAsyncDisposable
         _runtime = runtime;
         _log = log;
 
-        _prefix = $"http://{bindAddress}:{port}/metrics/";
+        _prefix = $"http://{NormalizeHost(bindAddress)}:{port}/metrics/";
         _listener.Prefixes.Add(_prefix);
     }
 
@@ -157,6 +157,13 @@ public sealed class MetricsEndpoint : IAsyncDisposable
         {
             try { ctx.Response.OutputStream.Close(); } catch { }
         }
+    }
+
+    private string NormalizeHost(string bindAddress)
+    {
+        if (string.IsNullOrWhiteSpace(bindAddress)) return "localhost";
+        if (bindAddress is "0.0.0.0" or "::") return "+"; // “all interfaces” for HttpListener
+        return bindAddress;
     }
 
     public async ValueTask DisposeAsync()

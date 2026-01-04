@@ -19,9 +19,7 @@
  * ====================================================================================================
  */
 
-
 using amFTPd.Config.Daemon;
-using amFTPd.Core;
 using amFTPd.Logging;
 using amFTPd.Properties;
 using amFTPd.Utils;
@@ -48,7 +46,6 @@ namespace amFTPd
             var runtime = await AmFtpdConfigLoader.LoadAsync(configFile, logger);
 
             var server = new FtpServer(runtime, logger);
-
             var serverTask = server.StartAsync();
 
 

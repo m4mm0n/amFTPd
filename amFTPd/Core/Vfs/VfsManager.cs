@@ -55,14 +55,20 @@ public sealed class VfsManager
         // IMPORTANT: provider order = priority
         _providers = new List<IVfsProvider>
         {
+            // IMPORTANT: provider order = priority
+            // 1) Pure virtual namespaces
             new PreVfsProvider(preRegistry),
             new ReleaseVfsProvider(releaseRegistry),
             new GroupVfsProvider(releaseRegistry),
-            new ShortcutVfsProvider(sectionResolver),
+
+            // 2) Physical filesystem (wins when a real dir/file exists)
             new PhysicalVfsProvider(
                 mounts?.ToList() ?? [],
                 userMounts?.ToList() ?? [],
-                sectionResolver)
+                sectionResolver),
+
+            // 3) Section shortcuts (used when the physical target does not exist)
+            new ShortcutVfsProvider(sectionResolver)
         };
     }
 
@@ -93,6 +99,39 @@ public sealed class VfsManager
         }
 
         return VfsResolveResult.NotFound();
+    }
+
+    /// <summary>
+    /// Enumerates child nodes for a given virtual directory path.
+    /// </summary>
+    public IEnumerable<VfsNode> Enumerate(string virtualPath, FtpUser? user)
+    {
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            return Enumerable.Empty<VfsNode>();
+
+        virtualPath = NormalizeVirtualPath(virtualPath);
+
+        foreach (var provider in _providers)
+        {
+            if (!provider.CanHandle(virtualPath))
+                continue;
+
+            var result = provider.Resolve(virtualPath, user);
+            if (!result.Success)
+                continue;
+
+            try
+            {
+                return provider.Enumerate(virtualPath, user) ?? Enumerable.Empty<VfsNode>();
+            }
+            catch
+            {
+                // Enumeration is best-effort; callers handle empty results.
+                return Enumerable.Empty<VfsNode>();
+            }
+        }
+
+        return Enumerable.Empty<VfsNode>();
     }
 
     // ---------------------------------------------------------------------------------------------

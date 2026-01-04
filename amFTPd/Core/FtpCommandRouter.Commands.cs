@@ -33,7 +33,7 @@ using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
 using amFTPd.Utils.Cryptography;
-using System.Diagnostics.Metrics;
+using System;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -1028,8 +1028,9 @@ namespace amFTPd.Core
             }
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+            var absTarget = FtpPath.Normalize(_s.Cwd, target);
 
-            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            var vfsResult = _s.VfsManager?.Resolve(absTarget, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
                 await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 Not found.\r\n", ct);
@@ -1054,6 +1055,20 @@ namespace amFTPd.Core
                     64 * 1024,
                     leaveOpen: true);
 
+                static string VirtualDirLine(string virtualPath)
+                {
+                    var name = Path.GetFileName(virtualPath.TrimEnd('/'));
+                    if (string.IsNullOrEmpty(name)) name = "/";
+                    return $"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}";
+                }
+
+                static string VirtualFileLine(string virtualPath, string? content)
+                {
+                    var name = Path.GetFileName(virtualPath);
+                    var size = content is null ? 0 : Encoding.UTF8.GetByteCount(content);
+                    return $"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}";
+                }
+
                 switch (node.Type)
                 {
                     case VfsNodeType.PhysicalDirectory:
@@ -1070,24 +1085,42 @@ namespace amFTPd.Core
                         break;
 
                     case VfsNodeType.VirtualDirectory:
-                    {
-                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                        if (string.IsNullOrEmpty(name)) name = "/";
-                        await wr.WriteLineAsync(
-                            $"drwxr-xr-x 1 owner group 0 Jan 01 00:00 {name}");
-                        break;
-                    }
+                        {
+                            // If the provider supports enumeration, list children; otherwise show a single entry.
+                            var children = _s.VfsManager?.Enumerate(node.VirtualPath, _s.Account)
+                                ?.ToList() ?? [];
+
+                            if (children.Count == 0)
+                            {
+                                await wr.WriteLineAsync(VirtualDirLine(node.VirtualPath));
+                                break;
+                            }
+
+                            foreach (var child in children)
+                            {
+                                switch (child.Type)
+                                {
+                                    case VfsNodeType.PhysicalDirectory:
+                                    case VfsNodeType.PhysicalFile:
+                                        if (child.FileSystemInfo is not null)
+                                            await wr.WriteLineAsync(_fs.ToUnixListLine(child.FileSystemInfo));
+                                        break;
+
+                                    case VfsNodeType.VirtualDirectory:
+                                        await wr.WriteLineAsync(VirtualDirLine(child.VirtualPath));
+                                        break;
+
+                                    case VfsNodeType.VirtualFile:
+                                        await wr.WriteLineAsync(VirtualFileLine(child.VirtualPath, child.VirtualContent));
+                                        break;
+                                }
+                            }
+                            break;
+                        }
 
                     case VfsNodeType.VirtualFile:
-                    {
-                        var name = Path.GetFileName(node.VirtualPath);
-                        var size = node.VirtualContent is null
-                            ? 0
-                            : Encoding.UTF8.GetByteCount(node.VirtualContent);
-                        await wr.WriteLineAsync(
-                            $"-rw-r--r-- 1 owner group {size} Jan 01 00:00 {name}");
+                        await wr.WriteLineAsync(VirtualFileLine(node.VirtualPath, node.VirtualContent));
                         break;
-                    }
                 }
 
                 // REQUIRED
@@ -1120,8 +1153,9 @@ namespace amFTPd.Core
             }
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+            var absTarget = FtpPath.Normalize(_s.Cwd, target);
 
-            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            var vfsResult = _s.VfsManager?.Resolve(absTarget, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
                 await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 Not found.\r\n", ct);
@@ -1156,13 +1190,30 @@ namespace amFTPd.Core
                             await wr.WriteLineAsync(Path.GetFileName(file));
                         break;
 
+                    case VfsNodeType.VirtualDirectory:
+                        {
+                            var children = _s.VfsManager?.Enumerate(node.VirtualPath, _s.Account)
+                                ?.ToList() ?? [];
+
+                            if (children.Count == 0)
+                                break;
+
+                            foreach (var child in children)
+                            {
+                                var name = Path.GetFileName(child.VirtualPath.TrimEnd('/'));
+                                if (!string.IsNullOrWhiteSpace(name))
+                                    await wr.WriteLineAsync(name);
+                            }
+
+                            break;
+                        }
+
                     default:
-                    {
-                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                        if (string.IsNullOrEmpty(name)) name = "/";
-                        await wr.WriteLineAsync(name);
+                        // Single file
+                        var singleName = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
+                        if (string.IsNullOrEmpty(singleName)) singleName = "/";
+                        await wr.WriteLineAsync(singleName);
                         break;
-                    }
                 }
 
                 return 0L;
@@ -1194,8 +1245,9 @@ namespace amFTPd.Core
             }
 
             var target = string.IsNullOrWhiteSpace(arg) ? "." : arg;
+            var absTarget = FtpPath.Normalize(_s.Cwd, target);
 
-            var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
+            var vfsResult = _s.VfsManager?.Resolve(absTarget, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
                 await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 MLSD failed.\r\n", ct);
@@ -1236,22 +1288,48 @@ namespace amFTPd.Core
                         break;
 
                     case VfsNodeType.VirtualDirectory:
-                    {
-                        var name = Path.GetFileName(node.VirtualPath.TrimEnd('/'));
-                        if (string.IsNullOrEmpty(name)) name = "/";
-                        await wr.WriteLineAsync($"type=dir;perm=el; {name}");
-                        break;
-                    }
+                        {
+                            var children = _s.VfsManager?.Enumerate(node.VirtualPath, _s.Account)
+                                ?.ToList() ?? [];
+
+                            foreach (var child in children)
+                            {
+                                var name = Path.GetFileName(child.VirtualPath.TrimEnd('/'));
+                                if (string.IsNullOrEmpty(name))
+                                    continue;
+
+                                switch (child.Type)
+                                {
+                                    case VfsNodeType.PhysicalDirectory:
+                                    case VfsNodeType.PhysicalFile:
+                                        if (child.FileSystemInfo is not null)
+                                            await wr.WriteLineAsync(_fs.ToMlsdLine(child.FileSystemInfo));
+                                        break;
+
+                                    case VfsNodeType.VirtualDirectory:
+                                        await wr.WriteLineAsync($"type=dir;perm=el; {name}");
+                                        break;
+
+                                    case VfsNodeType.VirtualFile:
+                                        var size = child.VirtualContent is null
+                                            ? 0
+                                            : Encoding.UTF8.GetByteCount(child.VirtualContent);
+                                        await wr.WriteLineAsync($"type=file;size={size};perm=rl; {name}");
+                                        break;
+                                }
+                            }
+                            break;
+                        }
 
                     case VfsNodeType.VirtualFile:
-                    {
-                        var name = Path.GetFileName(node.VirtualPath);
-                        var size = node.VirtualContent is null
-                            ? 0
-                            : Encoding.UTF8.GetByteCount(node.VirtualContent);
-                        await wr.WriteLineAsync($"type=file;size={size};perm=rl; {name}");
-                        break;
-                    }
+                        {
+                            var name = Path.GetFileName(node.VirtualPath);
+                            var size = node.VirtualContent is null
+                                ? 0
+                                : Encoding.UTF8.GetByteCount(node.VirtualContent);
+                            await wr.WriteLineAsync($"type=file;size={size};perm=rl; {name}");
+                            break;
+                        }
                 }
 
                 return 0L;
@@ -1575,7 +1653,7 @@ namespace amFTPd.Core
             Directory.CreateDirectory(physDir);
 
             var section = GetSectionForVirtual(virtTarget);
-            if (Server!.IsSectionBlocked(section.Name, out var reason))
+            if (Server.IsSectionBlocked(section.Name, out var reason))
             {
                 await _s.WriteAsync(
                     $"550 Section temporarily unavailable: {reason}\r\n",
@@ -2786,6 +2864,52 @@ namespace amFTPd.Core
             value is true ? "ALLOW"
             : value is false ? "DENY"
             : "INHERIT";
+
+        private static string ExtractListPathArg(string rawArg)
+        {
+            // FTP clients sometimes send LIST/NLST/MLSD options like "-la" or "-a /path".
+            // We treat the last non-option token as a path; if none, we default to ".".
+            if (string.IsNullOrWhiteSpace(rawArg))
+                return ".";
+
+            var s = rawArg.Trim();
+
+            if (!s.StartsWith("-", StringComparison.Ordinal))
+                return s;
+
+            var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (var i = parts.Length - 1; i >= 0; i--)
+            {
+                var p = parts[i];
+                if (p.Length == 0)
+                    continue;
+
+                if (!p.StartsWith("-", StringComparison.Ordinal))
+                    return p;
+            }
+
+            return ".";
+        }
+
+        private static string ExtractListTarget(string? arg)
+        {
+            if (string.IsNullOrWhiteSpace(arg))
+                return ".";
+
+            // Common FTP clients send options like: "-la". We treat the last non-option token as a path.
+            var parts = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            for (var i = parts.Length - 1; i >= 0; i--)
+            {
+                var p = parts[i];
+                if (p.Length == 0)
+                    continue;
+                if (p[0] == '-')
+                    continue;
+                return p;
+            }
+
+            return ".";
+        }
 
         /// <summary>
         /// Fires a logical SITE event into the site AMScript engine (site.msl),
