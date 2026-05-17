@@ -15,6 +15,14 @@ if (-not $currentTag) {
     Write-Error "GITHUB_REF is not a tag ref. Current value: $($env:GITHUB_REF)"
 }
 
+if (Test-Path $ChangelogPath) {
+    $existingChangelog = Get-Content $ChangelogPath -Raw
+    if ($existingChangelog -match "^\[\s*$([regex]::Escape($currentTag))\s+-") {
+        Write-Host "$ChangelogPath already starts with $currentTag. Keeping curated release notes."
+        exit 0
+    }
+}
+
 # Find previous tag (newest first, excluding current)
 $tags = git tag --sort=-creatordate | Where-Object { $_ -ne $currentTag }
 $previousTag = $tags | Select-Object -First 1
