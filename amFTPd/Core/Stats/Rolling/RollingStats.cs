@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Stats.Rolling;
+namespace amFTPd.Core.Stats.Rolling;
 
 /// <summary>
 /// Provides rolling statistical counters for commands, data transfers, and bandwidth usage over multiple time

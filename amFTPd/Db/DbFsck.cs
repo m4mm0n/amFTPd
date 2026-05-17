@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           DbFsck.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -23,9 +23,9 @@
 
 
 
-using amFTPd.Utils;
 using System.Security.Cryptography;
 using System.Text;
+using amFTPd.Utils;
 
 namespace amFTPd.Db
 {
@@ -429,13 +429,12 @@ namespace amFTPd.Db
 
         private static byte[] DeriveKey(string pw, byte[] salt)
         {
-            using var pbk = new Rfc2898DeriveBytes(
+            return Rfc2898DeriveBytes.Pbkdf2(
                 Encoding.UTF8.GetBytes(pw),
                 salt,
                 200_000,
-                HashAlgorithmName.SHA256);
-
-            return pbk.GetBytes(32);
+                HashAlgorithmName.SHA256,
+                32);
         }
     }
 }

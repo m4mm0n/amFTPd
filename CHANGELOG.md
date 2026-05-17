@@ -1,70 +1,373 @@
+[ v0.8.0.0 - 17.05.2026 ]
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Whats new?
+* Project upgraded to .NET 10 with repo-wide SDK, formatting, nullable, and
+  analyzer defaults.
+* Windows Service mode removed completely. amFTPd now runs as an explicit
+  foreground daemon, Docker container, or Linux/systemd-managed process rather
+  than exposing a privileged Windows Service install/run path.
+* QuickLog is now the default and only daemon logger through ZLS.QuickLog 2.2.0.
+  The previous console/file/combined logger stack was removed.
+* Added runtime logging controls: SITE LOG STATUS, SITE LOG EVERYTHING,
+  SITE LOG SOMETHING, and SITE LOG QUIET.
+* Hardened QuickLog startup so a locked configured log file falls back to a
+  process-specific QuickLog file instead of crashing the daemon.
+* Strengthened ioFTPD/glFTPd replacement coverage around migration validation,
+  nuke/unnuke state, no-ratio credits, admin authorization, FXP policy, active
+  mode denial, and scene-readiness workflows.
+* Release cleanup: proper README, .NET 10 Dockerfile, .dockerignore, updated
+  GitHub Actions release workflow, refreshed release checklist, and cleaned
+  source formatting.
+* Version bumped to 0.8.0.0.
+
+Validation:
+* dotnet format amFTPd.sln --verify-no-changes --verbosity minimal
+* dotnet build amFTPd.sln -c Release -warnaserror
+* dotnet test amFTPd.Tests\amFTPd.Tests.csproj -c Release --no-build
+* dotnet .\amFTPd\bin\Release\net10.0\amFTPd.dll amftpd.json --validate
+* dotnet publish amFTPd\amFTPd.csproj -c Release -o Ready2Release\amFTPd
+* .\Ready2Release\amFTPd\amFTPd.exe amftpd.json --validate
+* Published daemon startup/control smoke returned the configured 220 FTP
+  greeting.
+
+Detailed subsystem notes from the 0.8 development phase follow.
+
+---
+
+Plugin / Extension API
+----------------------
+
+amFTPd/Config/Daemon/AmFtpdConfigLoader.cs:
+* LoadAsync — fixed critical bug: `return new AmFtpdRuntimeConfig {...}` was
+  returning before the plugin loading block, making all plugin code unreachable.
+  Changed to `var runtime = new AmFtpdRuntimeConfig {...}; ... return runtime;`
+  so the plugin assembly scan and host initialization now execute.
+* LoadAsync — added `CancellationToken cancellationToken = default` parameter
+  so the plugin loading loop can honour cancellation.
+
+amFTPd/Config/Daemon/AmFtpdConfigRoot.cs:
++ Plugins property added: `List<AmFtpdPluginEntry>? Plugins = null`
++ Acme property added: `AmFtpdAcmeConfig? Acme = null`
++ Webhooks property added: `AmFtpdWebhookConfig? Webhooks = null`
+
+amFTPd/Config/Daemon/AmFtpdPluginEntry.cs (NEW):
+* JSON-deserialisable record describing a single plugin entry in the Plugins
+  array: Path (DLL path), Enabled (default true), Settings (string dictionary
+  passed verbatim to IPluginContext.Settings).
+
+amFTPd/Core/Plugins/PluginLoadContext.cs (NEW):
+* Custom AssemblyLoadContext (isCollectible: true) providing plugin isolation.
+* Uses AssemblyDependencyResolver to locate the plugin's own NuGet dependencies
+  from the .deps.json file next to the DLL.
+* Returns null for amFTPd.Plugin.Abstractions so that type is always loaded
+  from the host ALC — required for interface identity across the isolation
+  boundary.
+
+amFTPd/Core/Plugins/PluginHost.cs (NEW):
+* Manages the lifecycle of all loaded plugin instances.
+* LoadAllAsync: scans the Plugins config array, creates a PluginLoadContext per
+  DLL, resolves IAmFtpdPlugin implementations via reflection, calls
+  InitializeAsync on each.
+* TryHandleSiteCommandAsync: iterates ISiteCommandPlugin instances whose
+  RegisteredVerbs contain the requested verb, invokes ExecuteAsync, returns
+  true on first handler that returns true.
+* TryAuthenticateAsync: iterates IAuthProviderPlugin instances, invokes
+  AuthenticateAsync, returns the first non-null result.
+* WireEventHandlers: subscribes IEventHandlerPlugin.OnEventAsync to the
+  FtpEventBus for each registered event handler plugin.
+* DisposeAsync: calls DisposeAsync on every plugin and unloads each
+  PluginLoadContext.
+* Internal fix: removed public IPluginContext parameter from
+  TryHandleSiteCommandAsync — the context is resolved internally via the _all
+  list, so callers (FtpCommandRouter) do not need to know about it.
+
+amFTPd/Core/FtpCommandRouter.Commands.cs:
+* SITE handler — added plugin fallback block after the built-in SITE command
+  dictionary lookup fails. When _runtime.PluginHost is non-null,
+  TryHandleSiteCommandAsync is invoked with the verb, argument, username, role
+  flags, remote IP, current path, and an async write delegate. If the plugin
+  handles the command the router returns early; otherwise the original
+  "502 Unknown SITE command" path is reached.
+* PASS handler — restructured authentication flow to support auth plugin
+  fallback. Built-in TryAuthenticate is attempted first. On failure, if the
+  deny reason is not a policy block (concurrent limit, etc.) and a PluginHost
+  is present, TryAuthenticateAsync is called. On PluginAuthOutcome.Authenticated,
+  FindUser is called to populate the account record and execution jumps to
+  PostAuth: via goto. On PluginAuthOutcome.Rejected the session is denied
+  immediately. Added `if (account is null) { return; }` null-guard immediately
+  after the PostAuth: label to satisfy the compiler's flow analysis.
+
+amFTPd/Core/FtpServer.cs:
+* StartAsync — added `Runtime.PluginHost?.WireEventHandlers(Runtime.EventBus)`
+  call before the TCP listener opens, so plugin event handlers are subscribed
+  before any client can connect and trigger events.
+* ReloadConfigurationAsync — added disposal of the old runtime's PluginHost
+  before swapping runtimes, and wires the new runtime's PluginHost event
+  handlers after the swap completes.
+* Stop — added `Runtime.PluginHost?.DisposeAsync().AsTask().Wait()` to the
+  shutdown sequence, ensuring plugins are cleanly unloaded and their
+  AssemblyLoadContexts are released.
+
+Plugins/amFTPd.SamplePlugin/SamplePlugin.cs (NEW):
+* Reference / tutorial plugin implementing all three plugin interfaces:
+  ISiteCommandPlugin — registers SITE HELLO and SITE PING commands.
+  IAuthProviderPlugin — optional magic-password bypass (dev only) controlled
+  by Settings["MagicPassword"].
+  IEventHandlerPlugin — logs Upload events to a configurable file path
+  (Settings["LogPath"]).
+
+docs/Plugins.md (NEW):
+* Developer guide covering: interface contracts (IAmFtpdPlugin, ISiteCommandPlugin,
+  IAuthProviderPlugin, IEventHandlerPlugin), IPluginContext members (Settings,
+  Logger, RuntimeConfig), project setup (.csproj targeting net10.0, referencing
+  Abstractions), deployment (dotnet publish into plugins/ subdirectory with
+  .deps.json), REHASH behaviour (plugins are unloaded and reloaded),
+  AssemblyLoadContext isolation explanation, security considerations.
+
+---
+
+ACME / Let's Encrypt
+---------------------
+
+amFTPd/Config/Daemon/AmFtpdAcmeConfig.cs (NEW):
+* JSON-deserialisable record for ACME v2 automatic TLS:
+  Enabled, Domain, Email, AccountKeyPath (default "acme-account.pem"),
+  DirectoryUrl (default Let's Encrypt production), RenewalThresholdDays (30),
+  ChallengePort (80).
+* When Enabled is true the daemon provisions and auto-renews its certificate
+  from the configured CA rather than using Tls.PfxPath.
+
+---
+
+HTTP Webhooks
+-------------
+
+amFTPd/Config/Daemon/AmFtpdWebhookConfig.cs (NEW):
+* Configuration for the outbound HTTP webhook dispatcher.
+* Per-event URL slots: UploadUrl, DownloadUrl, NukeUrl, UnnukeUrl, PreUrl,
+  RaceCompleteUrl, LoginUrl, LogoutUrl, RequestUrl, DeleteUrl, DefaultUrl.
+* Enabled master switch (default true).
+* SigningSecret — when set, every request carries
+  X-AmFTPd-Signature: sha256=<lowercase HMAC-SHA256 hex>.
+* TimeoutSeconds (5) and MaxRetries (1) for delivery reliability.
+* Documented JSON payload shape: event, timestamp, data.{user, group, section,
+  virtualPath, releaseName, bytes, reason, remoteHost, extra}.
+
+---
+
+REST API
+---------
+
+amFTPd/Core/Api/RestApiRouter.cs (NEW):
+* JSON REST API served on /api/* by the existing StatusEndpoint HttpListener.
+* Uses the same AuthToken gate as the status and metrics endpoints.
+* GET  /api/          — endpoint index.
+* GET  /api/sessions  — active FTP sessions (sessionId, user, group, remoteIp,
+  transferDir, transferFile, bytesCompleted, bytesTotal).
+* GET  /api/users     — all user accounts (userName, group, secondaryGroups,
+  isAdmin, isSiteop, disabled, isNoRatio, maxConcurrentLogins, creditsKb,
+  maxUploadKbps, maxDownloadKbps, allowFxp, allowUpload, allowDownload).
+* GET  /api/users/{name} — single user by name (404 if missing).
+* GET  /api/stats     — aggregate counters from PerfCounters.GetSnapshot() plus
+  rolling transfer rate windows (5s, 1m, 5m).
+* GET  /api/stats/sections — per-section live stats (activeUsers, uploads,
+  downloads, bytesUploaded, bytesDownloaded).
+* GET  /api/stats/top?window=all|today|week|month&count=N&section=S — top
+  uploaders leaderboard via LeaderboardService; count capped at 100.
+* GET  /api/dupes/search?q=...&limit=N — dupe database search; limit capped
+  at 200; 503 if no dupe store configured.
+* GET  /api/pres?count=N&section=S — recent pre registrations from PreRegistry.
+* POST /api/kick      — kick all sessions for a user; writes audit log entry.
+* POST /api/ban       — add permanent or timed IP ban via BanList; writes audit
+  log entry.
+* POST /api/pre       — register a pre in PreRegistry + DupeStore, publish
+  FtpEvent.Pre to the event bus; writes audit log entry.
+* POST /api/rehash    — call Server.ReloadConfigurationAsync(), return success
+  flag and message; writes audit log entry.
+* All responses use camelCase JSON (JsonNamingPolicy.CamelCase), null fields
+  omitted (JsonIgnoreCondition.WhenWritingNull).
+
+amFTPd/Config/Daemon/AmFtpdStatusConfig.cs:
++ RestApiEnabled property added (bool, default true) — enables /api/* routes.
++ AdminDashboardEnabled property added (bool, default true) — serves SPA at /admin.
++ MetricsEnabled property added (bool, default true).
++ MetricsPort property added (int?, default Port+1).
++ AuthToken property added (string?).
++ IncludeIpStatsByDefault property added (bool, default true).
++ MaxIpEntries property added (int, default 10).
+
+docs/RestAPI.md (NEW):
+* Full API reference: all endpoints with request/response shapes, query
+  parameters, error codes, curl examples, Prometheus metrics endpoint notes.
+
+---
+
+Migration Validation Tool
+--------------------------
+
+amFTPd/Core/Dupe/IDupeStore.cs:
++ GetAll() added: IEnumerable<DupeEntry> — required for bulk comparison in the
+  migration validator.
+
+amFTPd/Core/Dupe/FileDupeStore.cs:
++ GetAll() implemented: snapshots _releases.Values via DupeEntryMapper.ToEntry
+  under read lock, returns a materialized List<DupeEntry>.
+
+amFTPd/Core/Dupe/BinaryDupeStore.cs:
++ GetAll() implemented: iterates _index.Values, calls ReadMeta(offset) per
+  entry under read lock, returns a materialized List<DupeEntry>.
+
+amFTPd/Core/Migration/MigrationReport.cs (NEW):
+* Top-level MigrationReport: GeneratedAt, SourceFlavor, SourcePath, ConfigPath,
+  Status ("Ok"/"Warnings"/"Errors"), Summary (one-line human-readable string).
+* UserMigrationReport: SourceCount, TargetCount, MissingInTarget (list of
+  usernames), CreditMismatches (list of CreditMismatch).
+* GroupMigrationReport: SourceCount, TargetCount, MissingInTarget (group names).
+* DupeMigrationReport: SourceCount, TargetCount, MissingCount (int),
+  MissingInTarget (up to 50 MissingDupeEntry samples).
+* NukeMigrationReport: SourceCount, TargetNukedCount, MissingNukeFlagCount,
+  MissingNukeFlag (up to 50 MissingNukeEntry samples).
+* Supporting types: CreditMismatch (Username, SourceKb, TargetKb),
+  MissingDupeEntry (Section, ReleaseName, Group),
+  MissingNukeEntry (Section, Path, Reason, Multiplier).
+* JSON-serializable throughout for --json <file> output.
+
+amFTPd/Core/Migration/MigrationValidator.cs (NEW):
+* Static ValidateAsync(sourcePath, runtime, logger, ct): entry point that
+  auto-detects source flavor via ImportFlavorDetector, runs all four
+  sub-validators, sets overall Status and builds Summary string.
+* ValidateUsers: parses source via IoUserParser or GlUserParser, compares
+  against runtime.UserStore.GetAllUsers(), flags missing accounts and credit
+  deltas exceeding CreditToleranceKb (1024 KiB = 1 MiB).
+* ValidateGroups: parses source via IoGroupParser or GlGroupParser, builds
+  target group name set from runtime.GroupStore (if present) or falls back to
+  deriving names from all user PrimaryGroup/SecondaryGroups fields.
+* ValidateDupes: parses source via IoDupeParser or GlDupeParser, builds a
+  HashSet of DupeEntry.MakeKey(section, release) from IDupeStore.GetAll(),
+  counts and samples missing entries.
+* ValidateNukes: parses source via IoNukeParser or GlNukeParser, extracts
+  release name from virtual path via Path.GetFileName, looks up entry in dupe
+  store and checks IsNuked flag; counts and samples missing flags.
+* SetOverallStatus: Errors if any users or groups are missing (data loss);
+  Warnings if credit mismatches, missing dupes, or missing nuke flags exist;
+  Ok otherwise.
+* Constants: MaxMissingDupeSamples = 50, MaxMissingNukeSamples = 50,
+  CreditToleranceKb = 1024.
+
+amFTPd/Program.cs:
++ --check-migration <source-dir> CLI mode added.
++ --json <file> option for --check-migration: writes structured JSON report.
++ --flavor <io|gl> option: overrides auto-detection.
++ RunMigrationCheckAsync method: loads config, calls MigrationValidator.ValidateAsync,
+  writes human-readable report to stdout with colour-coded sections.
++ PrintMigrationSection helper: prints per-section counts and sample lists with
+  colour coding (green = ok, yellow = warnings, red = errors).
+* Exit codes: 0 = Ok, 1 = Warnings, 2 = Errors (consistent with --validate).
+
+docs/Migration.md (NEW):
+* Step-by-step migration guide for ioFTPD and glFTPD.
+* Covers: source auto-detection heuristics, migration checklist, dry-run
+  preview, live import, post-migration --check-migration validation, report
+  sections, exit codes, subsystem-level details (user/group/dupe/nuke file
+  formats), ioFTPD→amFTPd and glFTPD→amFTPd configuration key mapping tables,
+  known limitations (MD5 passwords, glFTPD blowfish sitekey, IRC scripts).
+
+---
+
+Documentation Site
+------------------
+
+docs/GettingStarted.md (NEW):
+* Linux (Debian/Ubuntu), Windows, and Docker install procedures.
+* Minimal amftpd.json skeleton with all required fields.
+* FTP root and data directory creation commands.
+* TLS certificate generation: self-signed (openssl req/pkcs12) and
+  Let's Encrypt / ACME block reference.
+* First user creation via JSON seed file and via REST API.
+* Subsequent user management with SITE ADDUSER / CHGRP / SETLIMITS.
+* Section configuration example (MP3, 0DAY with ratio and SFV-first options).
+* Config validation usage (--validate exit codes 0/1/2).
+* systemd service setup (unit file, daemon-reload, enable, SIGHUP reload).
+* Windows Service mode intentionally removed from the 0.8 posture to avoid the privileged SCM attack surface.
+* Navigation table to all other docs.
+
+docs/Configuration.md (NEW):
+* Complete reference for every JSON key in amftpd.json.
+* Covers all 17 top-level blocks: Server, Tls, Storage, Ident, Vfs, Sections,
+  DirectoryRules, RatioRules, Groups, FxpPolicy, Irc, Zipscript, Status,
+  Compatibility, Webhooks, Acme, Plugins.
+* Each block documents field name, type, default value, and description.
+* Includes annotated full-example JSON at the end.
+
+docs/SiteCommands.md (NEW):
+* Complete reference for all 100+ SITE commands, organized by category:
+  User Management, IP/IDENT Management, Credits, Transfer Limits, Sessions,
+  Statistics, Races, Sections & Groups, Nukes, Pre System, Dupe Database,
+  SFV/Zipscript, Virtual File System, Oneliners, Requests, Affiliates,
+  Administration, Migration/Import, Diagnostics, Information.
+* Each command documents: permission level (User/Siteop/Admin), full syntax,
+  and a plain-English description of behaviour.
+* Compatibility alias table at the end mapping legacy ioFTPD/glFTPD verbs.
+
+docs/RestAPI.md (NEW):
+* Full REST API reference (see amFTPd/Core/Api/RestApiRouter.cs entry above).
+
+docs/VFS.md (EXPANDED from 20-line stub):
+* Concepts: virtual path, physical path, mount, longest-prefix matching.
+* Global mounts: table of fields (VirtualPath, PhysicalPath, IsReadOnly).
+* Per-user mounts: Username + Mount object, resolution priority.
+* Mount resolution algorithm (user mounts → global mounts, longest prefix).
+* Virtual files: injecting read-only text files into directory listings.
+* VFS symlinks: SITE LINK / UNLINK / LINKS commands and resolution behaviour.
+* Path normalisation: relative→absolute, .. collapse, trailing slash rules.
+* Windows path notes: forward-slash and UNC path support.
+* Common configuration patterns (single-root, multi-drive, read-only archive).
+
+docs/IDENT.md (EXPANDED from 11-line stub):
+* Overview of RFC 1413 and security considerations.
+* All IdentMode flags: Disabled, Standard, LoggingOnly, StrictUserMatch,
+  GroupMapping, ReverseDnsCheck, TlsBinding, Caching.
+* Timeout and caching configuration (TimeoutMs, CacheTtlSeconds).
+* Enforcement flags and their interaction with LoggingOnly mode.
+* GroupMappings: IdentUsername (supports * glob), FtpGroup, session-scoped
+  override (user record is not modified).
+* SITE IDENT / SITE REQIDENT command descriptions.
+* TlsBinding two-factor check explanation.
+* Log output format.
+
+docs/Migration.md (NEW — see Migration Validation Tool section above).
+
+docs/FAQ.md (NEW):
+* Troubleshooting guide with sections for: Installation, TLS/Certificates,
+  Logins, Transfers, Nukes, IRC, Webhooks, Migration, REST API, Plugins,
+  Performance, and Logging.
+* Covers the most common failure modes with specific diagnosis steps and
+  remediation commands.
+
+docs/index.md (NEW):
+* Master documentation hub with a categorised navigation table.
+* Architecture overview ASCII diagram showing FTP clients → FtpServer →
+  VFS/UserStore/DupeStore/PluginHost/EventBus → IRC/Webhooks, plus
+  REST/Prometheus side-channel.
+* Configuration at a glance: minimal amftpd.json annotated with block names.
+
+PLAN.md:
+* Phase 4 item 10 (Comprehensive documentation site) ticked [x].
+* Tracking table: Phase 4 updated to 10/10 ✅ Complete.
+* Summary line updated: all four phases complete.
+
+
 [ v0.7.1.0 - 04.01.2026 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Whats new?
-* Automated changelog based on git diff between v0.7.0.0..v0.7.1.0...
+* Maintenance release for the v0.7 line.
+* Fixed LIST, MLSD, NLST, and STOR path handling.
+* Improved daemon startup layout creation and listen-address resolution.
+* Improved metrics/status endpoint host normalization and authorization paths.
+* Updated ratio, credit, physical VFS, and VFS enumeration behavior.
+* Updated version history and release metadata.
 
-CHANGELOG.md:
-* changed...
-
-amFTPd/Config/Ftpd/FtpSection.cs:
-* changed...
-
-amFTPd/Core/FtpCommandRouter.Commands.cs:
-+ ExtractListPathArg added...
-+ ExtractListTarget added...
-* LIST changed...
-* MLSD changed...
-* NLST changed...
-* STOR changed...
-
-amFTPd/Core/FtpServer.cs:
-* Dispose changed...
-+ EnsureSiteLayout added...
-+ ResolveListenAddress added...
-* StartAsync changed...
-
-amFTPd/Core/Monitoring/MetricsEndpoint.cs:
-+ NormalizeHost added...
-
-amFTPd/Core/Monitoring/StatusEndpoint.cs:
-* AnonymizeIp changed...
-* BuildStatusPayload changed...
-* DisposeAsync changed...
-* EscapeLabel changed...
-* HandleRequestAsync changed...
-* IsAuthorized changed...
-+ NormalizeHost added...
-* RunAsync changed...
-* Start changed...
-* Stop changed...
-* WriteMetricsAsync changed...
-* WriteStatusAsync changed...
-
-amFTPd/Core/Ratio/DirectoryRuleEngine.cs:
-* changed...
-
-amFTPd/Core/Services/CreditService.cs:
-* ApplyDownload changed...
-* ApplyUpload changed...
-* CanDownload changed...
-
-amFTPd/Core/Vfs/Providers/PhysicalVfsProvider.cs:
-* BuildResult changed...
-* EnsureTrailingSeparator changed...
-
-amFTPd/Core/Vfs/VfsManager.cs:
-+ Enumerate added...
-* Resolve changed...
-
-amFTPd/Program.cs:
-* changed...
-
-amFTPd/amFTPd.csproj:
-* changed...
-
-version_history.txt:
-* changed...
-
+---
 
 [ v0.7.0.0 - 03.01.2026 ]
 ^^^^^^^^^^^^^^^^^^^^^^^^^

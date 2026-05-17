@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Stats;
+namespace amFTPd.Core.Stats;
 
 /// <summary>
 /// Represents an immutable snapshot of server statistics at a specific point in time.

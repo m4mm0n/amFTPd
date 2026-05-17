@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSfvCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x6C4ED375
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE SFV command handler.
  * 
  *  License:
  *      MIT License

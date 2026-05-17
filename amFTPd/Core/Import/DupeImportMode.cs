@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import;
+namespace amFTPd.Core.Import;
 
 /// <summary>
 /// Specifies how duplicate items are handled during an import operation.

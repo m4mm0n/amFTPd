@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteGroupinfoCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x9FB8A06E
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE GROUPINFO command handler.
  * 
  *  License:
  *      MIT License
@@ -54,7 +54,7 @@ public sealed class SiteGroupinfoCommand : SiteCommandBase
             return;
         }
 
-        if (!context.Runtime.Groups.TryGetValue(groupName, out var cfg))
+        if (!context.Runtime.TryGetGroup(groupName, out var cfg) || cfg is null)
         {
             await context.Session.WriteAsync(
                 "550 No such group.\r\n",

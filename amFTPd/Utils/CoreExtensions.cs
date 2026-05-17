@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           CoreExtensions.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -20,10 +20,10 @@
 
 
 
-using amFTPd.Config.Ftpd;
 using System.Collections;
 using System.Collections.Immutable;
 using System.Reflection;
+using amFTPd.Config.Ftpd;
 
 namespace amFTPd.Utils
 {
@@ -57,9 +57,9 @@ namespace amFTPd.Utils
                                  .Where(p => p.GetMethod != null && p.GetMethod.GetParameters().Length == 0);
 
             if ((from prop in properties
-                    let value = prop.GetValue(instance)
-                    where IsEmpty(value, prop.PropertyType)
-                    select prop).Any())
+                 let value = prop.GetValue(instance)
+                 where IsEmpty(value, prop.PropertyType)
+                 select prop).Any())
                 return true;
 
             // Public instance fields

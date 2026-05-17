@@ -362,3 +362,14 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /amFTPd/amFTPd.zip
+
+# amFTPd local runtime, validation, and release artifacts
+/amftpd.json
+/config/
+/data/
+/logs/
+/rules/
+/scripts/
+/site-root/
+/stats/
+/Ready2Release/

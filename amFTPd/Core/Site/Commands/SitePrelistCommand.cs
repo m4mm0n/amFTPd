@@ -1,5 +1,5 @@
-﻿using amFTPd.Core.Pre;
 using System.Text;
+using amFTPd.Core.Pre;
 
 namespace amFTPd.Core.Site.Commands;
 

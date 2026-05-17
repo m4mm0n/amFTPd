@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FxpPolicyEngine.cs
@@ -20,12 +20,12 @@
  */
 
 
-using amFTPd.Config.Fxp;
-using amFTPd.Security;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text.RegularExpressions;
+using amFTPd.Config.Fxp;
+using amFTPd.Security;
 
 namespace amFTPd.Core.Fxp;
 
@@ -204,10 +204,12 @@ public sealed class FxpPolicyEngine
             return TlsVersion.Tls13;
         if ((p & SslProtocols.Tls12) == SslProtocols.Tls12)
             return TlsVersion.Tls12;
+#pragma warning disable SYSLIB0039 // FTP clients may report legacy protocol flags; policy still rejects them when below the configured minimum.
         if ((p & SslProtocols.Tls11) == SslProtocols.Tls11)
             return TlsVersion.Tls11;
         if ((p & SslProtocols.Tls) == SslProtocols.Tls)
             return TlsVersion.Tls10;
+#pragma warning restore SYSLIB0039
 
         return TlsVersion.Any;
     }

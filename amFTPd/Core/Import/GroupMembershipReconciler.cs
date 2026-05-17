@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd;
 using amFTPd.Db;
 
 namespace amFTPd.Core.Import;

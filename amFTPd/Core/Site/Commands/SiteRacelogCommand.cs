@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRacelogCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xD3435356
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RACELOG command handler.
  * 
  *  License:
  *      MIT License

@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Monitoring;
+namespace amFTPd.Core.Monitoring;
 
 /// <summary>
 /// Represents rolling rate statistics over multiple time intervals for a status measurement.

@@ -1,7 +1,7 @@
-﻿using amFTPd.Core.Dupe;
+using System.Text.Json;
+using amFTPd.Core.Dupe;
 using amFTPd.Core.Dupe.ImportExport;
 using amFTPd.Db.Abstractions;
-using System.Text.Json;
 
 namespace amFTPd.Core.Site.Commands;
 
@@ -84,7 +84,7 @@ public sealed class SiteDupeExportCommand : SiteCommandBase
                         return;
                     }
 
-                    await using var conn = provider.Create(connString);
+                    await using var conn = provider!.Create(connString);
                     DupeSqlExporter.Export(entries, conn);
 
                     await context.Session.WriteAsync(

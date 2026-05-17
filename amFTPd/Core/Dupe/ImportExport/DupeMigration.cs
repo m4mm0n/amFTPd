@@ -1,5 +1,5 @@
-﻿using amFTPd.Core.Import;
 using System.Data.Common;
+using amFTPd.Core.Import;
 
 namespace amFTPd.Core.Dupe.ImportExport;
 

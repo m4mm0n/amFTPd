@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           TlsConfig.cs
@@ -21,11 +21,11 @@
 
 
 
-using amFTPd.Logging;
 using System.Net.Security;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using amFTPd.Logging;
 
 namespace amFTPd.Security
 {

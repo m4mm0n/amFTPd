@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Publish as a self-contained folder so the daemon can load it -->
+    <AssemblyName>amFTPd.SamplePlugin</AssemblyName>
+    <RootNamespace>amFTPd.SamplePlugin</RootNamespace>
+
+    <!--
+      Always produce a .deps.json file alongside the DLL so that
+      amFTPd's AssemblyDependencyResolver can resolve NuGet dependencies.
+      (This is automatic for "dotnet publish" but useful to see explicitly.)
+    -->
+    <GenerateDependencyFile>true</GenerateDependencyFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Reference the abstractions project directly during development.
+      In a real community plugin you would instead reference the NuGet package:
+        <PackageReference Include="amFTPd.Plugin.Abstractions" Version="1.*" />
+    -->
+    <ProjectReference Include="..\amFTPd.Plugin.Abstractions\amFTPd.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

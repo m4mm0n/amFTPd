@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           BinarySectionStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -357,13 +357,12 @@ public sealed class BinarySectionStore : ISectionStore
 
     private byte[] DeriveKey(string masterPassword, byte[] salt)
     {
-        using var pbkdf = new Rfc2898DeriveBytes(
+        return Rfc2898DeriveBytes.Pbkdf2(
             Encoding.UTF8.GetBytes(masterPassword),
             salt,
             200_000,
-            HashAlgorithmName.SHA256);
-
-        return pbkdf.GetBytes(32);
+            HashAlgorithmName.SHA256,
+            32);
     }
 
     public void ForceSnapshotRewrite()

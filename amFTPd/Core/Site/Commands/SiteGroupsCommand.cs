@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteGroupsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x7D420CD3
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE GROUPS command handler.
  * 
  *  License:
  *      MIT License
@@ -45,7 +45,7 @@ public sealed class SiteGroupsCommand : SiteCommandBase
             return;
         }
 
-        var groups = context.Runtime.Groups
+        var groups = context.Runtime.GetGroupsSnapshot()
             .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
             .ToList();
 

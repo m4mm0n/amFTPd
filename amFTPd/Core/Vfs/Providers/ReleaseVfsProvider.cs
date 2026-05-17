@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd;
 using amFTPd.Core.ReleaseSystem;
 
 namespace amFTPd.Core.Vfs.Providers;
@@ -51,6 +51,8 @@ public sealed class ReleaseVfsProvider : IVfsProvider
                         null,
                         null));
             }
+
+            return VfsResolveResult.NotFound();
         }
 
         if (CanHandle(virtualPath))

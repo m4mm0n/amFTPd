@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.Dupe;
+using amFTPd.Core.Dupe;
 
 namespace amFTPd.Core.Site.Commands;
 

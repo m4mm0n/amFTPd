@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Daemon;
+using amFTPd.Config.Daemon;
 using amFTPd.Core.Pre;
 
 namespace amFTPd.Core.Runtime;

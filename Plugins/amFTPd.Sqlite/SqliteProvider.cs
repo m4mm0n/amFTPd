@@ -1,7 +1,7 @@
-﻿using amFTPd.Db.Abstractions;
-using Microsoft.Data.Sqlite;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
+using amFTPd.Db.Abstractions;
+using Microsoft.Data.Sqlite;
 
 namespace amFTPd.Sqlite;
 

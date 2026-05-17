@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           VfsManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -38,13 +38,15 @@ public sealed class VfsManager
 {
     private readonly VfsCache _cache;
     private readonly List<IVfsProvider> _providers;
+    private readonly SymlinkVfsProvider? _symlinkProvider;
 
     public VfsManager(
         IEnumerable<VfsMount> mounts,
         IEnumerable<VfsUserMount> userMounts,
         ReleaseRegistry releaseRegistry,
         SectionResolver sectionResolver,
-        PreRegistry preRegistry)
+        PreRegistry preRegistry,
+        VfsSymlinkStore? symlinkStore = null)
     {
         ArgumentNullException.ThrowIfNull(sectionResolver);
         ArgumentNullException.ThrowIfNull(preRegistry);
@@ -55,21 +57,33 @@ public sealed class VfsManager
         // IMPORTANT: provider order = priority
         _providers = new List<IVfsProvider>
         {
-            // IMPORTANT: provider order = priority
             // 1) Pure virtual namespaces
             new PreVfsProvider(preRegistry),
-            new ReleaseVfsProvider(releaseRegistry),
             new GroupVfsProvider(releaseRegistry),
+        };
 
-            // 2) Physical filesystem (wins when a real dir/file exists)
+        // 2) Symlinks — resolves before the physical layer so links can alias any path
+        if (symlinkStore is not null)
+        {
+            _symlinkProvider = new SymlinkVfsProvider(symlinkStore);
+            _symlinkProvider.Owner = this;
+            _providers.Add(_symlinkProvider);
+        }
+
+        _providers.AddRange(new IVfsProvider[]
+        {
+            // 3) Physical filesystem (wins when a real dir/file exists)
             new PhysicalVfsProvider(
                 mounts?.ToList() ?? [],
                 userMounts?.ToList() ?? [],
                 sectionResolver),
 
-            // 3) Section shortcuts (used when the physical target does not exist)
+            // 4) Release registry views (used when the physical target does not exist)
+            new ReleaseVfsProvider(releaseRegistry),
+
+            // 5) Section shortcuts (used when the physical target does not exist)
             new ShortcutVfsProvider(sectionResolver)
-        };
+        });
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -90,6 +104,7 @@ public sealed class VfsManager
             if (!provider.CanHandle(virtualPath))
                 continue;
 
+            // _log?.Log(FtpLogLevel.Debug, $"[VFS] Resolve {virtualPath} using {provider.GetType().Name}");
             var result = provider.Resolve(virtualPath, user);
             if (result.Success)
             {
@@ -100,6 +115,8 @@ public sealed class VfsManager
 
         return VfsResolveResult.NotFound();
     }
+
+    public void ClearCache() => _cache.Clear();
 
     /// <summary>
     /// Enumerates child nodes for a given virtual directory path.
@@ -127,6 +144,65 @@ public sealed class VfsManager
             catch
             {
                 // Enumeration is best-effort; callers handle empty results.
+                return Enumerable.Empty<VfsNode>();
+            }
+        }
+
+        return Enumerable.Empty<VfsNode>();
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Internal helpers for SymlinkVfsProvider (bypass symlink layer to avoid infinite recursion)
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Resolves a virtual path using all providers EXCEPT the symlink provider.
+    /// Called by <see cref="SymlinkVfsProvider"/> to resolve symlink targets.
+    /// </summary>
+    internal VfsResolveResult ResolveSkipSymlinks(string virtualPath, FtpUser? user)
+    {
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            return VfsResolveResult.NotFound();
+
+        virtualPath = NormalizeVirtualPath(virtualPath);
+
+        foreach (var provider in _providers)
+        {
+            if (provider == _symlinkProvider) continue; // skip to avoid loops
+            if (!provider.CanHandle(virtualPath)) continue;
+
+            var result = provider.Resolve(virtualPath, user);
+            if (result.Success)
+                return result;
+        }
+
+        return VfsResolveResult.NotFound();
+    }
+
+    /// <summary>
+    /// Enumerates a virtual directory using all providers EXCEPT the symlink provider.
+    /// </summary>
+    internal IEnumerable<VfsNode> EnumerateSkipSymlinks(string virtualPath, FtpUser? user)
+    {
+        if (string.IsNullOrWhiteSpace(virtualPath))
+            return Enumerable.Empty<VfsNode>();
+
+        virtualPath = NormalizeVirtualPath(virtualPath);
+
+        foreach (var provider in _providers)
+        {
+            if (provider == _symlinkProvider) continue;
+            if (!provider.CanHandle(virtualPath)) continue;
+
+            var result = provider.Resolve(virtualPath, user);
+            if (!result.Success) continue;
+
+            try
+            {
+                return provider.Enumerate(virtualPath, user) ?? Enumerable.Empty<VfsNode>();
+            }
+            catch
+            {
                 return Enumerable.Empty<VfsNode>();
             }
         }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSearchCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xC2245D96
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE SEARCH command handler.
  * 
  *  License:
  *      MIT License

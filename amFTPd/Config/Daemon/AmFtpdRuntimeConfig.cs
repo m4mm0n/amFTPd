@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdRuntimeConfig.cs
@@ -24,20 +24,30 @@ using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Irc;
 using amFTPd.Config.Vfs;
+using amFTPd.Core.Affils;
+using amFTPd.Core.AutoNuke;
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
+using amFTPd.Core.Logging;
+using amFTPd.Core.Messages;
+using amFTPd.Core.Oneliners;
 using amFTPd.Core.Pre;
+using amFTPd.Core.Quota;
 using amFTPd.Core.Race;
 using amFTPd.Core.Ratio;
 using amFTPd.Core.ReleaseSystem;
+using amFTPd.Core.Requests;
 using amFTPd.Core.Runtime;
 using amFTPd.Core.Stats;
 using amFTPd.Core.Stats.Live;
 using amFTPd.Core.Stats.Rolling;
+using amFTPd.Core.Vfs;
 using amFTPd.Core.Zipscript;
 using amFTPd.Credits;
 using amFTPd.Db;
+using amFTPd.Logging;
+using amFTPd.Scripting.Tcl;
 using amFTPd.Security;
 using SectionResolver = amFTPd.Core.Sections.SectionResolver;
 
@@ -83,6 +93,10 @@ namespace amFTPd.Config.Daemon
         /// </summary>
         public required IdentConfig IdentConfig { get; init; }
         /// <summary>
+        /// QuickLog daemon logging configuration.
+        /// </summary>
+        public required QuickLogOptions Logging { get; init; }
+        /// <summary>
         /// Gets the configuration settings for the virtual file system.
         /// </summary>
         public required VfsConfig VfsConfig { get; init; }
@@ -106,6 +120,7 @@ namespace amFTPd.Config.Daemon
         /// Gets the collection of group configurations, keyed by group name.
         /// </summary>
         public required Dictionary<string, GroupConfig> Groups { get; init; }
+        private readonly object _groupsSync = new();
         /// <summary>
         /// Gets the ratio engine responsible for managing user ratios.
         /// </summary>
@@ -175,6 +190,61 @@ namespace amFTPd.Config.Daemon
         /// Timestamp (UTC) when this runtime snapshot was constructed.
         /// </summary>
         public DateTimeOffset LoadedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+
+        /// <summary>
+        /// Returns a snapshot copy of all groups for thread-safe read access.
+        /// </summary>
+        public Dictionary<string, GroupConfig> GetGroupsSnapshot()
+        {
+            lock (_groupsSync)
+            {
+                return new Dictionary<string, GroupConfig>(Groups, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
+        /// <summary>
+        /// Adds or replaces a runtime group entry.
+        /// </summary>
+        public void SetGroup(string groupName, GroupConfig cfg)
+        {
+            lock (_groupsSync)
+            {
+                Groups[groupName] = cfg;
+            }
+        }
+
+        /// <summary>
+        /// Removes a runtime group entry.
+        /// </summary>
+        public bool RemoveGroup(string groupName)
+        {
+            lock (_groupsSync)
+            {
+                return Groups.Remove(groupName);
+            }
+        }
+
+        /// <summary>
+        /// Tries to read a runtime group config with shared locking.
+        /// </summary>
+        public bool TryGetGroup(string groupName, out GroupConfig? cfg)
+        {
+            lock (_groupsSync)
+            {
+                return Groups.TryGetValue(groupName, out cfg);
+            }
+        }
+
+        /// <summary>
+        /// Checks if a runtime group exists.
+        /// </summary>
+        public bool ContainsGroup(string groupName)
+        {
+            lock (_groupsSync)
+            {
+                return Groups.ContainsKey(groupName);
+            }
+        }
         /// <summary>
         /// Gets the statistics collector used to gather and report runtime metrics for this instance.
         /// </summary>
@@ -192,6 +262,37 @@ namespace amFTPd.Config.Daemon
         /// Registry backing the virtual /PRE hierarchy.
         /// </summary>
         public PreRegistry PreRegistry { get; } = new();
+
+        /// <summary>
+        /// Shoutbox (oneliner) store. Null if not initialised (config dir unknown at runtime build time).
+        /// Initialised lazily by FtpServer after the config path is known.
+        /// </summary>
+        public OnelineStore? OnelineStore { get; set; }
+
+        /// <summary>
+        /// Request registry. Null if not initialised.
+        /// Initialised lazily by FtpServer after the config path is known.
+        /// </summary>
+        public RequestRegistry? RequestRegistry { get; set; }
+
+        /// <summary>
+        /// Affil store (section → affiliated groups). Null if not initialised.
+        /// Initialised lazily by FtpServer after the config path is known.
+        /// </summary>
+        public AffilStore? AffilStore { get; set; }
+
+        /// <summary>
+        /// Message engine for MOTD, login messages, and per-directory .message files.
+        /// Null until initialised by FtpServer.
+        /// </summary>
+        public MessageEngine? Messages { get; set; }
+
+        /// <summary>
+        /// Auto-nuke rules evaluated against zipscript completion/update events.
+        /// Empty by default (no automatic nukes). Populated from JSON config.
+        /// </summary>
+        public IReadOnlyList<AutoNukeRule> AutoNukeRules { get; init; } =
+            Array.Empty<AutoNukeRule>();
         /// <summary>
         /// Time-to-live for PRE entries.
         /// Default: 48 hours.
@@ -206,8 +307,78 @@ namespace amFTPd.Config.Daemon
         /// </summary>
         public bool IsRecovering => Recovery?.IsRecovering ?? false;
         /// <summary>
+        /// wu-ftpd-compatible xferlog writer. Null until initialised by FtpServer.
+        /// Subscribes to EventBus Upload/Download events.
+        /// </summary>
+        public XferlogWriter? Xferlog { get; set; }
+
+        /// <summary>
+        /// Structured admin mutation audit log (JSONL). Null until initialised by FtpServer.
+        /// Call <c>runtime.AuditLog?.Log(...)</c> from any SITE command that mutates state.
+        /// </summary>
+        public AuditLogWriter? AuditLog { get; set; }
+
+        /// <summary>
+        /// Per-user upload quota tracker (daily / weekly / monthly).
+        /// Initialised by FtpServer and subscribed to EventBus Upload events.
+        /// Check with <c>UploadQuota?.Check(user, Groups)</c> before accepting STOR.
+        /// </summary>
+        public UploadQuotaStore? UploadQuota { get; set; }
+
+        /// <summary>
+        /// Plugin host that manages all loaded extension plugins.
+        /// Null until after <see cref="amFTPd.Config.Daemon.AmFtpdConfigLoader"/> loads plugins.
+        /// </summary>
+        public amFTPd.Core.Plugins.PluginHost? PluginHost { get; set; }
+
+        /// <summary>
+        /// Virtual symlink registry. Maps link virtual paths to target virtual paths.
+        /// Null until initialised by FtpServer after the config path is known.
+        /// Passed to each session's VfsManager so symlinks are resolved transparently.
+        /// </summary>
+        public VfsSymlinkStore? SymlinkStore { get; set; }
+
+        /// <summary>
         /// Gets the registry that provides access to available releases.
         /// </summary>
         public ReleaseRegistry ReleaseRegistry { get; } = new();
+
+        /// <summary>
+        /// Outbound HTTP webhook configuration.
+        /// When non-null and Enabled, <see cref="amFTPd.Core.Webhooks.WebhookDispatcher"/>
+        /// fires HTTP POSTs on configured event types.
+        /// </summary>
+        public AmFtpdWebhookConfig? WebhookConfig { get; init; }
+
+        /// <summary>
+        /// ACME v2 automatic TLS certificate configuration.
+        /// When non-null and Enabled, <see cref="amFTPd.Core.Tls.AcmeCertificateManager"/>
+        /// provisions and renews the certificate from the configured CA.
+        /// </summary>
+        public AmFtpdAcmeConfig? AcmeConfig { get; init; }
+
+        /// <summary>
+        /// Absolute path to the PFX certificate file used for TLS.
+        /// Stored here so that <see cref="amFTPd.Core.Tls.AcmeCertificateManager"/> knows
+        /// where to write renewed certificates without re-parsing the raw JSON config.
+        /// </summary>
+        public string? TlsPfxPath { get; init; }
+
+        /// <summary>
+        /// Password protecting the PFX file at <see cref="TlsPfxPath"/>.
+        /// May be null or empty for unencrypted PFX files.
+        /// </summary>
+        public string? TlsPfxPassword { get; init; }
+
+        /// <summary>
+        /// Configuration for glFTPd-compatible TCL scripts.
+        /// </summary>
+        public TclConfig? Tcl { get; init; }
+
+        /// <summary>
+        /// Runner for glFTPd-compatible TCL scripts.
+        /// Initialised by FtpServer.
+        /// </summary>
+        public GlftpdTclRunner? TclRunner { get; set; }
     }
 }

@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Utils.Cryptography;
+namespace amFTPd.Utils.Cryptography;
 
 /// <summary>
 /// Write-only stream wrapper that computes CRC32 incrementally
@@ -26,6 +26,12 @@ internal sealed class Crc32WriteStream : Stream
         _inner.Write(buffer, offset, count);
     }
 
+    public override void Write(ReadOnlySpan<byte> buffer)
+    {
+        _crc = Crc32.Append(_crc, buffer);
+        _inner.Write(buffer);
+    }
+
     public override async Task WriteAsync(
         byte[] buffer,
         int offset,
@@ -35,6 +41,12 @@ internal sealed class Crc32WriteStream : Stream
         _crc = Crc32.Append(_crc, buffer.AsSpan(offset, count));
         await _inner.WriteAsync(buffer, offset, count, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        _crc = Crc32.Append(_crc, buffer.Span);
+        await _inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
     }
 
     #region passthrough

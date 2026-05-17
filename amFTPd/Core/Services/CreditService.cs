@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd;
 using amFTPd.Credits;
 
 namespace amFTPd.Core.Services;

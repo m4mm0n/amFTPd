@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Zipscript;
+namespace amFTPd.Core.Zipscript;
 
 /// <summary>
 /// Represents the context information provided to a Zipscript pre-processing operation, including section, release,

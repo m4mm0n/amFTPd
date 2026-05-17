@@ -1,0 +1,88 @@
+# amFTPd — Docker Compose (production-ready example)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f
+#   docker compose exec amftpd /app/amFTPd /config/amftpd.json --validate
+#
+# REHASH (reload config without restart):
+#   docker compose kill --signal SIGHUP amftpd
+
+services:
+  amftpd:
+    image: amftpd:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    container_name: amftpd
+
+    # ── Port mapping ──────────────────────────────────────────────────────────
+    # Map host port 21 → container 2121 (FTP control).
+    # If running as non-root you cannot bind to port 21 directly without
+    # net.ipv4.ip_unprivileged_port_start=21 on the host, or use host networking.
+    ports:
+      - "21:2121"
+      - "50000-50100:50000-50100"
+      # Uncomment for FTPS implicit mode:
+      # - "990:990"
+      # Uncomment for ACME HTTP-01 challenge (Let's Encrypt):
+      # - "80:80"
+
+    # ── Storage ───────────────────────────────────────────────────────────────
+    volumes:
+      # amftpd.json, TLS cert, ACME account key → read-only
+      - ./config:/config:ro
+      # User DB, dupe DB, logs, xferlog → writable
+      - ./data:/data
+      # FTP site root (can be a separate host path or named volume)
+      - ./site:/site
+
+    # ── Security ──────────────────────────────────────────────────────────────
+    user: "1500:1500"        # matches the amftpd UID/GID created in the Dockerfile
+
+    # Drop all capabilities; add back only what we need
+    cap_drop:
+      - ALL
+    cap_add:
+      # Bind to port 2121 (>1023, so NET_BIND_SERVICE is not strictly needed).
+      # Add it if you change to port 21 inside the container:
+      # - NET_BIND_SERVICE
+
+    # Read-only root filesystem with writable tmpfs for /tmp
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+
+    # ── Signals & drain ───────────────────────────────────────────────────────
+    stop_signal: SIGTERM
+    stop_grace_period: 75s    # matches GracefulStopAsync(60 s) + buffer
+
+    # ── Health check ──────────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/2121' 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+    # ── Environment ───────────────────────────────────────────────────────────
+    environment:
+      - DOTNET_ENVIRONMENT=Production
+      - DOTNET_CLI_TELEMETRY_OPTOUT=1
+      # Forward timezone so logs use local time:
+      # - TZ=Europe/Oslo
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+# ── Optional named volumes ────────────────────────────────────────────────────
+# Uncomment if you prefer managed volumes over bind mounts.
+# volumes:
+#   amftpd-config:
+#   amftpd-data:
+#   amftpd-site:

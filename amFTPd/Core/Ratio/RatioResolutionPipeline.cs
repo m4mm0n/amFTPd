@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           RatioResolutionPipeline.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -65,19 +65,19 @@ namespace amFTPd.Core.Ratio
             //---------------------------------------------------------------------
             // 1. Directory rules (strongest override)
             //---------------------------------------------------------------------
+            var section = _sectionResolver.Resolve(virtPath);
             var dRule = _dirEngine.Resolve(virtPath);
             if (dRule != null)
                 return new RatioRule(
-                    Ratio: dRule.Ratio,
-                    IsFree: dRule.IsFree,
-                    MultiplyCost: dRule.MultiplyCost,
-                    UploadBonus: dRule.UploadBonus
+                    Ratio: dRule.Ratio > 0 ? dRule.Ratio : section?.Ratio,
+                    IsFree: dRule.IsFree || (section?.IsFree ?? false),
+                    MultiplyCost: dRule.MultiplyCost > 0 ? dRule.MultiplyCost : section?.MultiplyCost,
+                    UploadBonus: dRule.UploadBonus > 0 ? dRule.UploadBonus : section?.UploadBonus
                 );
 
             //---------------------------------------------------------------------
             // 2. Section rule
             //---------------------------------------------------------------------
-            var section = _sectionResolver.Resolve(virtPath);
             if (section != null)
                 return new RatioRule(
                     Ratio: section.Ratio,

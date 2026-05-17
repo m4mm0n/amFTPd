@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.Import.Records;
+using amFTPd.Core.Import.Records;
 
 namespace amFTPd.Core.Import.Parsers;
 
@@ -31,7 +31,7 @@ public sealed class IoUserParser : IImportParser<ImportedUserRecord>
 
             yield return new ImportedUserRecord(
                 UserName: userName,
-                PrimaryGroup: null,
+                PrimaryGroup: "USERS",
                 SecondaryGroups: Array.Empty<string>(),
                 IsSiteop: isSiteop,
                 IsAdmin: isAdmin,

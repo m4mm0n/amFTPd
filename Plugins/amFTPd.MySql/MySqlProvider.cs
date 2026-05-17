@@ -1,6 +1,6 @@
-﻿using amFTPd.Db.Abstractions;
 using System.Data.Common;
 using System.Runtime.CompilerServices;
+using amFTPd.Db.Abstractions;
 using MySql.Data.MySqlClient;
 
 namespace amFTPd.MySql;

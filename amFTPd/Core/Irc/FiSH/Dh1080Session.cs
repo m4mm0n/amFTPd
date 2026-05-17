@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using amFTPd.Logging;
 
 namespace amFTPd.Core.Irc.FiSH;

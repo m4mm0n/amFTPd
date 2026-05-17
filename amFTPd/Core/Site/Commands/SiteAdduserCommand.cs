@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteAdduserCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xDE221B86
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE ADDUSER command handler.
  * 
  *  License:
  *      MIT License
@@ -20,9 +20,9 @@
  */
 
 
+using System.Collections.Immutable;
 using amFTPd.Config.Ftpd;
 using amFTPd.Security;
-using System.Collections.Immutable;
 
 namespace amFTPd.Core.Site.Commands;
 
@@ -96,6 +96,13 @@ public sealed class SiteAdduserCommand : SiteCommandBase
             await s.WriteAsync($"550 Failed to add user: {error ?? "unknown error"}\r\n", cancellationToken);
             return;
         }
+
+        context.Runtime.AuditLog?.Log(
+            actor: context.Session.Account?.UserName ?? "*unknown*",
+            action: "ADDUSER",
+            target: userName,
+            detail: $"group={group} home={home}",
+            ip: context.Session.RemoteEndPoint?.Address.ToString());
 
         await s.WriteAsync($"200 User {userName} created.\r\n", cancellationToken);
     }

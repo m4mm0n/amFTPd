@@ -1,4 +1,4 @@
-﻿using amFTPd.Db.Abstractions;
+using amFTPd.Db.Abstractions;
 
 namespace amFTPd.Core.Site.Commands;
 
@@ -38,7 +38,7 @@ public sealed class SiteSqlTestCommand : SiteCommandBase
 
         try
         {
-            await using var conn = provider.Create(connString);
+            await using var conn = provider!.Create(connString);
             await conn.OpenAsync(ct);
 
             await context.Session.WriteAsync(

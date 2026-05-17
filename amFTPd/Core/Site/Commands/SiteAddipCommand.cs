@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteAddipCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x3C74AA19
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE ADDIP command handler.
  * 
  *  License:
  *      MIT License

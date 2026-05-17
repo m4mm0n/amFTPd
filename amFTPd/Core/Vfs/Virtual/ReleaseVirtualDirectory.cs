@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.ReleaseSystem;
+using amFTPd.Core.ReleaseSystem;
 
 namespace amFTPd.Core.Vfs.Virtual;
 

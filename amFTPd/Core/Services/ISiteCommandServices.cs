@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Services;
+namespace amFTPd.Core.Services;
 
 /// <summary>
 /// Defines a set of services for executing site-level commands, including messaging, credit management, scene actions,

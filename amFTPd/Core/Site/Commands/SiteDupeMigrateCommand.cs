@@ -1,7 +1,7 @@
-﻿using amFTPd.Core.Dupe;
+using System.Text;
+using amFTPd.Core.Dupe;
 using amFTPd.Core.Dupe.ImportExport;
 using amFTPd.Db.Abstractions;
-using System.Text;
 
 namespace amFTPd.Core.Site.Commands;
 
@@ -90,7 +90,7 @@ public sealed class SiteDupeMigrateCommand : SiteCommandBase
                         return;
                     }
 
-                    await using var conn = provider.Create(connString);
+                    await using var conn = provider!.Create(connString);
 
                     DupeSqlExporter.Export(entries, conn);
                     sb.AppendLine($" Migrated to SQL ({providerName}).");

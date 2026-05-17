@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteWipeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x42C5404A
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE WIPE command handler.
  * 
  *  License:
  *      MIT License

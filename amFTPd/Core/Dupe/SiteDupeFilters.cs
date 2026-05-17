@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Dupe;
+namespace amFTPd.Core.Dupe;
 
 /// <summary>
 /// Represents a set of filter criteria for matching scene entries based on section, group, release name, nuked status,

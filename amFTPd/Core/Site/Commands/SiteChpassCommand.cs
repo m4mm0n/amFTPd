@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteChpassCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x819172C1
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE CHPASS command handler.
  * 
  *  License:
  *      MIT License
@@ -64,6 +64,12 @@ public sealed class SiteChpassCommand : SiteCommandBase
 
         if (context.Session.Users.TryUpdateUser(updated, out var error))
         {
+            context.Runtime.AuditLog?.Log(
+                actor: context.Session.Account?.UserName ?? "*unknown*",
+                action: "CHPASS",
+                target: userName,
+                ip: context.Session.RemoteEndPoint?.Address.ToString());
+
             await context.Session.WriteAsync($"200 Password changed for user '{userName}'.\r\n", cancellationToken);
         }
         else

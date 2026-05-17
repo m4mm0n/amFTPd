@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AnsiConsoleImage.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -23,13 +23,13 @@
 
 
 
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 using Image = SixLabors.ImageSharp.Image;
 
 namespace amFTPd.Utils
@@ -142,7 +142,7 @@ namespace amFTPd.Utils
 
             EnableVirtualTerminalProcessing();
 
-            var consoleWidth = Console.WindowWidth > 0 ? Console.WindowWidth : 80;
+            var consoleWidth = SafeWindowWidth();
             var targetCharWidth = maxWidth.HasValue ? Math.Min(maxWidth.Value, consoleWidth) : consoleWidth;
             if (targetCharWidth <= 0) targetCharWidth = 80;
 
@@ -214,10 +214,22 @@ namespace amFTPd.Utils
             if (percentageOfConsoleWidth <= 0f || percentageOfConsoleWidth > 100f)
                 throw new ArgumentOutOfRangeException(nameof(percentageOfConsoleWidth), "Percentage must be in (0, 100].");
 
-            var consoleWidth = Console.WindowWidth > 0 ? Console.WindowWidth : 80;
+            var consoleWidth = SafeWindowWidth();
             var targetWidth = (int)Math.Max(1, Math.Round(consoleWidth * (percentageOfConsoleWidth / 100f)));
 
             WriteImage(img, targetWidth);
+        }
+
+        private static int SafeWindowWidth()
+        {
+            try
+            {
+                return Console.WindowWidth > 0 ? Console.WindowWidth : 80;
+            }
+            catch
+            {
+                return 80;
+            }
         }
     }
 }

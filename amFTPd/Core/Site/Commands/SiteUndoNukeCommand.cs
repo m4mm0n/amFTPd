@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteUndoNukeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x740EB926
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE UNNUKE command handler.
  * 
  *  License:
  *      MIT License
@@ -149,6 +149,13 @@ public sealed class SiteUndoNukeCommand : SiteCommandBase
             section,
             user,
             reason);
+
+        context.Runtime.AuditLog?.Log(
+            actor: user,
+            action: "UNNUKE",
+            target: virtOrig,
+            detail: $"reason={reason} section={section?.Name ?? "-"}",
+            ip: s.RemoteEndPoint?.Address.ToString());
 
         await s.WriteAsync($"250 UNNUKE completed for {virtOrig}\r\n", cancellationToken);
     }

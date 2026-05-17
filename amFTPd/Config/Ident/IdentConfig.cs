@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IdentConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -33,6 +33,12 @@ namespace amFTPd.Config.Ident;
 /// customization of group mappings and timeout settings for IDENT operations.</remarks>
 public sealed record IdentConfig
 {
+    /// <summary>Enables RFC1413 IDENT lookups and related policies.</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>Compatibility flag for configs that require IDENT before login.</summary>
+    public bool Required { get; init; }
+
     /// <summary>
     /// Gets the identification modes that are enabled for this instance.
     /// </summary>

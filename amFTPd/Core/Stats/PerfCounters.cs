@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           PerfCounters.cs
@@ -42,12 +42,17 @@ namespace amFTPd.Core.Stats
         private static long _failedLogins;
         private static long _abortedTransfers;
 
+        // --- Scene-specific event counters ----------------------------------
+        private static long _nukes;
+        private static long _unnukes;
+        private static long _pres;
+
         // --- Transfer level -------------------------------------------------
         private static long _bytesUploaded;
         private static long _bytesDownloaded;
         private static long _activeTransfers;
         private static long _totalTransfers;
-        private static long _totalTransferMilliseconds;
+        //private static long _totalTransferMilliseconds;
         private static long _maxConcurrentTransfers;
         private static long _transferTimeTicks;
 
@@ -79,6 +84,22 @@ namespace amFTPd.Core.Stats
         /// <summary>Call when a transfer is aborted (ABOR, IO error, etc.).</summary>
         public static void TransferAborted()
             => Interlocked.Increment(ref _abortedTransfers);
+
+        // --------------------------------------------------------------------
+        // Scene event counters
+        // --------------------------------------------------------------------
+
+        /// <summary>Call when a release is successfully nuked.</summary>
+        public static void NukeExecuted()
+            => Interlocked.Increment(ref _nukes);
+
+        /// <summary>Call when a release is successfully unnuked.</summary>
+        public static void UnnukeExecuted()
+            => Interlocked.Increment(ref _unnukes);
+
+        /// <summary>Call when a release is successfully pre'd.</summary>
+        public static void PreRegistered()
+            => Interlocked.Increment(ref _pres);
 
         // --------------------------------------------------------------------
         // Transfer counters
@@ -131,7 +152,7 @@ namespace amFTPd.Core.Stats
             if (bytes > 0)
                 Interlocked.Add(ref _bytesUploaded, bytes);
         }
-        
+
         /// <summary>
         /// Adds the specified number of bytes to the total downloaded byte count in a thread-safe manner.
         /// </summary>
@@ -177,7 +198,11 @@ namespace amFTPd.Core.Stats
                         : 0.0,
 
                 MaxConcurrentTransfers =
-                    Interlocked.Read(ref _maxConcurrentTransfers)
+                    Interlocked.Read(ref _maxConcurrentTransfers),
+
+                TotalNukes = Interlocked.Read(ref _nukes),
+                TotalUnnukes = Interlocked.Read(ref _unnukes),
+                TotalPres = Interlocked.Read(ref _pres)
             };
         }
     }

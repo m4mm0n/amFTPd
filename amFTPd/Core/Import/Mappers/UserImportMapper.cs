@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd;
 using amFTPd.Core.Import.Records;
 
 namespace amFTPd.Core.Import.Mappers;

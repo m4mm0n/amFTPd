@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteIdentCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x2ED7FE55
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE IDENT command handler.
  * 
  *  License:
  *      MIT License

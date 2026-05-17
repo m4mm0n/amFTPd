@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd;
 using amFTPd.Core.ReleaseSystem;
 
 namespace amFTPd.Core.Vfs.Providers;

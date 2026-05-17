@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           VfsUserMount.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -31,6 +31,7 @@ public sealed record VfsUserMount
     public string UserName { get; init; } = string.Empty;
 
     /// <summary>Compatibility alias if any code uses "Username".</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public string Username
     {
         get => UserName;

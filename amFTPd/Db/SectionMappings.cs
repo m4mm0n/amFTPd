@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SectionMappings.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -7,7 +7,7 @@
  *  CRC32:          0xA523D711
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Normalizes stored section records into runtime section configuration.
  * 
  *  License:
  *      MIT License
@@ -36,7 +36,9 @@ namespace amFTPd.Db
 
             return section with
             {
-                VirtualRoot = root
+                VirtualRoot = root,
+                RatioUploadUnit = section.RatioUploadUnit > 0 ? section.RatioUploadUnit : 1,
+                RatioDownloadUnit = section.RatioDownloadUnit > 0 ? section.RatioDownloadUnit : 1
             };
         }
     }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteUsersCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x862A713A
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE USERS command handler.
  * 
  *  License:
  *      MIT License

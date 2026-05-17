@@ -1,41 +1,19 @@
-﻿namespace amFTPd.Core.Dupe;
+namespace amFTPd.Core.Dupe;
+
+using System.Text.Json.Serialization;
 
 /// <summary>
 /// Represents a record of a duplicate release, including metadata such as section, release name, group, file details,
 /// and nuke status.
 /// </summary>
-/// <remarks>A DupeRelease instance tracks information about a specific release, including its associated files,
-/// archive details, and any nuke status applied. This type is typically used to manage and query duplicate releases in
-/// automated systems or databases. All properties are read-only except where explicitly noted, ensuring the integrity
-/// of release data after creation.</remarks>
+/// <remarks>
+/// A DupeRelease tracks metadata for a specific release, including file stats, nuke state, and archive CRC map.
+/// </remarks>
 public sealed class DupeRelease
 {
-    public string Section { get; }
-    public string ReleaseName { get; }
-    public string Group { get; }
-
-    public DateTimeOffset FirstSeen { get; private set; }
-    public DateTimeOffset LastUpdated { get; private set; }
-
-    public long TotalBytes { get; private set; }
-
-    public int ArchiveCount { get; private set; }
-    public int FileCount { get; private set; }
-
-    public bool HasSfv { get; private set; }
-    public bool HasNfo { get; private set; }
-    public bool HasDiz { get; private set; }
-
-    /// <summary>
-    /// CRC32 for every archive file (filename → crc).
-    /// Always populated.
-    /// </summary>
-    public Dictionary<string, uint> Crc32 { get; }
-        = new(StringComparer.OrdinalIgnoreCase);
-
-    public bool IsNuked { get; private set; }
-    public string? NukeReason { get; private set; }
-    public double NukeMultiplier { get; private set; }
+    public DupeRelease()
+    {
+    }
 
     public DupeRelease(
         string section,
@@ -49,6 +27,47 @@ public sealed class DupeRelease
         FirstSeen = seen;
         LastUpdated = seen;
     }
+
+    public string Section { get; set; } = string.Empty;
+    public string ReleaseName { get; set; } = string.Empty;
+    public string Group { get; set; } = string.Empty;
+
+    [JsonInclude]
+    public DateTimeOffset FirstSeen { get; private set; }
+    [JsonInclude]
+    public DateTimeOffset LastUpdated { get; private set; }
+
+    [JsonInclude]
+    public long TotalBytes { get; private set; }
+
+    [JsonInclude]
+    public int ArchiveCount { get; private set; }
+    [JsonInclude]
+    public int FileCount { get; private set; }
+
+    [JsonInclude]
+    public bool HasSfv { get; private set; }
+    [JsonInclude]
+    public bool HasNfo { get; private set; }
+    [JsonInclude]
+    public bool HasDiz { get; private set; }
+
+    /// <summary>
+    /// CRC32 for every archive file (filename → crc).
+    /// Always populated.
+    /// </summary>
+    [JsonInclude]
+    public Dictionary<string, uint> Crc32 { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    [JsonInclude]
+    public bool IsNuked { get; private set; }
+    [JsonInclude]
+    public string? NukeReason { get; private set; }
+    [JsonInclude]
+    public double NukeMultiplier { get; private set; }
+
+    [JsonInclude]
+    public Dictionary<string, long> NukePenalties { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     // ------------------------------------------------------------
     // FILE INGESTION
@@ -106,6 +125,15 @@ public sealed class DupeRelease
     public void Unnuke()
     {
         IsNuked = false;
+        NukeReason = null;
+        NukeMultiplier = 0;
+        NukePenalties.Clear();
+        Touch();
+    }
+
+    public void SetNukePenalties(IReadOnlyDictionary<string, long> penalties)
+    {
+        NukePenalties = new Dictionary<string, long>(penalties, StringComparer.OrdinalIgnoreCase);
         Touch();
     }
 

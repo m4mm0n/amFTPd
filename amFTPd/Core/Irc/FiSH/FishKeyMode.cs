@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Irc.FiSH;
+namespace amFTPd.Core.Irc.FiSH;
 
 /// <summary>
 /// Specifies the encryption mode used by the FiSH protocol for secure message transmission.

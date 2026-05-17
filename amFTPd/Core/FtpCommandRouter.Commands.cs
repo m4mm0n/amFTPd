@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpCommandRouter.Commands.cs
@@ -20,11 +20,16 @@
  */
 
 
+using System;
+using System.Net;
+using System.Reflection;
+using System.Text;
 using amFTPd.Config.Ftpd;
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
 using amFTPd.Core.Fxp;
 using amFTPd.Core.Ident;
+using amFTPd.Core.Messages;
 using amFTPd.Core.Site;
 using amFTPd.Core.Stats.Live;
 using amFTPd.Core.Vfs;
@@ -33,10 +38,7 @@ using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
 using amFTPd.Utils.Cryptography;
-using System;
-using System.Net;
-using System.Reflection;
-using System.Text;
+using RatioLoginContext = amFTPd.Core.RatioLoginContext;
 
 namespace amFTPd.Core
 {
@@ -46,6 +48,17 @@ namespace amFTPd.Core
     public sealed partial class FtpCommandRouter
     {
         #region AMScript Context Builders
+        private static string FtpErrorReply(string? message, string fallback)
+        {
+            var reply = string.IsNullOrWhiteSpace(message) ? fallback : message.TrimEnd();
+            if (reply.Length < 3 || !char.IsDigit(reply[0]) || !char.IsDigit(reply[1]) || !char.IsDigit(reply[2]))
+            {
+                reply = "550 " + reply.TrimStart();
+            }
+
+            return reply.EndsWith("\r\n", StringComparison.Ordinal) ? reply : reply + "\r\n";
+        }
+
         private AMScriptContext BuildCreditContext(Config.Ftpd.FtpSection section, long bytes)
         {
             var account = _s.Account!;
@@ -60,7 +73,8 @@ namespace amFTPd.Core
                 Bytes: bytes,
                 Kb: kb,
                 CostDownload: kb,   // default cost = 1:1
-                EarnedUpload: kb    // default earn = 1:1
+                EarnedUpload: kb,    // default earn = 1:1
+                IsAdmin: account.IsAdmin || account.IsSiteop
             );
         }
 
@@ -95,7 +109,8 @@ namespace amFTPd.Core
                 EarnedUpload: 0,
                 VirtualPath: virt,
                 PhysicalPath: phys,
-                Event: command.ToUpperInvariant()   // "PASV", "EPSV", "PORT", "EPRT"
+                Event: command.ToUpperInvariant(),   // "PASV", "EPSV", "PORT", "EPRT"
+                IsAdmin: account is not null && (account.IsAdmin || account.IsSiteop)
             );
         }
 
@@ -115,7 +130,8 @@ namespace amFTPd.Core
                 EarnedUpload: 0,
                 VirtualPath: virtualPath,
                 PhysicalPath: physicalPath,
-                Event: "ROUTE"
+                Event: "ROUTE",
+                IsAdmin: account.IsAdmin || account.IsSiteop
             );
         }
 
@@ -152,7 +168,9 @@ namespace amFTPd.Core
                 EarnedUpload: 0,
                 VirtualPath: virtPath,
                 PhysicalPath: physicalPath,
-                Event: $"SITE {command.ToUpperInvariant()}"
+                Event: $"SITE {command.ToUpperInvariant()}",
+                IsAdmin: acc.IsAdmin || acc.IsSiteop,
+                Arg: args
             );
         }
 
@@ -187,8 +205,22 @@ namespace amFTPd.Core
                 EarnedUpload: 0,
                 VirtualPath: virt,
                 PhysicalPath: phys,
-                Event: evt
+                Event: evt,
+                IsAdmin: acc.IsAdmin || acc.IsSiteop,
+                IsSiteop: acc.IsSiteop,
+                IsTls: _s.TlsActive,
+                Arg: args ?? ""
             );
+        }
+
+        private async Task SendDenyAsync(AMScriptResult res, string command, CancellationToken ct)
+        {
+            var msg = res.DenyReason ?? $"550 {command} denied by policy.";
+            if (msg.Length < 3 || !char.IsDigit(msg[0]) || !char.IsDigit(msg[1]) || !char.IsDigit(msg[2]))
+            {
+                msg = "550 " + msg;
+            }
+            await _s.WriteAsync(msg, ct);
         }
         #endregion
 
@@ -240,16 +272,80 @@ namespace amFTPd.Core
                 return;
             }
 
-            if (!_s.Users.TryAuthenticate(username, arg, out var account) || account is null)
-            {
-                // Track failed login attempts for hammer/flood logic
-                _s.NotifyLoginFailed();
+            var builtInAuthOk = _s.Users.TryAuthenticate(username, arg, out var account, out var authDenyReason)
+                                && account is not null;
 
-                if (_s.RemoteEndPoint?.Address is IPAddress ip)
+            if (!builtInAuthOk)
+            {
+                var isConcurrentLimit = authDenyReason is not null &&
+                    authDenyReason.Contains("Max connections", StringComparison.OrdinalIgnoreCase);
+
+                // ── Plugin auth fallback ─────────────────────────────────────────
+                // Only attempt if it's a real auth failure (wrong password / unknown
+                // user), not a policy denial like the concurrent-connection limit.
+                if (!isConcurrentLimit && _runtime.PluginHost is { } pluginHost)
                 {
-                    _server.NotifyFailedLogin(ip);
+                    var remoteIp = _s.RemoteEndPoint?.Address?.ToString() ?? string.Empty;
+                    var pluginResult = await pluginHost.TryAuthenticateAsync(
+                        username, arg, remoteIp, ct).ConfigureAwait(false);
+
+                    if (pluginResult is not null)
+                    {
+                        if (pluginResult.Outcome == amFTPd.Plugin.Abstractions.PluginAuthOutcome.Authenticated)
+                        {
+                            // Plugin validated the credentials. Look up the user account so that
+                            // all subsequent login checks (disabled, ratio, ident, etc.) still run.
+                            account = _s.Users.FindUser(username);
+
+                            if (account is not null)
+                            {
+                                // Bypass further auth-failure handling; fall through to post-auth checks.
+                                goto PostAuth;
+                            }
+
+                            // Plugin authenticated but user doesn't exist in the store — deny.
+                            _log.Log(FtpLogLevel.Warn,
+                                $"[Plugin] Auth plugin authenticated '{username}' but user is not in the user store.");
+                            await _s.WriteAsync("530 Login incorrect.\r\n", ct);
+                            return;
+                        }
+
+                        if (pluginResult.Outcome == amFTPd.Plugin.Abstractions.PluginAuthOutcome.Rejected)
+                        {
+                            _s.NotifyLoginFailed();
+                            if (_s.RemoteEndPoint?.Address is IPAddress rejIp)
+                                _server.NotifyFailedLogin(rejIp);
+
+                            await _s.WriteAsync(
+                                pluginResult.RejectReason ?? "530 Login rejected.\r\n", ct);
+                            return;
+                        }
+                        // Passthrough — fall through to built-in deny below.
+                    }
+                }
+                // ── End plugin auth fallback ─────────────────────────────────────
+
+                // Only count against the hammer/IP-reputation for actual bad passwords,
+                // not for exceeding the concurrent login limit.
+                if (!isConcurrentLimit)
+                {
+                    _s.NotifyLoginFailed();
+
+                    if (_s.RemoteEndPoint?.Address is IPAddress ip)
+                    {
+                        _server.NotifyFailedLogin(ip);
+                    }
                 }
 
+                await _s.WriteAsync(authDenyReason ?? "530 Login incorrect.\r\n", ct);
+                return;
+            }
+
+        PostAuth:
+            // Reachable via fall-through (built-in auth) or goto (plugin auth).
+            // In both cases account is non-null, but add a guard for the compiler.
+            if (account is null)
+            {
                 await _s.WriteAsync("530 Login incorrect.\r\n", ct);
                 return;
             }
@@ -349,7 +445,8 @@ namespace amFTPd.Core
                     EarnedUpload: 0,
                     VirtualPath: "/",
                     PhysicalPath: "",
-                    Event: "LOGIN"
+                    Event: "LOGIN",
+                    IsAdmin: account.IsAdmin || account.IsSiteop
                 );
 
                 var gRule = _groupScript.EvaluateGroup(gctx);
@@ -388,7 +485,8 @@ namespace amFTPd.Core
                     EarnedUpload: 0,
                     VirtualPath: "/",
                     PhysicalPath: "",
-                    Event: "LOGIN"
+                    Event: "LOGIN",
+                    IsAdmin: account.IsAdmin || account.IsSiteop
                 );
 
                 var rule = _userScript.EvaluateDownload(ctx);
@@ -475,6 +573,21 @@ namespace amFTPd.Core
             });
 
             await _s.WriteAsync("230 Login successful.\r\n", ct);
+
+            // ------------------------------------------------------------------
+            // MOTD — send after successful login if a motd.txt exists.
+            // ------------------------------------------------------------------
+            var motdEngine = _runtime.Messages;
+            if (motdEngine is not null)
+            {
+                var activeSessions = FtpSession.GetActiveSessions().Count;
+                var motd = motdEngine.RenderMotd(account, activeSessions);
+                if (!string.IsNullOrWhiteSpace(motd))
+                {
+                    var motdMsg = MessageEngine.FormatAsMultiLine("230", motd);
+                    await _s.WriteAsync(motdMsg, ct);
+                }
+            }
         }
 
         private async Task AUTH(string arg, CancellationToken ct)
@@ -656,13 +769,12 @@ namespace amFTPd.Core
             if (_userScript is not null && _s.Account is not null)
             {
                 var ctx = BuildUserContext("CWD", arg);
+                _log.Log(FtpLogLevel.Debug, $"[AMScript] Evaluating CWD for {ctx.UserName}");
                 var res = _userScript.EvaluateUser(ctx);
+                _log.Log(FtpLogLevel.Debug, $"[AMScript] CWD result: {res.Action} {res.DenyReason}");
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 CWD denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "CWD", ct);
                     return;
                 }
             }
@@ -683,6 +795,19 @@ namespace amFTPd.Core
             {
                 _s.Cwd = newV;
                 await _s.WriteAsync(FtpResponses.ActionOk, ct);
+
+                // Per-directory .message file
+                var dirMsgEngine = _runtime.Messages;
+                if (dirMsgEngine is not null)
+                {
+                    var activeSessions = FtpSession.GetActiveSessions().Count;
+                    var dirMsg = dirMsgEngine.RenderDirMessage(phys, _s.Account, activeSessions);
+                    if (!string.IsNullOrWhiteSpace(dirMsg))
+                    {
+                        var formatted = MessageEngine.FormatAsMultiLine("250", dirMsg);
+                        await _s.WriteAsync(formatted, ct);
+                    }
+                }
             }
             else
             {
@@ -847,6 +972,12 @@ namespace amFTPd.Core
                 return;
             }
 
+            if (string.IsNullOrWhiteSpace(arg))
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
             var parts = arg.Split(',', StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 6)
             {
@@ -854,10 +985,30 @@ namespace amFTPd.Core
                 return;
             }
 
-            var ipString = string.Join('.', parts[0], parts[1], parts[2], parts[3]);
-            var port = (int.Parse(parts[4]) << 8) + int.Parse(parts[5]);
+            if (!int.TryParse(parts[0], out var h1) || h1 is < 0 or > 255 ||
+                !int.TryParse(parts[1], out var h2) || h2 is < 0 or > 255 ||
+                !int.TryParse(parts[2], out var h3) || h3 is < 0 or > 255 ||
+                !int.TryParse(parts[3], out var h4) || h4 is < 0 or > 255)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
 
-            var requestedIp = IPAddress.Parse(ipString);
+            if (!int.TryParse(parts[4], out var portHi) || portHi is < 0 or > 255 ||
+                !int.TryParse(parts[5], out var portLo) || portLo is < 0 or > 255)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            var port = (portHi << 8) + portLo;
+            if (port is < 1 or > 65535)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            var requestedIp = new IPAddress(new[] { (byte)h1, (byte)h2, (byte)h3, (byte)h4 });
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
 
             // FXP detection: active target != control IP
@@ -929,16 +1080,53 @@ namespace amFTPd.Core
                 return;
             }
 
-            var tok = arg.Split('|', StringSplitOptions.RemoveEmptyEntries);
-            if (tok.Length < 3)
+            if (string.IsNullOrWhiteSpace(arg))
             {
                 await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
                 return;
             }
 
-            // tok[0] = proto (1 = IPv4, 2 = IPv6, etc.)
-            var ip = IPAddress.Parse(tok[1]);
-            var port = int.Parse(tok[2]);
+            if (arg.Length < 5 || arg[0] != '|')
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            var eprtParts = arg.Split('|');
+            if (eprtParts.Length != 5 ||
+                eprtParts[0].Length != 0 ||
+                eprtParts[4].Length != 0)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            if (!int.TryParse(eprtParts[1], out var proto) || proto < 1 || proto > 2)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            var addrText = eprtParts[2];
+            if (!IPAddress.TryParse(addrText, out var ip))
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            if (proto == 1 && ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+                proto == 2 && ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
+
+            if (!int.TryParse(eprtParts[3], out var port) ||
+                port is < 1 or > 65535)
+            {
+                await _s.WriteAsync(FtpResponses.SyntaxErr, ct);
+                return;
+            }
 
             var remote = (IPEndPoint)_s.Control.Client.RemoteEndPoint!;
 
@@ -1019,10 +1207,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 LIST denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -1033,7 +1218,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(absTarget, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 Not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult?.ErrorMessage, "550 Not found.\r\n"), ct);
                 return;
             }
 
@@ -1047,7 +1232,7 @@ namespace amFTPd.Core
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
-            await _s.WithDataAsync(async stream =>
+            var transferOk = await _s.WithDataAsync(async stream =>
             {
                 await using var wr = new StreamWriter(
                     stream,
@@ -1127,7 +1312,8 @@ namespace amFTPd.Core
                 return 0L;
             }, isUpload: false, countBandwidth: false, ct);
 
-            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+            if (transferOk)
+                await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
 
         private async Task NLST(string arg, CancellationToken ct)
@@ -1144,10 +1330,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 NLST denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "NLST", ct);
                     return;
                 }
             }
@@ -1158,7 +1341,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(absTarget, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 Not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult?.ErrorMessage, "550 Not found.\r\n"), ct);
                 return;
             }
 
@@ -1172,7 +1355,7 @@ namespace amFTPd.Core
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
-            await _s.WithDataAsync(async stream =>
+            var transferOk = await _s.WithDataAsync(async stream =>
             {
                 await using var wr = new StreamWriter(
                     stream,
@@ -1219,7 +1402,8 @@ namespace amFTPd.Core
                 return 0L;
             }, isUpload: false, countBandwidth: false, ct);
 
-            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+            if (transferOk)
+                await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
 
         private async Task MLSD(string arg, CancellationToken ct)
@@ -1236,10 +1420,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 MLSD denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "MLSD", ct);
                     return;
                 }
             }
@@ -1250,7 +1431,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(absTarget, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 MLSD failed.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult?.ErrorMessage, "550 MLSD failed.\r\n"), ct);
                 return;
             }
 
@@ -1264,7 +1445,7 @@ namespace amFTPd.Core
 
             await _s.WriteAsync(FtpResponses.FileOk, ct);
 
-            await _s.WithDataAsync(async stream =>
+            var transferOk = await _s.WithDataAsync(async stream =>
             {
                 await using var wr = new StreamWriter(
                     stream,
@@ -1335,7 +1516,8 @@ namespace amFTPd.Core
                 return 0L;
             }, isUpload: false, countBandwidth: false, ct);
 
-            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+            if (transferOk)
+                await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
 
         private async Task MLST(string arg, CancellationToken ct)
@@ -1353,10 +1535,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 MLST denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -1366,7 +1545,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(target, _s.Account);
             if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 MLST failed.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult.ErrorMessage, "550 MLST failed.\r\n"), ct);
                 return;
             }
 
@@ -1435,10 +1614,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 RETR denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -1452,7 +1628,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(arg, _s.Account);
             if (vfsResult is not { Success: true, Node: not null })
             {
-                await _s.WriteAsync(vfsResult?.ErrorMessage ?? "550 File not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult?.ErrorMessage, "550 File not found.\r\n"), ct);
                 return;
             }
 
@@ -1518,78 +1694,102 @@ namespace amFTPd.Core
             await _s.WriteAsync(FtpResponses.FileOk, ct);
             _s.ClearRestOffset();
 
-            await _s.WithDataAsync(async data =>
+            _s.BeginTransfer(Path.GetFileName(node.PhysicalPath ?? virtTarget), isUpload: false, length);
+            try
             {
-                await using (sourceStream)
+                var transferOk = await _s.WithDataAsync(async data =>
                 {
-                    if (rest is > 0 && sourceStream.CanSeek)
-                        sourceStream.Seek(rest.Value, SeekOrigin.Begin);
-
-                    var transferred = await CopyWithThrottleAsync(
-                        sourceStream,
-                        data,
-                        _s.Account.MaxDownloadKbps,
-                        isDownload: true,
-                        ct);
-
-                    if (transferred <= 0)
-                        return 0L;
-
-                    Server.NotifySectionBandwidth(
-                        section.Name,
-                        transferred,
-                        isUpload: false);
-
-                    // ---- Credits -------------------------------------------------
-                    _runtime.CreditEngine?.TryConsumeCredits(
-                        _s.Account,
-                        section?.Name ?? "",
-                        transferred,
-                        out _);
-
-                    // ---- Rolling stats ------------------------------------------
-                    var rs = _runtime.RollingStats;
-                    rs.DownloadBytes5s.Add(transferred);
-                    rs.DownloadBytes1m.Add(transferred);
-                    rs.DownloadBytes5m.Add(transferred);
-                    rs.Transfers5s.Add(1);
-                    rs.Transfers1m.Add(1);
-                    rs.Transfers5m.Add(1);
-
-                    // ---- Live user stats ----------------------------------------
-                    var live = _runtime.LiveStats;
-
-                    var user = live.Users.GetOrAdd(
-                        _s.Account.UserName,
-                        _ => new UserLiveStats { UserName = _s.Account.UserName });
-
-                    Interlocked.Increment(ref user.Downloads);
-                    Interlocked.Add(ref user.BytesDownloaded, transferred);
-
-                    // ---- Live section stats -------------------------------------
-                    if (section is not null)
+                    await using (sourceStream)
                     {
-                        var sec = live.Sections.GetOrAdd(
-                            section.Name,
-                            _ => new SectionLiveStats { SectionName = section.Name });
+                        if (rest is > 0 && sourceStream.CanSeek)
+                            sourceStream.Seek(rest.Value, SeekOrigin.Begin);
 
-                        Interlocked.Increment(ref sec.Downloads);
-                        Interlocked.Add(ref sec.BytesDownloaded, transferred);
+                        var transferred = await CopyWithThrottleAsync(
+                            sourceStream,
+                            data,
+                            ResolveEffectiveSpeedKbps(isDownload: true, section, virtTarget),
+                            isDownload: true,
+                            ct,
+                            _s.AddTransferBytes);
 
-                        lock (_sectionsTouched)
+                        if (transferred <= 0)
+                            return 0L;
+
+                        if (section is not null)
                         {
-                            if (_sectionsTouched.Add(section.Name))
-                                Interlocked.Increment(ref sec.ActiveUsers);
+                            Server.NotifySectionBandwidth(
+                                section.Name,
+                                transferred,
+                                isUpload: false);
                         }
+
+                        // ---- Credits -------------------------------------------------
+                        _runtime.CreditEngine?.TryConsumeCredits(
+                            _s.Account,
+                            section?.Name ?? "",
+                            transferred,
+                            out _);
+
+                        // ---- Rolling stats ------------------------------------------
+                        var rs = _runtime.RollingStats;
+                        rs.DownloadBytes5s.Add(transferred);
+                        rs.DownloadBytes1m.Add(transferred);
+                        rs.DownloadBytes5m.Add(transferred);
+                        rs.Transfers5s.Add(1);
+                        rs.Transfers1m.Add(1);
+                        rs.Transfers5m.Add(1);
+
+                        // ---- Live user stats ----------------------------------------
+                        var live = _runtime.LiveStats;
+
+                        var user = live.Users.GetOrAdd(
+                            _s.Account.UserName,
+                            _ => new UserLiveStats { UserName = _s.Account.UserName });
+
+                        Interlocked.Increment(ref user.Downloads);
+                        Interlocked.Add(ref user.BytesDownloaded, transferred);
+
+                        // ---- Live section stats -------------------------------------
+                        if (section is not null)
+                        {
+                            var sec = live.Sections.GetOrAdd(
+                                section.Name,
+                                _ => new SectionLiveStats { SectionName = section.Name });
+
+                            Interlocked.Increment(ref sec.Downloads);
+                            Interlocked.Add(ref sec.BytesDownloaded, transferred);
+
+                            lock (_sectionsTouched)
+                            {
+                                if (_sectionsTouched.Add(section.Name))
+                                    Interlocked.Increment(ref sec.ActiveUsers);
+                            }
+                        }
+
+                        FireSiteEvent("onDownload", virtTarget, section, _s.Account.UserName);
+
+                        // Publish Download event to EventBus (for session log, xferlog, IRC, etc.)
+                        _runtime.EventBus?.Publish(new FtpEvent
+                        {
+                            Type = FtpEventType.Download,
+                            Timestamp = DateTimeOffset.UtcNow,
+                            SessionId = _s.SessionId,
+                            User = _s.Account.UserName,
+                            Group = _s.Account.GroupName,
+                            Section = section?.Name,
+                            VirtualPath = virtTarget,
+                            Bytes = transferred,
+                            RemoteHost = _s.RemoteEndPoint?.Address.ToString()
+                        });
+
+                        return transferred;
                     }
+                }, isUpload: false, countBandwidth: true, ct);
 
-                    FireSiteEvent("onDownload", virtTarget, section, _s.Account.UserName);
-
-                    return transferred;
-                }
-            }, isUpload: false, countBandwidth: true, ct);
-
-            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+                if (transferOk)
+                    await _s.WriteAsync(FtpResponses.ClosingData, ct);
+            }
+            finally { _s.EndTransfer(); }
         }
 
         private async Task STOR(string arg, CancellationToken ct)
@@ -1612,10 +1812,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 STOR denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -1661,126 +1858,285 @@ namespace amFTPd.Core
                 return;
             }
 
-            await _s.WriteAsync(FtpResponses.FileOk, ct);
+            // ------------------------------------------------------------------
+            // Upload quota check
+            // ------------------------------------------------------------------
+            if (_runtime.UploadQuota is { } quotaStore && _s.Account is not null)
+            {
+                var quotaResult = quotaStore.Check(_s.Account, _runtime.GetGroupsSnapshot());
+                if (!quotaResult.Allowed)
+                {
+                    await _s.WriteAsync(
+                        $"553 Upload denied: {quotaResult.DeniedReason}\r\n",
+                        ct);
+                    return;
+                }
+            }
 
+            // ------------------------------------------------------------------
+            // SFV-FIRST enforcement: reject non-.sfv uploads until an .sfv
+            // is present in the release directory.
+            // ------------------------------------------------------------------
+            if (section.RequireSfvFirst &&
+                !fileName.EndsWith(".sfv", StringComparison.OrdinalIgnoreCase))
+            {
+                var hasSfv = Directory.Exists(physDir) &&
+                    Directory.EnumerateFiles(physDir, "*.sfv", SearchOption.TopDirectoryOnly).Any();
+                if (!hasSfv)
+                {
+                    await _s.WriteAsync(
+                        $"550 SFV-first enforced: upload the .sfv file before uploading '{fileName}'.\r\n",
+                        ct);
+                    return;
+                }
+            }
+
+            // Read REST offset early so we can validate before opening the data connection.
             var rest = _s.RestOffset;
             _s.ClearRestOffset();
 
-            await _s.WithDataAsync(async data =>
+            // ------------------------------------------------------------------
+            // RESUME INTEGRITY CHECK: if a REST offset is given and the section
+            // requires it, verify the partial file on disk is exactly that many
+            // bytes before accepting the resume.  A size mismatch means either
+            // the partial file is corrupt or the client has the wrong offset.
+            // ------------------------------------------------------------------
+            if (rest is > 0 && section is not null && section.RequireResumeIntegrity)
             {
-                var mode = rest is > 0 ? FileMode.OpenOrCreate : FileMode.Create;
-
-                await using var fs = new FileStream(
-                    phys,
-                    mode,
-                    FileAccess.Write,
-                    FileShare.None);
-
-                // ============================================================
-                // CRC32 STREAM WRAPPER (ADDED)
-                // ============================================================
-                await using var crcStream = new Crc32WriteStream(fs);
-
-                if (rest is > 0)
-                    fs.Seek(rest.Value, SeekOrigin.Begin);
-
-                var transferred = await CopyWithThrottleAsync(
-                    data,
-                    crcStream,
-                    _s.Account.MaxUploadKbps,
-                    isDownload: false,
-                    ct);
-
-                if (transferred <= 0)
-                    return 0L;
-
-                Server.NotifySectionBandwidth(
-                    section.Name,
-                    transferred,
-                    isUpload: true);
-
-                // ---- Credits ---------------------------------------------------
-                if (_s.Account is not null)
+                if (!File.Exists(phys))
                 {
-                    CreditService.ApplyUpload(
-                        _s.Account,
-                        section.Name,
-                        transferred);
+                    await _s.WriteAsync(
+                        $"550 Resume rejected: no partial file found for '{fileName}' " +
+                        $"at REST offset {rest.Value}. Upload the complete file.\r\n",
+                        ct);
+                    return;
                 }
 
-                // ---- Rolling stats ---------------------------------------------
-                var rs = _runtime.RollingStats;
-                rs.UploadBytes5s.Add(transferred);
-                rs.UploadBytes1m.Add(transferred);
-                rs.UploadBytes5m.Add(transferred);
-                rs.Transfers5s.Add(1);
-                rs.Transfers1m.Add(1);
-                rs.Transfers5m.Add(1);
-
-                // ---- Live user stats -------------------------------------------
-                var live = _runtime.LiveStats;
-
-                var user = live.Users.GetOrAdd(
-                    _s.Account.UserName,
-                    _ => new UserLiveStats { UserName = _s.Account.UserName });
-
-                Interlocked.Increment(ref user.Uploads);
-                Interlocked.Add(ref user.BytesUploaded, transferred);
-
-                // ---- Live section stats ----------------------------------------
-                if (section is not null)
+                var existingSize = new FileInfo(phys).Length;
+                if (existingSize != rest.Value)
                 {
-                    var sec = live.Sections.GetOrAdd(
-                        section.Name,
-                        _ => new SectionLiveStats { SectionName = section.Name });
+                    await _s.WriteAsync(
+                        $"550 Resume integrity check failed: partial file is {existingSize} bytes " +
+                        $"but REST offset is {rest.Value}. Delete and re-upload.\r\n",
+                        ct);
+                    return;
+                }
 
-                    Interlocked.Increment(ref sec.Uploads);
-                    Interlocked.Add(ref sec.BytesUploaded, transferred);
-
-                    lock (_sectionsTouched)
+                // If an SFV is present, verify the partial file's CRC32 against a
+                // cached .partcrc sidecar if one exists from the previous upload attempt.
+                var partCrcFile = phys + ".partcrc";
+                if (File.Exists(partCrcFile))
+                {
+                    try
                     {
-                        if (_sectionsTouched.Add(section.Name))
-                            Interlocked.Increment(ref sec.ActiveUsers);
+                        var expectedHex = (await File.ReadAllTextAsync(partCrcFile, ct)).Trim();
+                        var actualCrc = amFTPd.Utils.Cryptography.Crc32.ComputeFile(phys);
+                        var actualHex = amFTPd.Utils.Cryptography.Crc32.ToHex(actualCrc);
+
+                        if (!string.Equals(expectedHex, actualHex, StringComparison.OrdinalIgnoreCase))
+                        {
+                            await _s.WriteAsync(
+                                $"550 Resume integrity check failed: partial CRC mismatch " +
+                                $"(expected {expectedHex}, got {actualHex}). Delete and re-upload.\r\n",
+                                ct);
+                            return;
+                        }
+                    }
+                    catch
+                    {
+                        // Sidecar unreadable — skip CRC check but still allow resume
                     }
                 }
+            }
 
-                // ============================================================
-                // BINARY DUPE STORE UPDATE (ADDED)
-                // ============================================================
-                if (_runtime.DupeStore is BinaryDupeStore dupe)
+            await _s.WriteAsync(FtpResponses.FileOk, ct);
+
+            _s.BeginTransfer(fileName, isUpload: true);
+            try
+            {
+                var transferOk = await _s.WithDataAsync(async data =>
                 {
-                    var release = Path.GetFileName(dirVirt.TrimEnd('/'));
+                    var mode = rest is > 0 ? FileMode.OpenOrCreate : FileMode.Create;
+                    var preTransferSize = rest is > 0 && File.Exists(phys) ? new FileInfo(phys).Length : 0L;
 
-                    dupe.AddOrUpdateFile(
-                        section.Name,
-                        release,
-                        fileName,
-                        crcStream.Hash,
-                        transferred,
-                        _s.Account!.UserName,
-                        _s.Account.GroupName);
-                }
-
-                // ---- Zipscript -------------------------------------------------
-                if (_runtime.Zipscript is not null)
-                {
-                    var ctx = new ZipscriptUploadContext(
-                        section.Name,
-                        virtTarget,
+                    await using var fs = new FileStream(
                         phys,
-                        transferred,
-                        _s.Account?.UserName,
-                        DateTimeOffset.UtcNow);
+                        mode,
+                        FileAccess.Write,
+                        FileShare.Read);
 
-                    _runtime.Zipscript.OnUploadComplete(ctx);
-                }
+                    // ============================================================
+                    // CRC32 STREAM WRAPPER (ADDED)
+                    // ============================================================
+                    await using var crcStream = new Crc32WriteStream(fs);
 
-                FireSiteEvent("onUpload", virtTarget, section, _s.Account.UserName);
+                    if (rest is > 0)
+                        fs.Seek(rest.Value, SeekOrigin.Begin);
 
-                return transferred;
-            }, isUpload: true, countBandwidth: true, ct);
+                    var transferred = await CopyWithThrottleAsync(
+                        data,
+                        crcStream,
+                        ResolveEffectiveSpeedKbps(isDownload: false, section, virtTarget),
+                        isDownload: false,
+                        ct,
+                        _s.AddTransferBytes);
 
-            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+                    if (transferred <= 0)
+                        return 0L;
+
+                    if (section is not null)
+                    {
+                        Server.NotifySectionBandwidth(
+                            section.Name,
+                            transferred,
+                            isUpload: true);
+                    }
+
+                    // ---- Credits ---------------------------------------------------
+                    if (section is not null)
+                        ApplyUploadCredits(virtTarget, section, transferred);
+
+                    // ---- Rolling stats ---------------------------------------------
+                    var rs = _runtime.RollingStats;
+                    rs.UploadBytes5s.Add(transferred);
+                    rs.UploadBytes1m.Add(transferred);
+                    rs.UploadBytes5m.Add(transferred);
+                    rs.Transfers5s.Add(1);
+                    rs.Transfers1m.Add(1);
+                    rs.Transfers5m.Add(1);
+
+                    // ---- Live user stats -------------------------------------------
+                    var live = _runtime.LiveStats;
+
+                    if (_s.Account is not null)
+                    {
+                        var user = live.Users.GetOrAdd(
+                            _s.Account.UserName,
+                            _ => new UserLiveStats { UserName = _s.Account.UserName });
+
+                        Interlocked.Increment(ref user.Uploads);
+                        Interlocked.Add(ref user.BytesUploaded, transferred);
+                    }
+
+                    // ---- Live section stats ----------------------------------------
+                    if (section is not null)
+                    {
+                        var sec = live.Sections.GetOrAdd(
+                            section.Name,
+                            _ => new SectionLiveStats { SectionName = section.Name });
+
+                        Interlocked.Increment(ref sec.Uploads);
+                        Interlocked.Add(ref sec.BytesUploaded, transferred);
+
+                        lock (_sectionsTouched)
+                        {
+                            if (_sectionsTouched.Add(section.Name))
+                                Interlocked.Increment(ref sec.ActiveUsers);
+                        }
+                    }
+
+                    // ============================================================
+                    // BINARY DUPE STORE UPDATE (ADDED)
+                    // ============================================================
+                    if (_runtime.DupeStore is BinaryDupeStore dupe && section is not null)
+                    {
+                        var release = Path.GetFileName(dirVirt.TrimEnd('/'));
+
+                        // Replace existing dupe state for this file so size/CRC are
+                        // calculated from the final on-disk file after resume/overwrite.
+                        dupe.RemoveFile(section.Name, release, fileName);
+
+                        await crcStream.FlushAsync(ct);
+
+                        uint finalCrc;
+                        try
+                        {
+                            finalCrc = rest is > 0
+                                ? amFTPd.Utils.Cryptography.Crc32.ComputeFile(phys)
+                                : crcStream.Hash;
+                        }
+                        catch
+                        {
+                            finalCrc = crcStream.Hash;
+                        }
+
+                        var finalSize = preTransferSize + transferred;
+
+                        dupe.AddOrUpdateFile(
+                            section.Name,
+                            release,
+                            fileName,
+                            finalCrc,
+                            finalSize,
+                            _s.Account!.UserName,
+                            _s.Account.GroupName);
+                    }
+
+                    // ---- Zipscript -------------------------------------------------
+                    if (_runtime.Zipscript is not null)
+                    {
+                        var ctx = new ZipscriptUploadContext(
+                            section?.Name,
+                            virtTarget,
+                            phys,
+                            transferred,
+                            _s.Account?.UserName,
+                            DateTimeOffset.UtcNow,
+                            Crc32: crcStream.Hash);
+
+                        _runtime.Zipscript.OnUploadComplete(ctx);
+                    }
+
+                    if (_s.Account is { } acc && section is not null)
+                    {
+                        _raceEngine.RegisterUpload(
+                            acc.UserName,
+                            dirVirt,
+                            section.Name,
+                            transferred);
+                    }
+
+                    // ---- Resume integrity sidecar (best-effort) -------------------
+                    // If RequireResumeIntegrity is set, write (or refresh) a .partcrc
+                    // sidecar alongside the uploaded file.  A subsequent resume will
+                    // verify this CRC before accepting the REST offset.
+                    if (section is { RequireResumeIntegrity: true })
+                    {
+                        try
+                        {
+                            var partCrcPath = phys + ".partcrc";
+                            var fileCrc = amFTPd.Utils.Cryptography.Crc32.ComputeFile(phys);
+                            await File.WriteAllTextAsync(
+                                partCrcPath,
+                                amFTPd.Utils.Cryptography.Crc32.ToHex(fileCrc),
+                                ct);
+                        }
+                        catch { /* best-effort; never block the upload response */ }
+                    }
+
+                    FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
+
+                    // Publish Upload event to EventBus (for session log, xferlog, IRC, etc.)
+                    _runtime.EventBus?.Publish(new FtpEvent
+                    {
+                        Type = FtpEventType.Upload,
+                        Timestamp = DateTimeOffset.UtcNow,
+                        SessionId = _s.SessionId,
+                        User = _s.Account?.UserName,
+                        Group = _s.Account?.GroupName,
+                        Section = section?.Name,
+                        VirtualPath = virtTarget,
+                        Bytes = transferred,
+                        RemoteHost = _s.RemoteEndPoint?.Address.ToString()
+                    });
+
+                    return transferred;
+                }, isUpload: true, countBandwidth: true, ct);
+
+                if (transferOk)
+                    await _s.WriteAsync(FtpResponses.ClosingData, ct);
+            }
+            finally { _s.EndTransfer(); }
         }
 
         private async Task APPE(string arg, CancellationToken ct)
@@ -1804,10 +2160,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 APPE denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -1866,21 +2219,22 @@ namespace amFTPd.Core
             _s.ClearRestOffset();
 
             long transferredTotal = 0;
+            long preTransferSize = 0;
 
-            await _s.WithDataAsync(async s =>
+            var transferOk = await _s.WithDataAsync(async s =>
             {
+                preTransferSize = new FileInfo(phys).Length;
+
                 await using var fs = new FileStream(
                     phys,
                     FileMode.Append,
                     FileAccess.Write,
-                    FileShare.None);
-
-                var maxKbps = _s.Account?.MaxUploadKbps ?? 0;
+                    FileShare.Read);
 
                 var transferred = await CopyWithThrottleAsync(
                     s,
                     fs,
-                    maxKbps,
+                    ResolveEffectiveSpeedKbps(isDownload: false, section, virtTarget),
                     isDownload: false,
                     ct);
 
@@ -1889,16 +2243,20 @@ namespace amFTPd.Core
 
                 transferredTotal = transferred;
 
-                Server.NotifySectionBandwidth(
-                    section.Name,
-                    transferred,
-                    isUpload: true);
+                if (section is not null)
+                {
+                    Server.NotifySectionBandwidth(
+                        section.Name,
+                        transferred,
+                        isUpload: true);
+                }
 
-                ApplyUploadCredits(virtTarget, section, transferred);
+                if (section is not null)
+                    ApplyUploadCredits(virtTarget, section, transferred);
 
                 FireSiteEvent("onUpload", virtTarget, section, _s.Account?.UserName);
 
-                if (_runtime.Zipscript is not null)
+                if (_runtime.Zipscript is not null && section is not null)
                 {
                     var ctx = new ZipscriptUploadContext(
                         section.Name,
@@ -1911,7 +2269,7 @@ namespace amFTPd.Core
                     _runtime.Zipscript.OnUploadComplete(ctx);
                 }
 
-                if (_s.Account is { } acc)
+                if (_s.Account is { } acc && section is not null)
                 {
                     _raceEngine.RegisterUpload(
                         acc.UserName,
@@ -1928,12 +2286,13 @@ namespace amFTPd.Core
             // ============================================================
             if (transferredTotal > 0 &&
                 _runtime.DupeStore is BinaryDupeStore dupe &&
+                section is not null &&
                 _s.Account is { } account)
             {
                 uint crc;
                 try
                 {
-                    crc = Crc32.Compute(phys);
+                    crc = Crc32.ComputeFile(phys);
                 }
                 catch
                 {
@@ -1942,7 +2301,9 @@ namespace amFTPd.Core
                 }
 
                 var release = Path.GetFileName(dirVirt.TrimEnd('/'));
-                var fileSize = new FileInfo(phys).Length;
+                var fileSize = preTransferSize + transferredTotal;
+
+                dupe.RemoveFile(section.Name, release, fileName);
 
                 dupe.AddOrUpdateFile(
                     section.Name,
@@ -1954,7 +2315,8 @@ namespace amFTPd.Core
                     account.GroupName);
             }
 
-            await _s.WriteAsync(FtpResponses.ClosingData, ct);
+            if (transferOk)
+                await _s.WriteAsync(FtpResponses.ClosingData, ct);
         }
 
         private async Task REST(string arg, CancellationToken ct)
@@ -1972,10 +2334,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateDownload(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.DenyReason ?? "550 REST denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -2002,10 +2361,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 DELE denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -2021,7 +2377,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
             if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult.ErrorMessage, "550 File not found.\r\n"), ct);
                 return;
             }
 
@@ -2050,6 +2406,15 @@ namespace amFTPd.Core
                 if (File.Exists(phys))
                 {
                     File.Delete(phys);
+                    _s.VfsManager?.ClearCache();
+
+                    // Clean up .partcrc sidecar if present
+                    try
+                    {
+                        var partCrc = phys + ".partcrc";
+                        if (File.Exists(partCrc)) File.Delete(partCrc);
+                    }
+                    catch { /* best-effort */ }
 
                     // ============================================================
                     // BINARY DUPE STORE UPDATE (ADDED)
@@ -2103,13 +2468,12 @@ namespace amFTPd.Core
             if (_userScript is not null && _s.Account is not null)
             {
                 var ctx = BuildUserContext("MKD", arg);
+                _log.Log(FtpLogLevel.Debug, $"[AMScript] Evaluating MKD for {ctx.UserName}");
                 var res = _userScript.EvaluateUser(ctx);
+                _log.Log(FtpLogLevel.Debug, $"[AMScript] MKD result: {res.Action} {res.DenyReason}");
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 MKD denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "MKD", ct);
                     return;
                 }
             }
@@ -2163,6 +2527,7 @@ namespace amFTPd.Core
             try
             {
                 Directory.CreateDirectory(phys);
+                _s.VfsManager?.ClearCache();
                 FireSiteEvent("onMkdir", virtTarget, section, _s.Account?.UserName);
                 await _s.WriteAsync(FtpResponses.PathCreated, ct);
             }
@@ -2181,10 +2546,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 RMD denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -2201,7 +2563,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
             if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 Directory not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult.ErrorMessage, "550 Directory not found.\r\n"), ct);
                 return;
             }
 
@@ -2262,10 +2624,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 RNTO denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -2283,7 +2642,7 @@ namespace amFTPd.Core
             var fromResult = _s.VfsManager?.Resolve(fromVirt, _s.Account);
             if (fromResult != null && (!fromResult.Success || fromResult.Node is null))
             {
-                await _s.WriteAsync(fromResult.ErrorMessage ?? "550 Not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(fromResult.ErrorMessage, "550 Not found.\r\n"), ct);
                 return;
             }
 
@@ -2355,10 +2714,12 @@ namespace amFTPd.Core
                 if (isFile)
                 {
                     File.Move(fromPhys, toPhys, overwrite: true);
+                    _s.VfsManager?.ClearCache();
                 }
                 else if (isDir)
                 {
                     Directory.Move(fromPhys, toPhys);
+                    _s.VfsManager?.ClearCache();
                 }
                 else
                 {
@@ -2484,6 +2845,7 @@ namespace amFTPd.Core
 
         private async Task SIZE(string arg, CancellationToken ct)
         {
+            _log.Log(FtpLogLevel.Debug, $"[FTP] SIZE {arg}");
             if (_s.Account is null)
             {
                 await _s.WriteAsync(FtpResponses.NotLoggedIn, ct);
@@ -2497,10 +2859,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 SIZE denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "SIZE", ct);
                     return;
                 }
             }
@@ -2521,9 +2880,9 @@ namespace amFTPd.Core
             }
 
             var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
-            if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
+            if (vfsResult == null || !vfsResult.Success || vfsResult.Node is null)
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult?.ErrorMessage, "550 File not found.\r\n"), ct);
                 return;
             }
 
@@ -2561,10 +2920,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 MDTM denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "MDTM", ct);
                     return;
                 }
             }
@@ -2587,7 +2943,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(virtTarget, _s.Account);
             if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult.ErrorMessage, "550 File not found.\r\n"), ct);
                 return;
             }
 
@@ -2626,10 +2982,7 @@ namespace amFTPd.Core
                 var res = _userScript.EvaluateUser(ctx);
                 if (res.Action == AMRuleAction.Deny)
                 {
-                    var msg = res.Message ?? "550 RNFR denied by policy.\r\n";
-                    if (!msg.EndsWith("\r\n", StringComparison.Ordinal))
-                        msg += "\r\n";
-                    await _s.WriteAsync(msg, ct);
+                    await SendDenyAsync(res, "LIST", ct);
                     return;
                 }
             }
@@ -2653,7 +3006,7 @@ namespace amFTPd.Core
             var vfsResult = _s.VfsManager?.Resolve(virtPath, _s.Account);
             if (vfsResult != null && (!vfsResult.Success || vfsResult.Node is null))
             {
-                await _s.WriteAsync(vfsResult.ErrorMessage ?? "550 File not found.\r\n", ct);
+                await _s.WriteAsync(FtpErrorReply(vfsResult.ErrorMessage, "550 File not found.\r\n"), ct);
                 return;
             }
 
@@ -2748,32 +3101,86 @@ namespace amFTPd.Core
             // Context for authorization: has verb, args, router, session, etc.
             var authCtx = new SiteCommandContext(this, sub, rest);
 
-            if (!FtpAuthorization.CanUseSiteCommand(account, sub, authCtx))
+            // --------------------------------------------------------------------------------------------------
+            // TCL SCRIPTING: Check for glFTPd-style custom TCL commands
+            // ------------------------------------------------------------------
+            if (_runtime.TclRunner is not null && _runtime.Tcl is { SiteCommands: { Count: > 0 } tclMap })
             {
-                await _s.WriteAsync("550 Permission denied.\r\n", ct);
-                _log.Log(FtpLogLevel.Warn,
-                    $"SITE {sub} rejected for user {account.UserName} from {_s.RemoteEndPoint}");
-                return;
-            }
+                if (tclMap.TryGetValue(sub, out var tclScriptPath))
+                {
+                    var tclArgs = string.IsNullOrWhiteSpace(rest) ? [] : rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    _log.Log(FtpLogLevel.Debug, $"[TCL] Executing {tclScriptPath} for user {account?.UserName}");
+                    var tclResult = await _runtime.TclRunner.ExecuteSiteCommandAsync(tclScriptPath, account!, tclArgs, _s);
+                    _log.Log(FtpLogLevel.Debug, $"[TCL] Result: Success={tclResult.Success}, OutputLength={tclResult.Result?.Length ?? 0}");
 
-            // Special-case: SITE SECURITY is implemented directly here, not via _siteCommands
-            if (sub.Equals("SECURITY", StringComparison.OrdinalIgnoreCase))
-            {
-                await HandleSiteSecurityAsync(rest, ct);
-                return;
+                    // glFTPd scripts output to stdout, which we capture as tclResult.Result.
+                    if (!string.IsNullOrEmpty(tclResult.Result))
+                    {
+                        var lines = tclResult.Result.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var line in lines)
+                        {
+                            // If script already provides code (e.g. 200-), don't prefix.
+                            if (line.Length >= 4 && char.IsDigit(line[0]) && (line[3] == '-' || line[3] == ' '))
+                            {
+                                await _s.WriteAsync(line, ct);
+                            }
+                            else
+                            {
+                                await _s.WriteAsync($"200- {line}", ct);
+                            }
+                        }
+                        await _s.WriteAsync("200 OK", ct);
+                    }
+                    else if (tclResult.Success)
+                    {
+                        await _s.WriteAsync("200 Command successful.", ct);
+                    }
+                    else
+                    {
+                        await _s.WriteAsync("550 Script failed or returned error.", ct);
+                    }
+                    return;
+                }
             }
 
             if (!_siteCommands.TryGetValue(sub, out var cmd))
             {
+                if (!FtpAuthorization.CanUseSiteCommand(account, sub, authCtx))
+                {
+                    await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                    _log.Log(FtpLogLevel.Warn,
+                        $"SITE {sub} rejected for user {account?.UserName} from {_s.RemoteEndPoint}");
+                    return;
+                }
+
+                // Delegate to any plugin that registered this verb before giving up.
+                if (_runtime.PluginHost is { } host)
+                {
+                    var handled = await host.TryHandleSiteCommandAsync(
+                        verb: sub,
+                        argument: rest,
+                        username: account!.UserName,
+                        isAdmin: account.IsAdmin,
+                        isSiteop: account.IsSiteop,
+                        remoteIp: _s.RemoteEndPoint?.Address?.ToString() ?? string.Empty,
+                        currentPath: _s.Cwd,
+                        write: (msg, token) => _s.WriteAsync(msg, token),
+                        ct: ct).ConfigureAwait(false);
+
+                    if (handled) return;
+                }
+
                 // Show the original verb in the error so scripts see what they typed
                 await _s.WriteAsync($"502 Unknown SITE command '{rawSub}'.\r\n", ct);
                 return;
             }
 
-            // Existing per-command RequiresAdmin flag (extra guard, still valid)
-            if (cmd.RequiresAdmin && !account.IsAdmin)
+            if ((cmd.RequiresAdmin && account?.IsAdmin != true) ||
+                (cmd.RequiresSiteop && account?.IsAdmin != true && account?.IsSiteop != true))
             {
                 await _s.WriteAsync("550 Permission denied.\r\n", ct);
+                _log.Log(FtpLogLevel.Warn,
+                    $"SITE {sub} rejected for user {account?.UserName} from {_s.RemoteEndPoint}");
                 return;
             }
 
@@ -2951,7 +3358,8 @@ namespace amFTPd.Core
                 EarnedUpload: 0,
                 VirtualPath: releaseVirtPath,
                 PhysicalPath: phys,
-                Event: eventName
+                Event: eventName,
+                IsAdmin: acc is not null && (acc.IsAdmin || acc.IsSiteop)
             );
 
             // We treat these as fire-and-forget notifications.

@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Site.Commands;
+namespace amFTPd.Core.Site.Commands;
 
 public sealed class SiteUnblockCommand : SiteCommandBase
 {

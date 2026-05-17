@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FxpRequest.cs
@@ -20,9 +20,9 @@
  */
 
 
-using amFTPd.Config.Fxp;
 using System.Net;
 using System.Security.Authentication;
+using amFTPd.Config.Fxp;
 
 namespace amFTPd.Core.Fxp
 {

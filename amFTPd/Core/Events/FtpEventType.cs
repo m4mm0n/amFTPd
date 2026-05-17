@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpEventType.cs
@@ -42,5 +42,8 @@ public enum FtpEventType
     Pre,
     RaceUpdate,
     RaceComplete,
-    ZipscriptStatus
+    ZipscriptStatus,
+    Oneliner,
+    Request,
+    AutoNuke
 }

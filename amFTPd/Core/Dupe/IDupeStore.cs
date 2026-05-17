@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IDupeStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -39,4 +39,10 @@ public interface IDupeStore
     /// Remove a dupe entry (eg. on WIPE).
     /// </summary>
     bool Remove(string sectionName, string releaseName);
+
+    /// <summary>
+    /// Enumerate every entry in the store.
+    /// Primarily used by tooling (migration validator, export) — not for hot paths.
+    /// </summary>
+    IEnumerable<DupeEntry> GetAll();
 }

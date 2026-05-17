@@ -1,8 +1,8 @@
-﻿using amFTPd.Config.Daemon;
-using amFTPd.Core.Stats;
-using amFTPd.Logging;
 using System.Net;
 using System.Text;
+using amFTPd.Config.Daemon;
+using amFTPd.Core.Stats;
+using amFTPd.Logging;
 
 namespace amFTPd.Core.Monitoring;
 

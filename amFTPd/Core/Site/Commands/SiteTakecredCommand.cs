@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteTakecredCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x004677FE
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE TAKECRED command handler.
  * 
  *  License:
  *      MIT License

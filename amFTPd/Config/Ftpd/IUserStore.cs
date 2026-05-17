@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -35,7 +35,7 @@ public interface IUserStore
     /// <param name="account">When this method returns, contains the authenticated <see cref="FtpUser"/> object if authentication succeeds;
     /// otherwise, <see langword="null"/>. This parameter is passed uninitialized.</param>
     /// <returns><see langword="true"/> if the authentication is successful; otherwise, <see langword="false"/>.</returns>
-    bool TryAuthenticate(string user, string password, out FtpUser? account);
+    bool TryAuthenticate(string user, string password, out FtpUser? account, out string? denyReason);
     /// <summary>
     /// Handles the logout process for the specified FTP user.
     /// </summary>

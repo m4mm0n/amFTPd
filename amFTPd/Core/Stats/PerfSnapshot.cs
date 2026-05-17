@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Stats;
+namespace amFTPd.Core.Stats;
 
 public sealed class PerfSnapshot
 {
@@ -19,4 +19,12 @@ public sealed class PerfSnapshot
     public double AverageTransferMilliseconds { get; init; }
 
     public long MaxConcurrentTransfers { get; init; }
+
+    // Scene-specific event counters
+    public long TotalNukes { get; init; }
+    public long TotalUnnukes { get; init; }
+    public long TotalPres { get; init; }
+
+    // Server uptime (set by StatusEndpoint from its start time)
+    public double UptimeSeconds { get; init; }
 }

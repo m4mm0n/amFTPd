@@ -1,7 +1,7 @@
-﻿using amFTPd.Core.Dupe;
+using System.Text.Json;
+using amFTPd.Core.Dupe;
 using amFTPd.Core.Dupe.ImportExport;
 using amFTPd.Core.Import;
-using System.Text.Json;
 
 namespace amFTPd.Core.Site.Commands;
 

@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import.Records;
+namespace amFTPd.Core.Import.Records;
 
 /// <summary>
 /// Represents a user record imported from an external source, including group memberships, roles, and credit

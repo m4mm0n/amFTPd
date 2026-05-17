@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IrcAnnouncer.cs
@@ -20,13 +20,13 @@
  */
 
 
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Text;
 using amFTPd.Config.Irc;
 using amFTPd.Core.Events;
 using amFTPd.Core.Irc.FiSH;
 using amFTPd.Logging;
-using System.Net.Security;
-using System.Net.Sockets;
-using System.Text;
 
 namespace amFTPd.Core.Irc;
 
@@ -79,7 +79,7 @@ public sealed class IrcAnnouncer : IAsyncDisposable
         _config = config;
         _log = log;
         _bus = bus;
-        _scriptHook = scriptHook;   
+        _scriptHook = scriptHook;
         _dh1080 = new Dh1080Manager(log);
 
 #if DEBUG
@@ -323,41 +323,41 @@ public sealed class IrcAnnouncer : IAsyncDisposable
 
                 _ = HandleNickCollisionAsync();
                 return;
-            
+
             case "MODE":
             case "KICK":
             case "INVITE":
                 break;
 
             case "NICK":
-            {
-                // Prefix MUST exist for NICK
-                if (prefix == null || args.Count < 1)
-                    return;
-
-                var oldNick = prefix.Split('!')[0];
-                var newNick = args[0];
-
-                _log.Log(FtpLogLevel.Info,
-                    $"[IRC] Nick change: {oldNick} → {newNick}");
-
-                // If it's us, update identity
-                if (oldNick.Equals(_currentNick, StringComparison.OrdinalIgnoreCase))
                 {
-                    _currentNick = newNick;
-                    _nickAttempts = 0;
+                    // Prefix MUST exist for NICK
+                    if (prefix == null || args.Count < 1)
+                        return;
+
+                    var oldNick = prefix.Split('!')[0];
+                    var newNick = args[0];
 
                     _log.Log(FtpLogLevel.Info,
-                        $"[IRC] Our nick is now {_currentNick}");
+                        $"[IRC] Nick change: {oldNick} → {newNick}");
+
+                    // If it's us, update identity
+                    if (oldNick.Equals(_currentNick, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _currentNick = newNick;
+                        _nickAttempts = 0;
+
+                        _log.Log(FtpLogLevel.Info,
+                            $"[IRC] Our nick is now {_currentNick}");
+                    }
+
+                    // 🔐 Rebind FiSH keys
+                    _keys.Rebind(oldNick, newNick);
+
+                    // 🔁 Rebind DH1080 session (if mid-handshake)
+                    _dh1080.Rebind(oldNick, newNick);
+                    return;
                 }
-
-                // 🔐 Rebind FiSH keys
-                _keys.Rebind(oldNick, newNick);
-
-                // 🔁 Rebind DH1080 session (if mid-handshake)
-                _dh1080.Rebind(oldNick, newNick);
-                return;
-            }
 
             // ─────────────────────────────────────────────
             // Channel / presence numerics (useful later)

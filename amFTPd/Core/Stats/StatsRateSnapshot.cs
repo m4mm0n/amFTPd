@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Stats;
+namespace amFTPd.Core.Stats;
 
 /// <summary>
 /// Represents a snapshot of command and data transfer rates over a specific interval.

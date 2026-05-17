@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Scene;
+namespace amFTPd.Core.Scene;
 
 /// <summary>
 /// Represents the release state of a scene, including its section, path, pre-release status, nuke status, and last

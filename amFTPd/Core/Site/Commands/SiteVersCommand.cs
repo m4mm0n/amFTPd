@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteVersCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x94EDB9C2
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE VERS command handler.
  * 
  *  License:
  *      MIT License

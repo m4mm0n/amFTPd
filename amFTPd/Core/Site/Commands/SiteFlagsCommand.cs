@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteFlagsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xB37FC15F
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE FLAGS command handler.
  * 
  *  License:
  *      MIT License

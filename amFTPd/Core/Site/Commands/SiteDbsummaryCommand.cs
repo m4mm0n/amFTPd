@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDbsummaryCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x9C6FFBA5
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DBSUMMARY command handler.
  * 
  *  License:
  *      MIT License

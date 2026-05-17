@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRescanCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x709DEE17
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RESCAN command handler.
  * 
  *  License:
  *      MIT License

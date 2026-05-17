@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteKickCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xB2AD5941
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE KICK command handler.
  * 
  *  License:
  *      MIT License
@@ -86,6 +86,13 @@ namespace amFTPd.Core.Site.Commands
                     // best effort
                 }
             }
+
+            context.Runtime.AuditLog?.Log(
+                actor: s.Account?.UserName ?? "*unknown*",
+                action: "KICK",
+                target: userName,
+                detail: $"sessions={targets.Count}",
+                ip: s.RemoteEndPoint?.Address.ToString());
 
             await s.WriteAsync($"200 Kicked {targets.Count} session(s) for {userName}.\r\n", cancellationToken);
         }

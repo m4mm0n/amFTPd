@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRacestatsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x98A63D24
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RACESTATS command handler.
  * 
  *  License:
  *      MIT License

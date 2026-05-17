@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+
+    <!-- Package metadata (publish to NuGet so community plugin authors can reference it) -->
+    <PackageId>amFTPd.Plugin.Abstractions</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Geir Gustavsen, ZeroLinez Softworx</Authors>
+    <Description>
+      Public plugin API for amFTPd. Reference this package when building plugins
+      that add SITE commands, custom authentication providers, or FTP event handlers.
+    </Description>
+    <PackageLicense>MIT</PackageLicense>
+    <RepositoryUrl>https://github.com/zerolinez/amftpd</RepositoryUrl>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

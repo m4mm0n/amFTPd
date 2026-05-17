@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpCompatibilityConfig.cs
@@ -47,6 +47,6 @@ namespace amFTPd.Config.Ftpd
         bool GlStyleSiteStat = false,
         bool IoStyleSiteWho = false,
         bool IrcGlStyleMessages = false,
-        IDictionary<string, string> SiteCommandAliases = null // alias -> canonical
+        IDictionary<string, string>? SiteCommandAliases = null // alias -> canonical
     );
 }

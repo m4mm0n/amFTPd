@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Utils;
+namespace amFTPd.Utils;
 
 internal sealed class CountingStream : Stream
 {

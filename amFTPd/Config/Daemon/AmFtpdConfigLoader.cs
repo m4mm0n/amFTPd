@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdConfigLoader.cs
@@ -20,6 +20,9 @@
  */
 
 
+using System.Collections.Immutable;
+using System.Text;
+using System.Text.Json;
 using amFTPd.Config.Ftpd;
 using amFTPd.Core.Dupe;
 using amFTPd.Core.Fxp;
@@ -30,8 +33,6 @@ using amFTPd.Credits;
 using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Security;
-using System.Text;
-using System.Text.Json;
 
 namespace amFTPd.Config.Daemon;
 
@@ -68,7 +69,8 @@ public static class AmFtpdConfigLoader
     public static async Task<AmFtpdRuntimeConfig> LoadAsync(
             string configPath,
             IFtpLogger logger,
-            DatabaseManager? reuseDatabase = null)
+            DatabaseManager? reuseDatabase = null,
+            CancellationToken cancellationToken = default)
     {
         // ------------------------------------------
         // Ensure JSON config exists (generate default on first run)
@@ -107,13 +109,13 @@ public static class AmFtpdConfigLoader
                     RootPath = defaultRootPath,
                     WelcomeMessage = "Welcome to amFTPd",
                     AllowAnonymous = false,
-                    RequireTlsForAuth = false,
+                    RequireTlsForAuth = true,
 
                     // Use the enum name so it round-trips cleanly with Enum.TryParse.
                     // Short RFC codes (C/P/S/E) are still supported by the parser below.
                     DataChannelProtectionDefault = "Clear",
 
-                    AllowActiveMode = true,
+                    AllowActiveMode = false,
                     AllowFxp = false
                 },
                 Tls = new
@@ -131,6 +133,15 @@ public static class AmFtpdConfigLoader
                     GroupsDbPath = defaultGroupsDbPath,
                     SectionsDbPath = defaultSectionsDbPath,
                     UseMmap = true
+                },
+                Logging = new
+                {
+                    Mode = "something",
+                    TextLogPath = "logs/amftpd.log",
+                    BinaryLogPath = "logs/amftpd.qlbin",
+                    Console = true,
+                    Binary = true,
+                    QueueCapacity = 8192
                 },
 
                 // ---------------------------------
@@ -268,6 +279,11 @@ public static class AmFtpdConfigLoader
             AllowFxp: root.Server.AllowFxp
         );
 
+        ftpCfg = ftpCfg with
+        {
+            MaxCommandsPerMinute = root.Server.MaxCommandsPerMinute
+        };
+
         // Apply compatibility profile if present in the root config.
         if (root.Compatibility is not null)
         {
@@ -281,6 +297,7 @@ public static class AmFtpdConfigLoader
         IUserStore userStore;
         IGroupStore? groupStore = null;
         ISectionStore? sectionStore = null;
+        var normalizedGroups = NormalizeGroupConfigs(root.Groups);
 
         var backend = root.Storage.UserStoreBackend?.Trim() ?? "json";
         var useBinary = backend.Equals("binary", StringComparison.OrdinalIgnoreCase);
@@ -331,7 +348,7 @@ public static class AmFtpdConfigLoader
                 "Using JSON/config backend for users/groups/sections (UserStoreBackend != 'binary').");
 
             userStore = InMemoryUserStore.LoadFromFile(root.Storage.UsersDbPath);
-            groupStore = null;
+            groupStore = BuildInMemoryGroupStore(normalizedGroups);
             sectionStore = null;
         }
 
@@ -377,10 +394,9 @@ public static class AmFtpdConfigLoader
         // ------------------------------------------
         // SectionManager (runtime FtpSection model)
         // ------------------------------------------
-        var sections =
-            sectionStore is not null
-                ? SectionManager.FromSectionStore(sectionStore, "db")
-                : SectionManager.LoadOrCreateDefault(root.Storage.SectionsPath);
+        var sections = CreateSectionManager(root, sectionStore);
+        if (sectionStore is null)
+            sectionStore = new InMemorySectionStore(sections.GetSections());
 
         // ------------------------------------------
         // TLS
@@ -409,7 +425,7 @@ public static class AmFtpdConfigLoader
             root.Sections,
             root.DirectoryRules,
             root.RatioRules,
-            root.Groups
+            normalizedGroups
         );
 
         var raceEngine = new RaceEngine();
@@ -478,20 +494,21 @@ public static class AmFtpdConfigLoader
         // Return combined runtime configuration
         // ======================================================================
 
-        return new AmFtpdRuntimeConfig
+        var runtime = new AmFtpdRuntimeConfig
         {
             FtpConfig = ftpCfg,
             UserStore = userStore,
             Sections = sections,
             TlsConfig = tlsCfg,
             IdentConfig = root.Ident,
+            Logging = root.Logging ?? QuickLogOptions.Default,
             VfsConfig = root.Vfs,
             Database = reuseDatabase ?? db,
 
             SectionRules = root.Sections,
             DirectoryRules = root.DirectoryRules,
             RatioRules = root.RatioRules,
-            Groups = root.Groups,
+            Groups = normalizedGroups,
 
             RatioEngine = ratioEngine,
             RatioPipeline = ratioPipeline,
@@ -513,8 +530,158 @@ public static class AmFtpdConfigLoader
             ConfigFilePath = configPath,
             RawJson = json,
             LoadedAtUtc = DateTimeOffset.UtcNow,
-            StatusConfig = statusConfig
+            StatusConfig = statusConfig,
+            WebhookConfig = root.Webhooks,
+            AcmeConfig = root.Acme,
+            TlsPfxPath = root.Tls.PfxPath,
+            TlsPfxPassword = root.Tls.PfxPassword,
+            Tcl = root.Tcl,
+            TclRunner = root.Tcl is not null
+                ? new amFTPd.Scripting.Tcl.GlftpdTclRunner(Path.Combine(dbBaseDir_ ?? AppContext.BaseDirectory, root.Tcl.ScriptsPath))
+                : null
         };
+
+        // ======================================================================
+        // PLUGIN SYSTEM
+        // Load plugins AFTER the runtime is fully assembled so each plugin
+        // receives a stable configDir and a complete IPluginContext.
+        // ======================================================================
+        if (root.Plugins is { Count: > 0 } pluginEntries)
+        {
+            try
+            {
+                var baseDir = Path.GetDirectoryName(Path.GetFullPath(configPath))
+                              ?? AppContext.BaseDirectory;
+
+                var host = await amFTPd.Core.Plugins.PluginHost.LoadAsync(
+                    pluginEntries, baseDir, logger, cancellationToken)
+                    .ConfigureAwait(false);
+
+                runtime.PluginHost = host;
+            }
+            catch (Exception ex)
+            {
+                logger.Log(FtpLogLevel.Error,
+                    $"[Plugin] Plugin subsystem failed to initialise: {ex.Message}", ex);
+            }
+        }
+
+        return runtime;
+    }
+
+    private static SectionManager CreateSectionManager(
+        AmFtpdConfigRoot root,
+        ISectionStore? sectionStore)
+    {
+        if (sectionStore is not null)
+            return SectionManager.FromSectionStore(sectionStore, "db");
+
+        if (!string.IsNullOrWhiteSpace(root.Storage.SectionsPath))
+            return SectionManager.LoadOrCreateDefault(root.Storage.SectionsPath);
+
+        if (root.Sections.Count == 0)
+            return new SectionManager([]);
+
+        var sections = root.Sections
+            .Where(pair => pair.Value.Enabled)
+            .Select(pair =>
+            {
+                var name = string.IsNullOrWhiteSpace(pair.Value.SectionName)
+                    ? pair.Key
+                    : pair.Value.SectionName;
+
+                var directoryRule = root.DirectoryRules
+                    .OrderByDescending(rule => rule.Key.Length)
+                    .FirstOrDefault(rule =>
+                        rule.Value.Enabled &&
+                        rule.Value.SectionName.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+                var virtualRoot = !string.IsNullOrWhiteSpace(directoryRule.Key)
+                    ? directoryRule.Key
+                    : "/" + name;
+
+                root.RatioRules.TryGetValue(pair.Value.RatioRuleName, out var ratioRule);
+
+                return new Ftpd.FtpSection
+                {
+                    Name = name,
+                    VirtualRoot = virtualRoot,
+                    RatioSection = pair.Value.RatioRuleName,
+                    AllowUpload = directoryRule.Value?.AllowUpload ?? true,
+                    AllowDownload = directoryRule.Value?.AllowDownload ?? true,
+                    FreeLeech = ratioRule?.IsFree == true ||
+                                (ratioRule is not null &&
+                                 ratioRule.CreditsPerKiBDownloaded == 0),
+                    RatioUploadUnit = Math.Max(0, ratioRule?.CreditsPerKiBUploaded ?? 0),
+                    RatioDownloadUnit = Math.Max(0, ratioRule?.CreditsPerKiBDownloaded ?? 0),
+                    UploadMultiplier = ratioRule?.UploadBonus is > 0
+                        ? ratioRule.UploadBonus.Value
+                        : 1.0,
+                    DownloadMultiplier = ratioRule?.MultiplyCost ?? 1.0
+                };
+            });
+
+        return new SectionManager(sections, "config");
+    }
+
+    private static Dictionary<string, GroupConfig> NormalizeGroupConfigs(
+        Dictionary<string, GroupConfig> sourceGroups)
+    {
+        if (sourceGroups.Count == 0)
+            return new Dictionary<string, GroupConfig>(StringComparer.OrdinalIgnoreCase);
+
+        var normalized = new Dictionary<string, GroupConfig>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (key, value) in sourceGroups)
+        {
+            var rawName = !string.IsNullOrWhiteSpace(value.GroupName)
+                ? value.GroupName
+                : key;
+
+            var normalizedName = rawName?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(normalizedName))
+                continue;
+
+            normalized[normalizedName] = value with
+            {
+                // preserve config-provided compatibility and make runtime access predictable
+                GroupName = normalizedName,
+                Description = string.IsNullOrWhiteSpace(value.Description)
+                    ? string.Empty
+                    : value.Description,
+                Users = value.Users ?? [],
+                Flags = value.Flags ?? ImmutableHashSet<char>.Empty,
+                RatioMultiply = value.RatioMultiply >= 0 ? value.RatioMultiply : 1.0,
+                UploadBonus = value.UploadBonus >= 0 ? value.UploadBonus : 1.0,
+                MaxUsers = value.MaxUsers < 0 ? 0 : value.MaxUsers,
+                DailyUploadLimitMb = value.DailyUploadLimitMb < 0 ? 0 : value.DailyUploadLimitMb,
+                WeeklyUploadLimitMb = value.WeeklyUploadLimitMb < 0 ? 0 : value.WeeklyUploadLimitMb,
+                MonthlyUploadLimitMb = value.MonthlyUploadLimitMb < 0 ? 0 : value.MonthlyUploadLimitMb
+            };
+        }
+
+        return normalized;
+    }
+
+    private static InMemoryGroupStore BuildInMemoryGroupStore(
+        IDictionary<string, GroupConfig> groups)
+    {
+        var store = new InMemoryGroupStore();
+
+        foreach (var (groupName, cfg) in groups)
+        {
+            var users = (cfg.Users ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var group = new FtpGroup(
+                GroupName: groupName,
+                Description: cfg.Description,
+                Users: users,
+                SectionCredits: new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase)
+            );
+
+            store.TryAddGroup(group, out _);
+        }
+
+        return store;
     }
 
     /// <summary>
@@ -666,6 +833,15 @@ public static class AmFtpdConfigLoader
                 GroupsDbPath = groupsDbPath,
                 SectionsDbPath = sectionsDbPath,
                 UseMmap = true
+            },
+            Logging = new
+            {
+                Mode = "something",
+                TextLogPath = "logs/amftpd.log",
+                BinaryLogPath = "logs/amftpd.qlbin",
+                Console = true,
+                Binary = true,
+                QueueCapacity = 8192
             },
 
             // Ident disabled by default

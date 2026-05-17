@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteGroupmembersCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x8DFD2B37
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE GROUPMEMBERS command handler.
  * 
  *  License:
  *      MIT License

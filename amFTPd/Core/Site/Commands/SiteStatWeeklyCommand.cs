@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteStatWeeklyCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xF1F0E7D2
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE STATWEEKLY command handler.
  * 
  *  License:
  *      MIT License

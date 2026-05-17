@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.Scene;
+using amFTPd.Core.Scene;
 using amFTPd.Core.Zipscript;
 
 namespace amFTPd.Core.Dupe;

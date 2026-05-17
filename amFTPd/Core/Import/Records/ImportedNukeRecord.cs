@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import.Records;
+namespace amFTPd.Core.Import.Records;
 
 public sealed record ImportedNukeRecord(
     string Section,

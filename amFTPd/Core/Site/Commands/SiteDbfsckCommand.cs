@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDbfsckCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xD22DF666
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DBFSCK command handler.
  * 
  *  License:
  *      MIT License

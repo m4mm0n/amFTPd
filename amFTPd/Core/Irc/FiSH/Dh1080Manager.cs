@@ -1,4 +1,4 @@
-﻿using amFTPd.Logging;
+using amFTPd.Logging;
 
 namespace amFTPd.Core.Irc.FiSH;
 
@@ -15,7 +15,7 @@ public sealed class Dh1080Manager
         new(StringComparer.OrdinalIgnoreCase);
 
     private IFtpLogger? _log;
-    
+
     /// <summary>
     /// Initializes a new instance of the Dh1080Manager class with the specified logger.
     /// </summary>
@@ -41,7 +41,16 @@ public sealed class Dh1080Manager
     /// null. This parameter is passed uninitialized.</param>
     /// <returns>true if a session associated with the specified target is found; otherwise, false.</returns>
     public bool TryGet(string target, out Dh1080Session session)
-        => _sessions.TryGetValue(target, out session);
+    {
+        if (_sessions.TryGetValue(target, out var found))
+        {
+            session = found;
+            return true;
+        }
+
+        session = null!;
+        return false;
+    }
     /// <summary>
     /// Removes the session associated with the specified target identifier.
     /// </summary>

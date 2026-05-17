@@ -1,4 +1,4 @@
-﻿using amFTPd.Db.Abstractions;
+using amFTPd.Db.Abstractions;
 
 namespace amFTPd.Core.Site.Commands;
 

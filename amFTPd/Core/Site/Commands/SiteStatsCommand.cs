@@ -1,5 +1,5 @@
-﻿using amFTPd.Core.Stats;
 using System.Text;
+using amFTPd.Core.Stats;
 
 namespace amFTPd.Core.Site.Commands;
 
@@ -107,7 +107,8 @@ public sealed class SiteStatsCommand : SiteCommandBase
                 }
             }
 
-            if (context.StatusEndpoint is not null &&
+            var statusEndpoint = context.StatusEndpoint;
+            if (statusEndpoint is not null &&
                 runtime.LiveStats.Ips.Count > 0)
             {
                 sb.AppendLine();
@@ -116,20 +117,23 @@ public sealed class SiteStatsCommand : SiteCommandBase
                         ? $"  -- Per-IP live stats (top {topN.Value}, anonymized) --"
                         : "  -- Per-IP live stats (anonymized) --");
 
-                var payload = context.StatusEndpoint
+                var payload = statusEndpoint
                     .BuildStatusPayload(includeIpStats: true, overrideMaxIps: topN);
 
-                foreach (var kv in payload.Ips)
+                if (payload.Ips is not null)
                 {
-                    var ip = kv.Value;
+                    foreach (var kv in payload.Ips)
+                    {
+                        var ip = kv.Value;
 
-                    sb.AppendLine(
-                        $"   {kv.Key} " +
-                        $"UL={ip.Uploads} " +
-                        $"DL={ip.Downloads} " +
-                        $"UP={ip.BytesUploaded} " +
-                        $"DN={ip.BytesDownloaded} " +
-                        $"sessions={ip.ActiveSessions}");
+                        sb.AppendLine(
+                            $"   {kv.Key} " +
+                            $"UL={ip.Uploads} " +
+                            $"DL={ip.Downloads} " +
+                            $"UP={ip.BytesUploaded} " +
+                            $"DN={ip.BytesDownloaded} " +
+                            $"sessions={ip.ActiveSessions}");
+                    }
                 }
             }
         }

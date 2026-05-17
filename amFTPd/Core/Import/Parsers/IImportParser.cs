@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import.Parsers;
+namespace amFTPd.Core.Import.Parsers;
 
 /// <summary>
 /// Defines a parser that reads data from a specified root path and produces a collection of objects of type T.

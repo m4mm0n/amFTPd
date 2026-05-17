@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpConfig.cs
@@ -97,6 +97,9 @@ namespace amFTPd.Config.Ftpd
 
         /// <summary>Welcome message on successful login.</summary>
         public string? WelcomeMessage { get; init; }
+
+        /// <summary>Site name used in MOTD/message variable substitution (%sitename).</summary>
+        public string SiteName { get; init; } = "amFTPd";
 
         /// <summary>
         /// Maximum concurrent connections across the whole daemon.

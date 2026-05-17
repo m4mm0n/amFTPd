@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteUptimeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x26E91FED
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE UPTIME command handler.
  * 
  *  License:
  *      MIT License

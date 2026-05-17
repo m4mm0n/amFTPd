@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRaceCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xC2BB1017
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RACE command handler.
  * 
  *  License:
  *      MIT License

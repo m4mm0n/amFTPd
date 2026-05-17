@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteNukeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x339492A2
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE NUKE command handler.
  * 
  *  License:
  *      MIT License
@@ -20,10 +20,10 @@
  */
 
 
+using System.Text;
 using amFTPd.Core.Events;
 using amFTPd.Core.Race;
 using amFTPd.Logging;
-using System.Text;
 
 namespace amFTPd.Core.Site.Commands;
 
@@ -124,16 +124,9 @@ public sealed class SiteNukeCommand : SiteCommandBase
             nukeMultiplier = context.Router.Config.DefaultNukeMultiplier;
         }
 
-        // We keep penalties list and race reference, but *no* RatioEngine calls anymore.
-        var penalties = new List<(string User, long Bytes, long PenaltyKb, long NewCredits)>();
+        // Grab the race snapshot; NukePropagation will handle credit deduction from it.
         RaceSnapshot? race = null;
-
-        if (context.RaceEngine.TryGetRace(releaseVirt, out var r))
-        {
-            // For now we just remember the race for logging / events.
-            // Credit-back logic via RatioEngine was removed because the API does not exist.
-            race = r;
-        }
+        context.RaceEngine.TryGetRace(releaseVirt, out race);
 
         if (context.Runtime.Zipscript is not null)
         {
@@ -174,7 +167,7 @@ public sealed class SiteNukeCommand : SiteCommandBase
                 // Log to main log
                 context.Log.Log(
                     FtpLogLevel.Warn,
-                    $"SITE NUKE by {nuker}: {virt} => {target} (Reason: {reason}, Penalties: {penalties.Count})");
+                    $"SITE NUKE by {nuker}: {virt} => {target} (Reason: {reason}, Mult: {nukeMultiplier}x)");
             }
 
             // Centralized side effects (dupe/zipscript state is already updated above)
@@ -186,6 +179,13 @@ public sealed class SiteNukeCommand : SiteCommandBase
                 reason,
                 nukeMultiplier,
                 race);
+
+            context.Runtime.AuditLog?.Log(
+                actor: nuker,
+                action: "NUKE",
+                target: virt,
+                detail: $"reason={reason} mult={nukeMultiplier}x section={section?.Name ?? "-"}",
+                ip: context.Session.RemoteEndPoint?.Address.ToString());
 
             await context.Session.WriteAsync(
                 $"250 NUKE completed for {virt}. Reason: {reason}\r\n",

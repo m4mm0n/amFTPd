@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteGivecredCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xE6A3BF1E
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE GIVECRED command handler.
  * 
  *  License:
  *      MIT License

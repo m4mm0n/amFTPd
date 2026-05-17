@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Monitoring;
+namespace amFTPd.Core.Monitoring;
 
 /// <summary>
 /// Gets the number of active sessions represented by the payload.

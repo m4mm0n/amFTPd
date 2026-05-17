@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Scene;
+namespace amFTPd.Core.Scene;
 
 /// <summary>
 /// Provides utility methods for parsing and extracting information from scene release names.

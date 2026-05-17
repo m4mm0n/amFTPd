@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.Import.Records;
+using amFTPd.Core.Import.Records;
 
 namespace amFTPd.Core.Import.Parsers;
 

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdStatusConfig.cs
@@ -71,4 +71,20 @@ public sealed record AmFtpdStatusConfig(
     /// Default: 10.
     /// </summary>
     public int MaxIpEntries { get; init; } = 10;
+
+    /// <summary>
+    /// Whether the REST API endpoints at /api/* should be enabled.
+    /// When true, the same HttpListener and AuthToken gate the REST routes.
+    /// Default: true (when Status is enabled).
+    /// </summary>
+    public bool RestApiEnabled { get; init; } = true;
+
+    /// <summary>
+    /// Whether the web admin dashboard SPA should be served at /admin.
+    /// The dashboard HTML itself is served without auth (auth is handled in-browser
+    /// via the REST API Bearer token). All actual data comes from /api/* which
+    /// is still auth-gated when <see cref="AuthToken"/> is set.
+    /// Default: true (when Status is enabled).
+    /// </summary>
+    public bool AdminDashboardEnabled { get; init; } = true;
 }

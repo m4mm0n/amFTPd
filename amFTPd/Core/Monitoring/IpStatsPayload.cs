@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Monitoring;
+namespace amFTPd.Core.Monitoring;
 
 public sealed class IpStatsPayload
 {

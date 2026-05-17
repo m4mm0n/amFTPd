@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Monitoring;
+namespace amFTPd.Core.Monitoring;
 
 /// <summary>
 /// Represents a snapshot of transfer status metrics, including data volume and concurrency information for ongoing and

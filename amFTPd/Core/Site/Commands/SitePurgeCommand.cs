@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SitePurgeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xA864FDDD
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE PURGE command handler.
  * 
  *  License:
  *      MIT License

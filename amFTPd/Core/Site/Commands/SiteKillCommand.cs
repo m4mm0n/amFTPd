@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteKillCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x3908BD92
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE KILL command handler.
  * 
  *  License:
  *      MIT License
@@ -20,8 +20,8 @@
  */
 
 
-using amFTPd.Logging;
 using System.Net.Sockets;
+using amFTPd.Logging;
 
 namespace amFTPd.Core.Site.Commands;
 

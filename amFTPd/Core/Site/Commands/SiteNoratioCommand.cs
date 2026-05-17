@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteNoratioCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x0B3D3536
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE NORATIO command handler.
  * 
  *  License:
  *      MIT License

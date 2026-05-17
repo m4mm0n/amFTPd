@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import;
+namespace amFTPd.Core.Import;
 
 /// <summary>
 /// Provides a global registry for tracking the progress of an ongoing import operation.

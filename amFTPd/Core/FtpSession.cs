@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpSession.cs
@@ -20,6 +20,12 @@
  */
 
 
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Text;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ident;
 using amFTPd.Config.Vfs;
@@ -30,12 +36,6 @@ using amFTPd.Core.Stats.Live;
 using amFTPd.Core.Vfs;
 using amFTPd.Logging;
 using amFTPd.Security;
-using System.Collections.Concurrent;
-using System.Net;
-using System.Net.Security;
-using System.Net.Sockets;
-using System.Security.Authentication;
-using System.Text;
 
 namespace amFTPd.Core;
 
@@ -81,6 +81,9 @@ public sealed class FtpSession : IAsyncDisposable
 
     private DateTimeOffset _lastViolationUtc;
     private DateTimeOffset? _blockedUntilUtc;
+
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private bool _bannerSent;
 
     #endregion
     #region Public Properties and Methods
@@ -228,6 +231,55 @@ public sealed class FtpSession : IAsyncDisposable
     /// Gets the FTP server associated with the current connection.
     /// </summary>
     public FtpServer? Server { get; }
+
+    // ------------------------------------------------------------------
+    // Transfer state — updated during RETR/STOR for SITE WHO display.
+    // Fields are volatile/Interlocked-safe; WHO reads them without a lock.
+    // ------------------------------------------------------------------
+
+    /// <summary>Filename currently being transferred, or null when idle.</summary>
+    public volatile string? TransferFileName;
+
+    /// <summary>0 = Idle, 1 = Upload, 2 = Download.</summary>
+    public volatile int TransferDirection;
+
+    /// <summary>Total bytes of the transfer (0 if unknown / not applicable).</summary>
+    public long TransferTotalBytes;
+
+    /// <summary>Bytes transferred so far in the current transfer. Updated via Interlocked.Add.</summary>
+    public long TransferBytesCompleted;
+
+    /// <summary>UTC timestamp when the current transfer started.</summary>
+    public DateTimeOffset TransferStartedAt;
+
+    /// <summary>
+    /// Marks the start of a data transfer. Called immediately before the data pump begins.
+    /// </summary>
+    public void BeginTransfer(string fileName, bool isUpload, long totalBytes = 0)
+    {
+        TransferFileName = fileName;
+        TransferDirection = isUpload ? 1 : 2;
+        TransferTotalBytes = totalBytes;
+        Interlocked.Exchange(ref TransferBytesCompleted, 0L);
+        TransferStartedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Clears transfer state after a data transfer completes or is aborted.
+    /// </summary>
+    public void EndTransfer()
+    {
+        TransferDirection = 0;
+        TransferFileName = null;
+    }
+
+    /// <summary>
+    /// Atomically adds <paramref name="bytes"/> to <see cref="TransferBytesCompleted"/>.
+    /// Called per-chunk from the copy loop.
+    /// </summary>
+    public void AddTransferBytes(long bytes) =>
+        Interlocked.Add(ref TransferBytesCompleted, bytes);
+
     #endregion
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpSession"/> class, representing an FTP session with the specified
@@ -270,13 +322,18 @@ public sealed class FtpSession : IAsyncDisposable
         TlsActive = false;
         _tls = tls;
 
-        IdentManager = new IdentManager(identCfg);
+        identCfg ??= new IdentConfig();
+
+        IdentManager = identCfg.Enabled || identCfg.Required
+            ? new IdentManager(identCfg)
+            : null;
         VfsManager = new VfsManager(
             vfsCfg.Mounts,
             vfsCfg.UserMounts,
             server.Runtime.ReleaseRegistry,
-            sectionResolver, 
-            server.Runtime.PreRegistry);
+            sectionResolver,
+            server.Runtime.PreRegistry,
+            server.Runtime.SymlinkStore);
 
         SessionId = Interlocked.Increment(ref _nextSessionId);
         _sessions[SessionId] = this;
@@ -359,9 +416,43 @@ public sealed class FtpSession : IAsyncDisposable
     /// <returns>A task that represents the asynchronous write operation.</returns>
     public async Task WriteAsync(string s, CancellationToken ct)
     {
-        var bytes = Encoding.ASCII.GetBytes(s);
-        await _ctrlStream.WriteAsync(bytes, 0, bytes.Length, ct);
-        await _ctrlStream.FlushAsync(ct);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await WriteInternalAsync(s, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task SendWelcomeAsync(CancellationToken ct)
+    {
+        if (_bannerSent || _cfg.WelcomeMessage is null)
+            return;
+
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_bannerSent || _cfg.WelcomeMessage is null)
+                return;
+
+            await WriteInternalAsync(FtpResponses.Banner(_cfg.WelcomeMessage), ct).ConfigureAwait(false);
+            _bannerSent = true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task WriteInternalAsync(string s, CancellationToken ct)
+    {
+        if (!s.EndsWith("\r\n")) s += "\r\n";
+        var bytes = Encoding.UTF8.GetBytes(s);
+        await _ctrlStream.WriteAsync(bytes, 0, bytes.Length, ct).ConfigureAwait(false);
+        await _ctrlStream.FlushAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -516,7 +607,7 @@ public sealed class FtpSession : IAsyncDisposable
     /// <param name="countBandwidth">A boolean indicating whether to count the bandwidth used during the transfer.</param>
     /// <param name="ct">A <see cref="CancellationToken"/> used to observe cancellation requests.</param>
     /// <returns></returns>
-    public async Task WithDataAsync(
+    public async Task<bool> WithDataAsync(
         Func<Stream, Task<long>> action,
         bool isUpload,
         bool countBandwidth,
@@ -525,7 +616,7 @@ public sealed class FtpSession : IAsyncDisposable
         if (_data is null)
         {
             await WriteAsync("425 Can't open data connection.\r\n", ct);
-            return;
+            return false;
         }
 
         CancellationTokenSource? linkedCts = null;
@@ -542,7 +633,10 @@ public sealed class FtpSession : IAsyncDisposable
             }
 
             var bytesTransferred =
-                await _data.SendAsync(action, linkedCts.Token);
+                await _data.SendAsync(
+                    action,
+                    flushAfterTransfer: !isUpload,
+                    linkedCts.Token);
 
             if (bytesTransferred > 0)
             {
@@ -555,16 +649,20 @@ public sealed class FtpSession : IAsyncDisposable
         catch (OperationCanceledException)
         {
             // ABOR or shutdown – do not count twice
+            return false;
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            _log.Log(FtpLogLevel.Warn, "Data connection closed during transfer.", ex);
             NotifyTransferAborted();
             await WriteAsync("426 Connection closed; transfer aborted.\r\n", ct);
+            return false;
         }
         catch (Exception ex)
         {
             _log.Log(FtpLogLevel.Error, "Data connection error.", ex);
             await WriteAsync("451 Requested action aborted. Local error.\r\n", ct);
+            return false;
         }
         finally
         {
@@ -579,6 +677,8 @@ public sealed class FtpSession : IAsyncDisposable
             try { await _data.DisposeAsync(); } catch { }
             _data = null;
         }
+
+        return true;
     }
     /// <summary>
     /// Processes FTP commands asynchronously, handling client-server communication and managing the control connection.
@@ -607,10 +707,9 @@ public sealed class FtpSession : IAsyncDisposable
             return;
         }
 
-        if (_cfg.WelcomeMessage != null) await WriteAsync(FtpResponses.Banner(_cfg.WelcomeMessage), ct);
+        await SendWelcomeAsync(ct);
 
-        var buffer = new byte[8192];
-        var sb = new StringBuilder();
+        using var reader = new StreamReader(_ctrlStream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 1024, leaveOpen: true);
 
         while (!ct.IsCancellationRequested && Control.Connected && !QuitRequested)
         {
@@ -623,56 +722,37 @@ public sealed class FtpSession : IAsyncDisposable
                 break;
             }
 
-            int n;
+            string? line;
             try
             {
-                n = await _ctrlStream.ReadAsync(buffer, 0, buffer.Length, ct);
+                line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (IOException)
-            {
-                break;
-            }
+            catch (OperationCanceledException) { break; }
+            catch (IOException) { break; }
             catch (Exception ex)
             {
                 _log.Log(FtpLogLevel.Error, "Control channel read error", ex);
                 break;
             }
 
-            if (n <= 0)
-                break;
+            if (line == null) break;
+            if (string.IsNullOrWhiteSpace(line)) continue;
 
-            sb.Append(Encoding.ASCII.GetString(buffer, 0, n));
+            LastActivity = DateTimeOffset.UtcNow;
 
-            while (true)
+            try
             {
-                var text = sb.ToString();
-                var idx = text.IndexOf("\r\n", StringComparison.Ordinal);
-                if (idx < 0)
-                    break;
-
-                var line = text[..idx];
-                sb.Remove(0, idx + 2);
-
-                if (string.IsNullOrWhiteSpace(line))
-                    continue;
-
-                try
-                {
-                    await router.HandleAsync(line, ct);
-                }
-                catch (Exception ex)
-                {
-                    _log.Log(FtpLogLevel.Error, $"Command error: {line}", ex);
-                    await WriteAsync("451 Requested action aborted. Local error.\r\n", ct);
-                }
-
-                if (QuitRequested)
-                    break;
+                await router.HandleAsync(line, ct);
             }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Error, $"Command error: {line}", ex);
+                await WriteAsync("451 Requested action aborted. Local error.\r\n", ct);
+            }
+
+            if (QuitRequested)
+                break;
         }
     }
     /// <summary>
@@ -773,8 +853,8 @@ public sealed class FtpSession : IAsyncDisposable
 
         // ---- Rolling command rates ----------------------------
         var rs = Server?.Runtime.RollingStats;
-        if (rs is not null) 
-        { 
+        if (rs is not null)
+        {
             rs.Commands5s.Add(1);
             rs.Commands1m.Add(1);
             rs.Commands5m.Add(1);

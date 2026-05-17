@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           RatioEngineLoginExtensions.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -23,8 +23,9 @@
 
 
 
-using amFTPd.Core.Ratio;
 using amFTPd.Scripting;
+using RatioEngine = amFTPd.Core.Ratio.RatioEngine;
+using RatioLoginContext = amFTPd.Core.RatioLoginContext;
 
 namespace amFTPd.Core;
 
@@ -47,12 +48,6 @@ public static class RatioEngineLoginExtensions
         if (ratioEngine is null) throw new ArgumentNullException(nameof(ratioEngine));
         if (context is null) throw new ArgumentNullException(nameof(context));
 
-        // TODO: implement real login rules based on AMScript/ratio later.
-        // For now: always allow login, no cost/earned adjustments, no limits.
-        return new AMScriptResult(
-            AMRuleAction.Allow,
-            0L,
-            0L
-        );
+        return ratioEngine.ResolveLoginRuleInternal(context);
     }
 }

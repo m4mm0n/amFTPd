@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Dupe;
+namespace amFTPd.Core.Dupe;
 
 /// <summary>
 /// Represents metadata for a duplicate binary record, including section, release, group, file statistics, timestamps,
@@ -20,6 +20,9 @@ internal sealed class BinaryDupeMetaRecord
     public bool IsNuked;
     public double NukeMultiplier;
     public string? NukeReason;
+
+    public Dictionary<string, long> NukePenalties =
+        new(StringComparer.OrdinalIgnoreCase);
 
     // Pointer into CRC file
     public long CrcOffset;

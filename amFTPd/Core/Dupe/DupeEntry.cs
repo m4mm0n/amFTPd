@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           DupeEntry.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -57,6 +57,14 @@ namespace amFTPd.Core.Dupe
 
         /// <summary>Nuke multiplier (eg. 3x, 5x).</summary>
         public int NukeMultiplier { get; init; }
+
+        /// <summary>
+        /// Per-uploader credit penalties (in KB) recorded at nuke time.
+        /// Keyed by username (case-insensitive). Used to restore credits on UNNUKE.
+        /// Empty when the release is not nuked or when no race data was available.
+        /// </summary>
+        public IReadOnlyDictionary<string, long> NukePenalties { get; init; }
+            = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
 
         public string Key => MakeKey(SectionName, ReleaseName);
 

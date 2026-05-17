@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           GroupConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -22,6 +22,7 @@
 
 
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 
 namespace amFTPd.Config.Ftpd
 {
@@ -39,6 +40,18 @@ namespace amFTPd.Config.Ftpd
     {
         // Original properties
         public string Description { get; init; } = string.Empty;
+
+        /// <summary>
+        /// Compatibility field used by older configs where the group name is repeated on each object.
+        /// </summary>
+        [JsonPropertyName("GroupName")]
+        public string? GroupName { get; init; }
+
+        /// <summary>
+        /// Compatibility field listing users directly on each group object.
+        /// </summary>
+        [JsonPropertyName("Users")]
+        public IReadOnlyList<string> Users { get; init; } = [];
 
         /// <summary>
         /// Ratio multiplier applied to downloads (cost *= N).
@@ -60,24 +73,48 @@ namespace amFTPd.Config.Ftpd
         // ------------------------------------------------------------------
 
         /// <summary>
-        /// Optional comment/description for the group. Alias for Description.
-        /// </summary>
-        public string Comment
-        {
-            get => Description;
-            init => Description = value;
-        }
-
-        /// <summary>
         /// Whether this group should be treated as a siteop/admin group.
         /// </summary>
         public bool IsSiteOp { get; init; }
+
+        /// <summary>
+        /// Compatibility alias for older configs using <c>IsAdminGroup</c>.
+        /// </summary>
+        [JsonPropertyName("IsAdminGroup")]
+        public bool IsAdminGroup
+        {
+            get => IsSiteOp;
+            init => IsSiteOp = value;
+        }
 
         /// <summary>
         /// Optional recommended maximum number of users in this group.
         /// (Not enforced unless you add logic elsewhere.)
         /// </summary>
         public int MaxUsers { get; init; }
+
+        /// <summary>
+        /// Compatibility alias for older configs using <c>Comment</c>.
+        /// </summary>
+        [JsonPropertyName("Comment")]
+        public string Comment
+        {
+            get => Description;
+            init => Description = value;
+        }
+
+        // ------------------------------------------------------------------
+        // Upload quotas  (0 = unlimited)
+        // ------------------------------------------------------------------
+
+        /// <summary>Maximum upload allowed per day per user in this group (MiB). 0 = no limit.</summary>
+        public long DailyUploadLimitMb { get; init; }
+
+        /// <summary>Maximum upload allowed per week (Mon–Sun) per user in this group (MiB). 0 = no limit.</summary>
+        public long WeeklyUploadLimitMb { get; init; }
+
+        /// <summary>Maximum upload allowed per calendar month per user in this group (MiB). 0 = no limit.</summary>
+        public long MonthlyUploadLimitMb { get; init; }
 
         // ------------------------------------------------------------------
         // Constructors

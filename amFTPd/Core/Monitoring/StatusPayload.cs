@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Monitoring;
+namespace amFTPd.Core.Monitoring;
 
 /// <summary>
 /// Represents a snapshot of current system status, including session, transfer, rolling, rate, and IP statistics.

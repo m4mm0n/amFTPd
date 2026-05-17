@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Irc.FiSH;
+namespace amFTPd.Core.Irc.FiSH;
 
 /// <summary>
 /// Represents an entry containing a cryptographic key, its associated target, and the key mode for use with the Fish

@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 
 namespace amFTPd.Core.Irc.FiSH;
 
@@ -239,12 +239,12 @@ internal sealed class Blowfish
         }
 
         for (var i = 0; i < 4; i++)
-        for (var j = 0; j < 256; j += 2)
-        {
-            block = Encrypt(block);
-            S[i, j] = Left(block);
-            S[i, j + 1] = Right(block);
-        }
+            for (var j = 0; j < 256; j += 2)
+            {
+                block = Encrypt(block);
+                S[i, j] = Left(block);
+                S[i, j + 1] = Right(block);
+            }
     }
 
     public ulong Encrypt(ulong block)

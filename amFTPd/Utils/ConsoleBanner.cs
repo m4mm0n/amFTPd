@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           ConsoleBanner.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -7,7 +7,7 @@
  *  CRC32:          0x440EA573
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Renders the amFTPd startup banner and console logo output.
  * 
  *  License:
  *      MIT License

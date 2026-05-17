@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import.Records;
+namespace amFTPd.Core.Import.Records;
 
 /// <summary>
 /// Represents a record containing a target identifier, a user flag, and an associated ratio value.

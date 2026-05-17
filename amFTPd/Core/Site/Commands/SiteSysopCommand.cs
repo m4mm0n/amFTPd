@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSysopCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x827C1849
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE SYSOP command handler.
  * 
  *  License:
  *      MIT License

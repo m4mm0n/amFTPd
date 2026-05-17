@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           BackupManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -214,13 +214,12 @@ namespace amFTPd.Db
 
         private static byte[] DeriveKey(string pw, byte[] salt)
         {
-            using var pbkdf2 = new Rfc2898DeriveBytes(
+            return Rfc2898DeriveBytes.Pbkdf2(
                 Encoding.UTF8.GetBytes(pw),
                 salt,
                 200_000,
-                HashAlgorithmName.SHA256
-            );
-            return pbkdf2.GetBytes(32);
+                HashAlgorithmName.SHA256,
+                32);
         }
     }
 

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FxpTlsState.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x1CACC8C1
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Captures negotiated TLS details used during FXP policy evaluation.
  * 
  *  License:
  *      MIT License

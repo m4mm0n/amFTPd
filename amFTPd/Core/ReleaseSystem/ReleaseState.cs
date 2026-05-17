@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.ReleaseSystem;
+namespace amFTPd.Core.ReleaseSystem;
 
 /// <summary>
 /// Specifies the possible states of a release within the system.

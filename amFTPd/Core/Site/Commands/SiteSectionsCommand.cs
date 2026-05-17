@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteSectionsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x90E23849
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE SECTIONS command handler.
  * 
  *  License:
  *      MIT License

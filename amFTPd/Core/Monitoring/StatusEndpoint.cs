@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           StatusEndpoint.cs
@@ -19,13 +19,15 @@
  * ====================================================================================================
  */
 
-using amFTPd.Config.Daemon;
-using amFTPd.Core.Stats;
-using amFTPd.Logging;
 using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using amFTPd.Config.Daemon;
+using amFTPd.Core.Admin;
+using amFTPd.Core.Api;
+using amFTPd.Core.Stats;
+using amFTPd.Logging;
 
 namespace amFTPd.Core.Monitoring;
 
@@ -39,11 +41,15 @@ public sealed class StatusEndpoint : IAsyncDisposable
     private readonly IFtpLogger _log;
     private readonly AmFtpdStatusConfig _cfg;
     private readonly string _prefix;
+    private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
 
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
     private readonly string _ipSalt = Guid.NewGuid().ToString("N");
+
+    // REST API router — wired by FtpServer after endpoint is created
+    private RestApiRouter? _api;
 
     private const int MaxIpEntries = 10;
     private const int DefaultMaxIpEntries = 10;
@@ -179,7 +185,22 @@ public sealed class StatusEndpoint : IAsyncDisposable
             var req = ctx.Request;
             var res = ctx.Response;
 
-            // Optional token auth (AuthToken)
+            var path = req.Url?.AbsolutePath ?? "/";
+            if (path.EndsWith("/") && path.Length > 1)
+                path = path[..^1];
+
+            // Admin dashboard — served WITHOUT the token auth check.
+            // The HTML/JS page itself contains no sensitive data; the JavaScript app
+            // enforces auth independently via Bearer token on every /api/* call.
+            if (_cfg.AdminDashboardEnabled &&
+                (path.Equals("/admin", StringComparison.OrdinalIgnoreCase) ||
+                 path.StartsWith("/admin/", StringComparison.OrdinalIgnoreCase)))
+            {
+                await WriteAdminDashboardAsync(res).ConfigureAwait(false);
+                return;
+            }
+
+            // Optional token auth (AuthToken) — all remaining routes are gated.
             if (!IsAuthorized(req))
             {
                 res.StatusCode = (int)HttpStatusCode.Unauthorized;
@@ -189,9 +210,13 @@ public sealed class StatusEndpoint : IAsyncDisposable
                 return;
             }
 
-            var path = req.Url?.AbsolutePath ?? "/";
-            if (path.EndsWith("/"))
-                path = path[..^1];
+            // Dispatch REST API requests
+            if (_api is not null && _cfg.RestApiEnabled &&
+                path.StartsWith("/api", StringComparison.OrdinalIgnoreCase))
+            {
+                await _api.HandleAsync(ctx).ConfigureAwait(false);
+                return;
+            }
 
             // Accept /status or the configured path, with or without trailing slash
             var configPath = _cfg.Path;
@@ -236,10 +261,26 @@ public sealed class StatusEndpoint : IAsyncDisposable
     {
         var perf = PerfCounters.GetSnapshot();
         var live = _runtime.LiveStats;
+        var uptime = (DateTimeOffset.UtcNow - _startedAt).TotalSeconds;
+
+        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+        var ver = asm.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+            ?? asm.GetName().Version?.ToString()
+            ?? "unknown";
 
         var sb = new StringBuilder();
 
-        // --- core server metrics ---------------------------------------------
+        // --- build info / uptime ─────────────────────────────────────────────
+        sb.AppendLine("# HELP amftpd_info Static build information (always 1)");
+        sb.AppendLine("# TYPE amftpd_info gauge");
+        sb.AppendLine($"amftpd_info{{version=\"{EscapeLabel(ver)}\"}} 1");
+
+        sb.AppendLine("# HELP amftpd_uptime_seconds Seconds since the status endpoint started");
+        sb.AppendLine("# TYPE amftpd_uptime_seconds counter");
+        sb.AppendLine($"amftpd_uptime_seconds {uptime:F3}");
+
+        // --- core server metrics ─────────────────────────────────────────────
         sb.AppendLine("# HELP amftpd_active_connections Current active control connections");
         sb.AppendLine("# TYPE amftpd_active_connections gauge");
         sb.AppendLine($"amftpd_active_connections {perf.ActiveConnections}");
@@ -291,7 +332,7 @@ public sealed class StatusEndpoint : IAsyncDisposable
 
         foreach (var u in live.Users.Values)
         {
-            var name = EscapeLabel(u.UserName);
+            var name = EscapeLabel(u.UserName ?? string.Empty);
 
             sb.AppendLine($"amftpd_user_uploads_total{{user=\"{name}\"}} {u.Uploads}");
             sb.AppendLine($"amftpd_user_downloads_total{{user=\"{name}\"}} {u.Downloads}");
@@ -327,6 +368,28 @@ public sealed class StatusEndpoint : IAsyncDisposable
             sb.AppendLine($"amftpd_section_active_users{{section=\"{name}\"}} {s.ActiveUsers}");
         }
 
+        // --- scene event counters ─────────────────────────────────────────────
+        sb.AppendLine("# HELP amftpd_nukes_total Total releases nuked (including auto-nuke)");
+        sb.AppendLine("# TYPE amftpd_nukes_total counter");
+        sb.AppendLine($"amftpd_nukes_total {perf.TotalNukes}");
+
+        sb.AppendLine("# HELP amftpd_unnukes_total Total releases unnuked");
+        sb.AppendLine("# TYPE amftpd_unnukes_total counter");
+        sb.AppendLine($"amftpd_unnukes_total {perf.TotalUnnukes}");
+
+        sb.AppendLine("# HELP amftpd_pres_total Total releases pre'd");
+        sb.AppendLine("# TYPE amftpd_pres_total counter");
+        sb.AppendLine($"amftpd_pres_total {perf.TotalPres}");
+
+        sb.AppendLine("# HELP amftpd_total_connections_total Total control connections accepted since start");
+        sb.AppendLine("# TYPE amftpd_total_connections_total counter");
+        sb.AppendLine($"amftpd_total_connections_total {perf.TotalConnections}");
+
+        sb.AppendLine("# HELP amftpd_average_transfer_duration_ms Average transfer duration in milliseconds");
+        sb.AppendLine("# TYPE amftpd_average_transfer_duration_ms gauge");
+        sb.AppendLine($"amftpd_average_transfer_duration_ms {perf.AverageTransferMilliseconds:F3}");
+
+        // --- IP stats ─────────────────────────────────────────────────────────
         sb.AppendLine("# HELP amftpd_ip_active_sessions Active sessions per IP (anonymized)");
         sb.AppendLine("# TYPE amftpd_ip_active_sessions gauge");
 
@@ -360,6 +423,22 @@ public sealed class StatusEndpoint : IAsyncDisposable
 
         await res.OutputStream.WriteAsync(data, 0, data.Length);
     }
+    // ------------------------------------------------------------------
+    // Admin dashboard
+    // ------------------------------------------------------------------
+    private static async Task WriteAdminDashboardAsync(HttpListenerResponse res)
+    {
+        var html = AdminDashboardPage.GetHtml();
+        var data = Encoding.UTF8.GetBytes(html);
+
+        res.StatusCode = 200;
+        res.ContentType = "text/html; charset=utf-8";
+        res.ContentEncoding = Encoding.UTF8;
+        res.ContentLength64 = data.Length;
+
+        await res.OutputStream.WriteAsync(data, 0, data.Length).ConfigureAwait(false);
+    }
+
     private async Task WriteStatusAsync(HttpListenerRequest req, HttpListenerResponse res)
     {
         var now = DateTimeOffset.UtcNow;
@@ -484,7 +563,8 @@ public sealed class StatusEndpoint : IAsyncDisposable
     /// <returns>A task that represents the asynchronous dispose operation.</returns>
     public async ValueTask DisposeAsync()
     {
-        await _cts?.CancelAsync();
+        if (_cts is not null)
+            await _cts.CancelAsync();
 
         if (_loopTask is not null)
         {
@@ -510,6 +590,11 @@ public sealed class StatusEndpoint : IAsyncDisposable
     /// </summary>
     public void Stop() => _ = DisposeAsync();
 
+
+    /// <summary>
+    /// Attaches the REST API router. Called by FtpServer after creating the endpoint.
+    /// </summary>
+    public void AttachApiRouter(RestApiRouter router) => _api = router;
 
     private bool IsAuthorized(HttpListenerRequest req)
     {

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpDataConnection.cs
@@ -20,15 +20,15 @@
  */
 
 
-using amFTPd.Config.Daemon;
-using amFTPd.Core.Stats;
-using amFTPd.Logging;
-using amFTPd.Security;
 using System.Buffers;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using amFTPd.Config.Daemon;
+using amFTPd.Core.Stats;
+using amFTPd.Logging;
+using amFTPd.Security;
 using amFTPd.Utils;
 
 namespace amFTPd.Core;
@@ -64,13 +64,13 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     internal const int TransferBufferSize = 64 * 1024;
 
-    private long _bytesTransferred;
+    //private long _bytesTransferred;
     #endregion
 
     /// <summary>
     /// Gets the total number of bytes that have been transferred.
     /// </summary>
-    public long BytesTransferred => _bytesTransferred;
+    //public long BytesTransferred => _bytesTransferred;
 
     /// <summary>
     /// Gets the current transfer mode for the FTP operation.
@@ -223,6 +223,7 @@ internal sealed class FtpDataConnection : IAsyncDisposable
     /// </summary>
     public async Task<long> SendAsync(
         Func<Stream, Task<long>> send,
+        bool flushAfterTransfer,
         CancellationToken ct)
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
@@ -240,7 +241,8 @@ internal sealed class FtpDataConnection : IAsyncDisposable
         try
         {
             var transferred = await send(_stream).ConfigureAwait(false);
-            await _stream.FlushAsync(ct).ConfigureAwait(false);
+            if (flushAfterTransfer)
+                await _stream.FlushAsync(ct).ConfigureAwait(false);
             return transferred;
         }
         finally

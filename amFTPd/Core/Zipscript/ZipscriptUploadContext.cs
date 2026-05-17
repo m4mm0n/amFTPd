@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           ZipscriptUploadContext.cs
@@ -24,9 +24,10 @@ namespace amFTPd.Core.Zipscript;
 /// Context passed when a file upload has completed.
 /// </summary>
 public sealed record ZipscriptUploadContext(
-    string SectionName,
+    string? SectionName,
     string VirtualFilePath,
     string PhysicalFilePath,
     long SizeBytes,
     string? UserName,
-    DateTimeOffset CompletedAt);
+    DateTimeOffset CompletedAt,
+    uint? Crc32 = null);

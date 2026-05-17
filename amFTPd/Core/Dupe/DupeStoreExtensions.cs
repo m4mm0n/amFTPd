@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Dupe;
+namespace amFTPd.Core.Dupe;
 
 /// <summary>
 /// Provides extension methods for converting an IDupeStore to a portable scene dupe database.

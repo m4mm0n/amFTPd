@@ -1,4 +1,4 @@
-﻿using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd;
 using amFTPd.Core.Pre;
 using amFTPd.Core.Vfs.Virtual;
 

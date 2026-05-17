@@ -1,8 +1,12 @@
-﻿using amFTPd.Core.Dupe;
+using System.Text;
+using amFTPd.Config.Daemon;
+using amFTPd.Config.Ftpd;
+using amFTPd.Core.Dupe;
 using amFTPd.Core.Events;
 using amFTPd.Core.Race;
-using System.Text;
-using amFTPd.Config.Ftpd;
+using amFTPd.Core.Scene;
+using amFTPd.Core.Stats;
+using amFTPd.Logging;
 
 namespace amFTPd.Core.Site;
 
@@ -84,6 +88,19 @@ public static class NukePropagation
             reason: reason,
             multiplier: nukeMultiplier,
             race: race);
+
+        // Deduct upload credits from everyone who contributed to this release.
+        if (race is not null && race.UserBytes.Count > 0)
+        {
+            var penaltyMap = DeductNukeCredits(context.Users, race.UserBytes, nukeMultiplier);
+            if (penaltyMap.Count > 0)
+            {
+                PersistNukePenalties(context.Runtime.DupeStore, sectionName, releaseName, penaltyMap);
+                AppendCreditLog("NUKE-DEDUCT", virt, penaltyMap);
+            }
+        }
+
+        PerfCounters.NukeExecuted();
     }
     /// <summary>
     /// Removes the nuke status from a specified release and updates related site state, logs, and events.
@@ -111,6 +128,11 @@ public static class NukePropagation
         var virt = releaseVirt.TrimEnd('/', '\\');
         var sectionName = section?.Name ?? string.Empty;
         var releaseName = Path.GetFileName(virt);
+
+        // Restore credits before we clear the penalty record from the dupe entry.
+        var restored = RestoreNukeCredits(context.Users, context.Runtime.DupeStore, sectionName, releaseName);
+        if (restored.Count > 0)
+            AppendCreditLog("UNNUKE-RESTORE", virt, restored);
 
         UpdateDupeStore(
             context.Runtime.DupeStore,
@@ -145,6 +167,182 @@ public static class NukePropagation
             reason: reason,
             multiplier: 0,
             race: null);
+
+        PerfCounters.UnnukeExecuted();
+    }
+
+    // ==========================================================
+    // SYSTEM (AUTO) NUKE — no session/router required
+    // ==========================================================
+
+    /// <summary>
+    /// Apply a nuke triggered by an automated rule (e.g. auto-nuke engine).
+    /// Does not require an active FTP session or router; all state changes are
+    /// driven through <paramref name="runtime"/> directly.
+    /// </summary>
+    public static void ApplySystemNuke(
+        AmFtpdRuntimeConfig runtime,
+        IFtpLogger log,
+        string releaseVirt,
+        string sectionName,
+        string reason,
+        double nukeMultiplier,
+        SceneStateRegistry? sceneRegistry = null)
+    {
+        if (runtime is null) throw new ArgumentNullException(nameof(runtime));
+        if (string.IsNullOrWhiteSpace(releaseVirt)) return;
+
+        var virt = releaseVirt.TrimEnd('/', '\\');
+        var releaseName = Path.GetFileName(virt);
+        const string nuker = "AUTO-NUKE";
+
+        // Update dupe store
+        UpdateDupeStore(
+            runtime.DupeStore,
+            virt,
+            sectionName,
+            releaseName,
+            isNuked: true,
+            reason: reason,
+            nukeMultiplier: nukeMultiplier);
+
+        // Publish event
+        runtime.EventBus?.Publish(new FtpEvent
+        {
+            Type = FtpEventType.AutoNuke,
+            Timestamp = DateTimeOffset.UtcNow,
+            User = nuker,
+            Section = string.IsNullOrWhiteSpace(sectionName) ? null : sectionName,
+            VirtualPath = virt,
+            ReleaseName = releaseName,
+            Reason = reason,
+            Extra = $"mult={nukeMultiplier}"
+        });
+
+        // Update scene registry (if wired)
+        sceneRegistry?.Nuke(sectionName, virt, reason);
+
+        // Append scene log
+        AppendSceneLog(
+            action: "AUTO-NUKE",
+            virt: virt,
+            user: nuker,
+            reason: reason,
+            multiplier: nukeMultiplier,
+            race: null);
+
+        log.Log(FtpLogLevel.Info,
+            $"[AUTO-NUKE] {releaseName} in {sectionName}: {reason} (×{nukeMultiplier})");
+
+        PerfCounters.NukeExecuted();
+    }
+
+    // ==========================================================
+    // CREDIT DEDUCTION / RESTORATION
+    // ==========================================================
+
+    /// <summary>
+    /// Proportionally deduct credits from every uploader in the race.
+    /// Penalty = ceil(bytesUploadedKb × nukeMultiplier), floored at zero credits.
+    /// Returns a map of username → penaltyKb for the uploaders that were found and updated.
+    /// </summary>
+    private static Dictionary<string, long> DeductNukeCredits(
+        IUserStore users,
+        IReadOnlyDictionary<string, long> userBytes,
+        double nukeMultiplier)
+    {
+        var penalties = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (userName, bytes) in userBytes)
+        {
+            var user = users.FindUser(userName);
+            if (user is null) continue;
+
+            var bytesKb = bytes / 1024L;
+            if (bytesKb <= 0) continue;
+
+            var penaltyKb = (long)Math.Ceiling(bytesKb * nukeMultiplier);
+            var newCredits = Math.Max(0L, user.CreditsKb - penaltyKb);
+
+            if (users.TryUpdateUser(user with { CreditsKb = newCredits }, out _))
+                penalties[userName] = penaltyKb;
+        }
+
+        return penalties;
+    }
+
+    /// <summary>
+    /// Write the penalty map into the matching <see cref="DupeEntry"/> so it survives
+    /// across restarts and can be replayed on UNNUKE.
+    /// </summary>
+    private static void PersistNukePenalties(
+        IDupeStore? dupeStore,
+        string sectionName,
+        string releaseName,
+        Dictionary<string, long> penalties)
+    {
+        if (dupeStore is null || penalties.Count == 0) return;
+
+        var entry = FindMatchingDupeEntry(dupeStore, sectionName, releaseName);
+        if (entry is null) return;
+
+        var updated = entry with
+        {
+            NukePenalties = new Dictionary<string, long>(penalties, StringComparer.OrdinalIgnoreCase),
+            LastUpdated = DateTimeOffset.UtcNow
+        };
+        dupeStore.Upsert(updated);
+    }
+
+    /// <summary>
+    /// Read the stored penalty map from the dupe entry and credit each uploader back.
+    /// Returns the map of username → restoredKb (empty if nothing was stored).
+    /// Called before <see cref="UpdateDupeStore"/> clears <c>NukePenalties</c>.
+    /// </summary>
+    private static Dictionary<string, long> RestoreNukeCredits(
+        IUserStore users,
+        IDupeStore? dupeStore,
+        string sectionName,
+        string releaseName)
+    {
+        var restorations = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        if (dupeStore is null) return restorations;
+
+        var entry = FindMatchingDupeEntry(dupeStore, sectionName, releaseName);
+        if (entry is null || entry.NukePenalties.Count == 0) return restorations;
+
+        foreach (var (userName, penaltyKb) in entry.NukePenalties)
+        {
+            var user = users.FindUser(userName);
+            if (user is null) continue;
+
+            var newCredits = user.CreditsKb + penaltyKb;
+            if (newCredits < 0) newCredits = long.MaxValue; // overflow guard
+
+            if (users.TryUpdateUser(user with { CreditsKb = newCredits }, out _))
+                restorations[userName] = penaltyKb;
+        }
+
+        return restorations;
+    }
+
+    /// <summary>Append a credit-mutation block to the nukes log.</summary>
+    private static void AppendCreditLog(string action, string virt, Dictionary<string, long> entries)
+    {
+        if (entries.Count == 0) return;
+        try
+        {
+            Directory.CreateDirectory("logs");
+            var sb = new StringBuilder();
+            sb.Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss zzz"))
+              .Append(" | ").Append(action)
+              .Append(" | path=").AppendLine(virt);
+            foreach (var (user, kb) in entries)
+                sb.Append("  ").Append(user).Append(' ')
+                  .Append(action.StartsWith("NUKE") ? '-' : '+').Append(kb).AppendLine("kb");
+            File.AppendAllText("logs/nukes.log", sb.ToString());
+        }
+        catch { }
     }
 
     private static void UpdateDupeStore(
@@ -165,17 +363,9 @@ public static class NukePropagation
         var now = DateTimeOffset.UtcNow;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var candidates = new List<DupeEntry>(64);
+        candidates.AddRange(FindMatchingDupeEntries(dupeStore, sectionName, releaseName));
 
-        if (!string.IsNullOrWhiteSpace(sectionName))
-        {
-            var exact = dupeStore.Find(sectionName, releaseName);
-            if (exact is not null)
-                candidates.Add(exact);
-
-            candidates.AddRange(dupeStore.Search(releaseName, sectionName, limit: 50));
-        }
-
-        candidates.AddRange(dupeStore.Search(releaseName, sectionName: null, limit: 50));
+        var updatedAny = false;
 
         foreach (var entry in candidates)
         {
@@ -186,7 +376,7 @@ public static class NukePropagation
                              entry.VirtualPath.TrimEnd('/', '\\')
                                  .Equals(releaseVirt, StringComparison.OrdinalIgnoreCase);
 
-            var isSameName = entry.ReleaseName.Equals(releaseName, StringComparison.OrdinalIgnoreCase);
+            var isSameName = IsMatchingReleaseName(entry.ReleaseName, releaseName);
 
             if (!isSameVirt && !isSameName)
                 continue;
@@ -203,12 +393,177 @@ public static class NukePropagation
                 IsNuked = isNuked,
                 NukeReason = isNuked ? reason : null,
                 NukeMultiplier = isNuked ? (int)Math.Round(nukeMultiplier) : 0,
+                // Clear stored penalties when unnuking so stale data can't be replayed.
+                NukePenalties = isNuked
+                    ? entry.NukePenalties
+                    : new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase),
                 LastUpdated = now
             };
 
             dupeStore.Upsert(updated);
+            updatedAny = true;
+        }
+
+        if (!updatedAny && isNuked)
+        {
+            dupeStore.Upsert(new DupeEntry
+            {
+                ReleaseName = releaseName,
+                SectionName = sectionName,
+                VirtualPath = releaseVirt,
+                TotalBytes = 0,
+                FirstSeen = now,
+                LastUpdated = now,
+                IsNuked = true,
+                NukeReason = reason,
+                NukeMultiplier = (int)Math.Round(nukeMultiplier)
+            });
         }
     }
+
+    /// <summary>
+    /// Returns all dupe entries that match <paramref name="releaseName"/>, including legacy
+    /// <c>.NUKED</c> variants and stripped names.
+    /// </summary>
+    private static IReadOnlyList<DupeEntry> FindMatchingDupeEntries(
+        IDupeStore dupeStore,
+        string sectionName,
+        string releaseName)
+    {
+        if (string.IsNullOrWhiteSpace(releaseName))
+            return Array.Empty<DupeEntry>();
+
+        var matches = new List<DupeEntry>(8);
+        var dedupe = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var lookup in GetReleaseNameLookupKeys(releaseName))
+        {
+            var patternLookup = lookup.Contains('*') || lookup.Contains('?');
+            if (patternLookup)
+            {
+                if (!string.IsNullOrWhiteSpace(sectionName))
+                {
+                    foreach (var e in dupeStore.Search(lookup, sectionName, limit: 100))
+                    {
+                        if (IsMatchingReleaseName(e.ReleaseName, releaseName) && dedupe.Add(e.Key))
+                            matches.Add(e);
+                    }
+                }
+
+                foreach (var e in dupeStore.Search(lookup, sectionName: null, limit: 100))
+                {
+                    if (IsMatchingReleaseName(e.ReleaseName, releaseName) && dedupe.Add(e.Key))
+                        matches.Add(e);
+                }
+            }
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(sectionName))
+                {
+                    var exact = dupeStore.Find(sectionName, lookup);
+                    if (exact is not null && dedupe.Add(exact.Key) && IsMatchingReleaseName(exact.ReleaseName, releaseName))
+                        matches.Add(exact);
+                }
+
+                if (!string.IsNullOrWhiteSpace(sectionName))
+                {
+                    foreach (var e in dupeStore.Search(lookup, sectionName, limit: 100))
+                    {
+                        if (IsMatchingReleaseName(e.ReleaseName, releaseName) && dedupe.Add(e.Key))
+                            matches.Add(e);
+                    }
+                }
+            }
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Returns the first matching dupe entry for persistence/restore actions.
+    /// </summary>
+    private static DupeEntry? FindMatchingDupeEntry(
+        IDupeStore dupeStore,
+        string sectionName,
+        string releaseName)
+    {
+        var matches = FindMatchingDupeEntries(dupeStore, sectionName, releaseName);
+        return matches.Count == 0 ? null : matches[0];
+    }
+
+    /// <summary>
+    /// Returns lookup keys to resolve a release with or without <c>.NUKED</c> suffixes.
+    /// </summary>
+    private static IReadOnlyList<string> GetReleaseNameLookupKeys(string releaseName)
+    {
+        if (string.IsNullOrWhiteSpace(releaseName))
+            return Array.Empty<string>();
+
+        var normalized = releaseName.Trim();
+        var baseName = GetBaseReleaseName(normalized);
+        var keys = new List<string>(3) { normalized };
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var orderedKeys = new List<string>(3);
+
+        foreach (var key in keys)
+        {
+            if (seen.Add(key))
+                orderedKeys.Add(key);
+        }
+
+        if (!string.IsNullOrWhiteSpace(baseName))
+        {
+            var nukedLookup = $"{baseName}.NUKED*";
+            if (seen.Add(nukedLookup))
+                orderedKeys.Add(nukedLookup);
+
+            if (!string.Equals(baseName, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                if (seen.Add(baseName))
+                    orderedKeys.Add(baseName);
+            }
+        }
+
+        return orderedKeys;
+    }
+
+    /// <summary>
+    /// Normalizes release names used in matching logic by stripping known .NUKED suffixes.
+    /// Supports <c>.NUKED</c> and <c>.NUKED-YYYY...</c>.
+    /// </summary>
+    private static string GetBaseReleaseName(string releaseName)
+    {
+        var idx = releaseName.IndexOf(".NUKED", StringComparison.OrdinalIgnoreCase);
+        if (idx <= 0)
+            return releaseName;
+
+        return releaseName[..idx];
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="candidateRelease"/> identifies the same logical release as
+    /// <paramref name="targetRelease"/> or one of its <c>.NUKED</c> variants.
+    /// </summary>
+    private static bool IsMatchingReleaseName(string candidateRelease, string targetRelease)
+    {
+        if (string.IsNullOrWhiteSpace(candidateRelease) || string.IsNullOrWhiteSpace(targetRelease))
+            return false;
+
+        if (candidateRelease.Equals(targetRelease, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var baseName = GetBaseReleaseName(targetRelease);
+        if (candidateRelease.Equals(baseName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!candidateRelease.StartsWith(baseName, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return candidateRelease[baseName.Length..].StartsWith(
+            ".NUKED",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void AppendSceneLog(
         string action,
         string virt,

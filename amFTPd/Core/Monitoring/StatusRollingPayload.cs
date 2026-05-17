@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Monitoring;
+namespace amFTPd.Core.Monitoring;
 
 /// <summary>
 /// Represents the rolling status payload, including transfer rate information.

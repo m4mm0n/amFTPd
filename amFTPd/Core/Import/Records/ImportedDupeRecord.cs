@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import.Records;
+namespace amFTPd.Core.Import.Records;
 
 /// <summary>
 /// Represents a record of a duplicate release imported from an external source, including metadata such as section,

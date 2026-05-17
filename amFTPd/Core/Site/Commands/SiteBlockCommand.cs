@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Site.Commands;
+namespace amFTPd.Core.Site.Commands;
 
 public sealed class SiteBlockCommand : SiteCommandBase
 {
@@ -25,6 +25,13 @@ public sealed class SiteBlockCommand : SiteCommandBase
         var reason = parts.Length > 1 ? parts[1] : "manual block";
 
         context.Server.BlockIpByKey(key, reason);
+
+        context.Runtime.AuditLog?.Log(
+            actor: context.Session.Account?.UserName ?? "*unknown*",
+            action: "BLOCK",
+            target: key,
+            detail: $"reason={reason}",
+            ip: context.Session.RemoteEndPoint?.Address.ToString());
 
         await context.Session.WriteAsync(
             $"200 IP bucket {key} blocked.\r\n",

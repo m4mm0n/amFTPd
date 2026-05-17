@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           DatabaseMaintenance.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -58,14 +58,15 @@ namespace amFTPd.Db
             if (_db == null)
                 return;
 
-            _log.Log(FtpLogLevel.Info,"Running FSCK...");
+            _log.Log(FtpLogLevel.Info, "Running FSCK...");
 
             if (_db != null)
             {
                 _db.FsckUsers();
                 _db.FsckGroups();
                 _db.FsckSections();
-            } else
+            }
+            else
                 _log.Log(FtpLogLevel.Error, "DatabaseManager was never initiated!");
         }
         /// <summary>
@@ -76,7 +77,7 @@ namespace amFTPd.Db
         /// calling this method.</remarks>
         public void CreateBackup()
         {
-            _log.Log(FtpLogLevel.Info,"Creating DB backup...");
+            _log.Log(FtpLogLevel.Info, "Creating DB backup...");
             if (_db != null) _db.BackupAll();
             else _log.Log(FtpLogLevel.Error, "DatabaseManager was never initiated!");
         }

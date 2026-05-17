@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FileDupeStore.cs
@@ -35,7 +35,7 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
     private readonly Dictionary<string, DupeRelease> _releases
         = new(StringComparer.OrdinalIgnoreCase);
 
-    private const int SaveBatchThreshold = 32;
+    private const int SaveBatchThreshold = 1;
     private int _pendingSaves;
 
     /// <summary>
@@ -110,6 +110,22 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         return list;
     }
 
+    public IEnumerable<DupeEntry> GetAll()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            // Snapshot to avoid holding the lock during caller iteration.
+            return _releases.Values
+                .Select(r => DupeEntryMapper.ToEntry(r, virtualPath: $"/{r.Section}/{r.ReleaseName}"))
+                .ToList();
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
     public void Upsert(DupeEntry entry)
     {
         if (entry is null)
@@ -142,6 +158,12 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
                         ? entry.NukeMultiplier
                         : 1);
             }
+            else
+            {
+                r.Unnuke();
+            }
+
+            r.SetNukePenalties(entry.NukePenalties);
 
             if (ShouldPersist())
             {
@@ -163,17 +185,17 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
         var key = DupeEntry.MakeKey(sectionName, releaseName);
 
         List<DupeRelease>? snapshot = null;
+        bool removed;
 
         _lock.EnterWriteLock();
         try
         {
-            var removed = _releases.Remove(key);
+            removed = _releases.Remove(key);
             if (removed && ShouldPersist())
             {
                 snapshot = _releases.Values.ToList();
                 _pendingSaves = 0;
             }
-            return removed;
         }
         finally
         {
@@ -185,7 +207,7 @@ public sealed class FileDupeStore : IDupeStore, IDisposable
             SaveToDisk(snapshot);
         }
 
-        return snapshot is not null;
+        return removed;
     }
 
     private bool ShouldPersist()

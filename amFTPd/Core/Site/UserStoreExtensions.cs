@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           UserStoreExtensions.cs
@@ -20,8 +20,8 @@
  */
 
 
-using amFTPd.Config.Ftpd;
 using System.Reflection;
+using amFTPd.Config.Ftpd;
 
 namespace amFTPd.Core.Site
 {

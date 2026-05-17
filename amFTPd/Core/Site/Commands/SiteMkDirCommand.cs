@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteMkDirCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x57DD959E
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE MKDIR command handler.
  * 
  *  License:
  *      MIT License

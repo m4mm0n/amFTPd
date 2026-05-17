@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRescanDupeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x60CA3D3C
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RESCANDUPE command handler.
  * 
  *  License:
  *      MIT License

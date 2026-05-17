@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import;
+namespace amFTPd.Core.Import;
 
 /// <summary>
 /// Represents the progress of an import operation, including status information and metrics.

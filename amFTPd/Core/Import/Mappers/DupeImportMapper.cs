@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.Dupe;
+using amFTPd.Core.Dupe;
 using amFTPd.Core.Import.Records;
 
 namespace amFTPd.Core.Import.Mappers;

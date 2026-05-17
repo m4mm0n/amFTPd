@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.ReleaseSystem;
+namespace amFTPd.Core.ReleaseSystem;
 
 /// <summary>
 /// Represents contextual information about a release, including its identity, state, and associated metadata.

@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AMScriptDefaults.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -51,8 +51,8 @@ namespace amFTPd.Scripting
             CreateIfMissing(Path.Combine(baseDir, "sections.msl"), DefaultSections);
             CreateIfMissing(Path.Combine(baseDir, "site.msl"), DefaultSite);
             CreateIfMissing(Path.Combine(baseDir, "speed.msl"), DefaultSpeed);
-            CreateIfMissing(Path.Combine(baseDir, "user.msl"), DefaultUser);
-            CreateIfMissing(Path.Combine(baseDir, "group.msl"), DefaultGroup);
+            CreateIfMissing(Path.Combine(baseDir, "user-rules.msl"), DefaultUser);
+            CreateIfMissing(Path.Combine(baseDir, "group-rules.msl"), DefaultGroup);
             CreateIfMissing(Path.Combine(baseDir, "section-rules.msl"), DefaultSectionRules);
             CreateIfMissing(Path.Combine(baseDir, "messages.msl"), DefaultMessages);
             CreateIfMissing(Path.Combine(baseDir, "section-routing.msl"), DefaultSectionRouting);
@@ -105,7 +105,7 @@ if ($freeleech) cost_download = 0;
 """;
 
         private const string DefaultSections = """
-# Section override rules, v1 placeholder.
+# Section override rules. Add site-specific routing or metadata overrides here.
 """;
 
         private const string DefaultSite = """
@@ -116,19 +116,31 @@ if ($freeleech) cost_download = 0;
                                            """;
 
         private const string DefaultSpeed = """
-# Speed limit rules, v1 placeholder.
+# Speed limit rules — evaluated per transfer.
+# Return set_dl <kbps> to cap download speed for this transfer.
+# Return set_ul <kbps> to cap upload speed for this transfer.
+# The effective limit is the most restrictive non-zero value across:
+#   user record, section config, and this script.
+# 0 = unlimited.
+#
+# Available variables:
+#   $user.name, $user.group, $section, $is_fxp, $freeleech
+#
+# Examples:
+#   if ($user.group == "LEECH") return set_dl 512;
+#   if ($section == "0DAY" && $user.group == "TRIAL") return set_ul 256;
 """;
 
         private const string DefaultUser = """
-# User-based policy rules, v1 placeholder.
+# User-based policy rules. Add custom account-level policy checks here.
 """;
 
         private const string DefaultGroup = """
-# Group-based policy rules, v1 placeholder.
+# Group-based policy rules. Add custom group-level policy checks here.
 """;
 
         private const string DefaultSectionRules = """
-# Section-specific policy rules, v1 placeholder.
+# Section-specific policy rules. Add custom section-level policy checks here.
 """;
 
         private const string DefaultMessages = """

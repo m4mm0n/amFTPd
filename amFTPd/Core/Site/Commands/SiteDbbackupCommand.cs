@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDbbackupCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xB8A99451
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DBBACKUP command handler.
  * 
  *  License:
  *      MIT License

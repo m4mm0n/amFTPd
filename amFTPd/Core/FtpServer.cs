@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpServer.cs
@@ -19,13 +19,25 @@
  * ====================================================================================================
  */
 
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
 using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
+using amFTPd.Config.Ftpd.RatioRules;
 using amFTPd.Config.Scripting;
+using amFTPd.Core;
+using amFTPd.Core.Affils;
+using amFTPd.Core.AutoNuke;
 using amFTPd.Core.Irc;
+using amFTPd.Core.Logging;
+using amFTPd.Core.Messages;
 using amFTPd.Core.Monitoring;
+using amFTPd.Core.Oneliners;
 using amFTPd.Core.Pre;
+using amFTPd.Core.Quota;
 using amFTPd.Core.ReleaseSystem;
+using amFTPd.Core.Requests;
 using amFTPd.Core.Runtime;
 using amFTPd.Core.Scene;
 using amFTPd.Core.Services;
@@ -36,13 +48,8 @@ using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security.BanList;
 using amFTPd.Security.HammerGuard;
-using System.Collections.Concurrent;
-using System.Net;
-using System.Net.Sockets;
-using amFTPd.Config.Ftpd.RatioRules;
-using amFTPd.Core;
-using SectionResolver = amFTPd.Core.Sections.SectionResolver;
 using FtpSection = amFTPd.Config.Ftpd.FtpSection;
+using SectionResolver = amFTPd.Core.Sections.SectionResolver;
 
 /// <summary>
 /// Represents an FTP(S) server that can handle client connections, manage user authentication,  and facilitate file
@@ -126,6 +133,9 @@ public sealed class FtpServer
     private const long MaxBytesPerSectionWindow = 20 * 1024 * 1024; // 20MB/5s
 
     private HousekeepingService? _housekeeping;
+    private AutoNukeEngine? _autoNuke;
+    private amFTPd.Core.Webhooks.WebhookDispatcher? _webhooks;
+    private amFTPd.Core.Tls.AcmeCertificateManager? _acme;
 
     #endregion
     /// <summary>
@@ -203,6 +213,27 @@ public sealed class FtpServer
             runtime.EventBus.Subscribe(_sessionLog.OnEvent);
 
             _log.Log(FtpLogLevel.Info, $"Session log enabled. Path: {sessionLogPath}");
+
+            // wu-ftpd xferlog (Upload/Download events only)
+            var xferlogPath = Path.Combine(configDir!, "xferlog");
+            runtime.Xferlog = new XferlogWriter(xferlogPath);
+            runtime.EventBus.Subscribe(runtime.Xferlog.OnEvent);
+            _log.Log(FtpLogLevel.Info, $"Xferlog enabled. Path: {xferlogPath}");
+
+            // Admin mutation audit log (JSONL)
+            var auditLogPath = Path.Combine(configDir!, "audit.log");
+            runtime.AuditLog = new AuditLogWriter(auditLogPath);
+            _log.Log(FtpLogLevel.Info, $"Audit log enabled. Path: {auditLogPath}");
+
+            // Upload quota tracker
+            runtime.UploadQuota = new UploadQuotaStore();
+            runtime.EventBus.Subscribe(runtime.UploadQuota.OnEvent);
+            _log.Log(FtpLogLevel.Info, "Upload quota tracking enabled.");
+
+            // VFS symlink store (virtual path → virtual path)
+            var symlinkPath = Path.Combine(configDir!, "vfs-symlinks.json");
+            runtime.SymlinkStore = new amFTPd.Core.Vfs.VfsSymlinkStore(symlinkPath);
+            _log.Log(FtpLogLevel.Info, $"VFS symlink store enabled. Path: {symlinkPath}");
         }
         catch (Exception ex)
         {
@@ -215,6 +246,35 @@ public sealed class FtpServer
         _hammerGuard = new(Runtime.FtpConfig);
         _banList = new();
         Runtime.Recovery = new RuntimeRecoveryManager(Runtime);
+
+        // Initialise social stores (oneliner shoutbox, requests) next to the config file.
+        try
+        {
+            var configDir2 = Path.GetDirectoryName(_configPath);
+            if (string.IsNullOrWhiteSpace(configDir2))
+                configDir2 = AppContext.BaseDirectory;
+
+            runtime.OnelineStore = new OnelineStore(
+                Path.Combine(configDir2!, "oneliners.json"),
+                maxLines: 200);
+
+            runtime.RequestRegistry = new RequestRegistry(
+                Path.Combine(configDir2!, "requests.json"));
+
+            runtime.AffilStore = new AffilStore(
+                Path.Combine(configDir2!, "affils.json"));
+
+            var messagesDir = Path.Combine(configDir2!, "messages");
+            Directory.CreateDirectory(messagesDir);
+            runtime.Messages = new MessageEngine(messagesDir, runtime.FtpConfig.SiteName);
+
+            _log.Log(FtpLogLevel.Info, "[SOCIAL] Oneliner, request, affil, and message stores loaded.");
+        }
+        catch (Exception ex)
+        {
+            _log.Log(FtpLogLevel.Warn,
+                $"[SOCIAL] Failed to initialise social stores: {ex.Message}", ex);
+        }
 
         // Initialize IRC announcer if configured
         if (Runtime.IrcConfig is { Enabled: true } ircCfg)
@@ -237,7 +297,33 @@ public sealed class FtpServer
                 scriptHook: null);
         }
 
+        // Webhook dispatcher — subscribes to the EventBus and fires HTTP POSTs.
+        if (runtime.WebhookConfig is { Enabled: true } webhookCfg)
+        {
+            try
+            {
+                _webhooks = new amFTPd.Core.Webhooks.WebhookDispatcher(
+                    webhookCfg, runtime.EventBus, _log);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Warn, $"[Webhook] Failed to start dispatcher: {ex.Message}", ex);
+            }
+        }
+
         SceneRegistry = new SceneStateRegistry();
+
+        // Auto-nuke engine — subscribe to zipscript events if any rules are configured.
+        if (runtime.AutoNukeRules.Count > 0 && runtime.Zipscript is not null)
+        {
+            _autoNuke = new AutoNukeEngine(runtime, SceneRegistry, runtime.AutoNukeRules, _log);
+            _autoNuke.Subscribe(runtime.Zipscript);
+            _log.Log(FtpLogLevel.Info,
+                $"[AUTO-NUKE] Engine started with {runtime.AutoNukeRules.Count} rule(s).");
+        }
+
+        if (Runtime.Zipscript is null)
+            return;
 
         Runtime.Zipscript.ReleaseUpdated += status =>
         {
@@ -375,6 +461,41 @@ public sealed class FtpServer
             _log.Log(FtpLogLevel.Warn, "Failed to ensure site directory layout. Continuing.", ex);
         }
 
+        // ---------------------------------------------------------------------------------
+        // Plugin event handlers — wire BEFORE the listener opens so no events are missed.
+        // ---------------------------------------------------------------------------------
+        if (Runtime.PluginHost is { } pluginHost)
+        {
+            pluginHost.WireEventHandlers(Runtime.EventBus);
+            _log.Log(FtpLogLevel.Info, "[Plugin] Event handlers wired to EventBus.");
+        }
+
+        // ---------------------------------------------------------------------------------
+        // ACME automatic TLS certificate manager
+        // Starts before the listener so the certificate is fresh when sessions begin.
+        // ---------------------------------------------------------------------------------
+        if (Runtime.AcmeConfig is { Enabled: true } acmeCfg)
+        {
+            try
+            {
+                _acme = new amFTPd.Core.Tls.AcmeCertificateManager(
+                    cfg: acmeCfg,
+                    pfxPath: Runtime.TlsPfxPath
+                                  ?? throw new InvalidOperationException("TlsPfxPath is not set in runtime config."),
+                    pfxPassword: Runtime.TlsPfxPassword ?? "",
+                    configDir: Path.GetDirectoryName(Runtime.ConfigFilePath) ?? AppContext.BaseDirectory,
+                    log: _log,
+                    onRenewed: ct => ReloadConfigurationAsync(ct).ContinueWith(_ => { }, CancellationToken.None));
+
+                await _acme.StartAsync(_cts!.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Error,
+                    $"[ACME] Failed to initialise certificate manager: {ex.Message}", ex);
+            }
+        }
+
         _listener = new(new IPEndPoint(ip, Runtime.FtpConfig.Port));
         _listener.Start();
         _log.Log(FtpLogLevel.Info, $"Server listening on {Runtime.FtpConfig.BindAddress}:{Runtime.FtpConfig.Port}");
@@ -451,62 +572,72 @@ public sealed class FtpServer
 
             var defaultProt = MapDataChannelProtectionToLetter(Runtime.FtpConfig.DataChannelProtectionDefault);
 
-            // capture for the task
             var remoteCopy = remoteEndPoint;
 
-            _ = Task.Run(async () =>
+            _ = HandleClientAsync(client, remoteCopy, rem, fs, defaultProt);
+        }
+    }
+
+    private async Task HandleClientAsync(
+        TcpClient client,
+        IPEndPoint remoteCopy,
+        string rem,
+        FtpFileSystem fs,
+        string defaultProt)
+    {
+        try
+        {
+            await using var session = new FtpSession(
+                client,
+                _log,
+                Runtime.FtpConfig,
+                Runtime.UserStore,
+                fs,
+                defaultProt,
+                Runtime.TlsConfig,
+                Runtime.IdentConfig,
+                Runtime.VfsConfig,
+                new SectionResolver(Runtime.Sections.GetSections()), this);
+
+            var ct = _cts!.Token;
+            await session.SendWelcomeAsync(ct);
+
+            var router = new FtpCommandRouter(this, session, _log, fs, Runtime.FtpConfig, Runtime.TlsConfig, Runtime.Sections, Runtime);
+
+            ScriptEngines? scripts;
+            lock (_configLock)
             {
-                try
-                {
-                    await using var session = new FtpSession(
-                        client,
-                        _log,
-                        Runtime.FtpConfig,
-                        Runtime.UserStore,
-                        fs,
-                        defaultProt,
-                        Runtime.TlsConfig,
-                        Runtime.IdentConfig,
-                        Runtime.VfsConfig,
-                        new SectionResolver(Runtime.Sections.GetSections()), this);
+                scripts = _scripts;
+            }
 
-                    var router = new FtpCommandRouter(this, session, _log, fs, Runtime.FtpConfig, Runtime.TlsConfig, Runtime.Sections, Runtime);
+            router.AttachScriptEngines(
+                scripts?.Credit,
+                scripts?.Fxp,
+                scripts?.Active,
+                scripts?.SectionRouting,
+                scripts?.Site,
+                scripts?.Users,
+                scripts?.Groups,
+                scripts?.Speed);
 
-                    // Attach script engines so router can use AMScript in credits/FXP/active
-                    ScriptEngines? scripts;
-                    lock (_configLock)
-                    {
-                        scripts = _scripts;
-                    }
-                    router.AttachScriptEngines(
-                        scripts?.Credit,
-                        scripts?.Fxp,
-                        scripts?.Active,
-                        scripts?.SectionRouting,
-                        scripts?.Site,
-                        scripts?.Users,
-                        scripts?.Groups);
+            try
+            {
+                await session.RunAsync(router, ct);
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Error, $"Unhandled session error for {rem}", ex);
+            }
 
-
-                    var ct = _cts!.Token;
-
-                    try
-                    {
-                        await session.RunAsync(router, ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        _log.Log(FtpLogLevel.Error, $"Unhandled session error for {rem}", ex);
-                    }
-
-                    _log.Log(FtpLogLevel.Info, $"Connection closed: {rem}");
-                }
-                finally
-                {
-                    // Always decrement global / per-IP counters
-                    UnregisterConnection(remoteCopy);
-                }
-            });
+            _log.Log(FtpLogLevel.Info, $"Connection closed: {rem}");
+        }
+        catch (Exception ex)
+        {
+            _log.Log(FtpLogLevel.Error, $"Global session setup error for {rem}", ex);
+        }
+        finally
+        {
+            UnregisterConnection(remoteCopy);
         }
     }
 
@@ -536,8 +667,6 @@ public sealed class FtpServer
 
     internal AmFtpdRuntimeConfig SwapRuntime(AmFtpdRuntimeConfig newRuntime) => Interlocked.Exchange(ref _runtime, newRuntime);
 
-
-
     private sealed record ScriptEngines(
         AMScriptEngine Credit,
         AMScriptEngine Fxp,
@@ -545,7 +674,8 @@ public sealed class FtpServer
         AMScriptEngine SectionRouting,
         AMScriptEngine Site,
         AMScriptEngine Users,
-        AMScriptEngine Groups) : IDisposable
+        AMScriptEngine Groups,
+        AMScriptEngine Speed) : IDisposable
     {
         public void Dispose()
         {
@@ -556,11 +686,9 @@ public sealed class FtpServer
             Site.Dispose();
             Users.Dispose();
             Groups.Dispose();
+            Speed.Dispose();
         }
     }
-
-
-
 
     private static IPAddress ResolveListenAddress(string? bindAddress)
     {
@@ -628,6 +756,17 @@ public sealed class FtpServer
             try
             {
                 var status = new StatusEndpoint(runtime, _log, cfg);
+
+                if (cfg.RestApiEnabled)
+                {
+                    var apiRouter = new amFTPd.Core.Api.RestApiRouter(runtime, _log)
+                    {
+                        Server = this
+                    };
+                    status.AttachApiRouter(apiRouter);
+                    _log.Log(FtpLogLevel.Info, "[API] REST API enabled at /api/*");
+                }
+
                 status.Start();
                 StatusEndpoint = status;
             }
@@ -675,6 +814,7 @@ public sealed class FtpServer
         var siteScript = new AMScriptEngine(Path.Combine(rulesBase, "site.msl"));
         var userScript = new AMScriptEngine(Path.Combine(rulesBase, "user-rules.msl"));
         var groupScript = new AMScriptEngine(Path.Combine(rulesBase, "group-rules.msl"));
+        var speedScript = new AMScriptEngine(Path.Combine(rulesBase, "speed.msl"));
 
         // Optional: pipe AMScript debug into your logger
         creditScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
@@ -684,6 +824,7 @@ public sealed class FtpServer
         siteScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         userScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
         groupScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
+        speedScript.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
 
         ConfigureScriptEngine(creditScript, scriptConfig);
         ConfigureScriptEngine(fxpScript, scriptConfig);
@@ -692,6 +833,7 @@ public sealed class FtpServer
         ConfigureScriptEngine(siteScript, scriptConfig);
         ConfigureScriptEngine(userScript, scriptConfig);
         ConfigureScriptEngine(groupScript, scriptConfig);
+        ConfigureScriptEngine(speedScript, scriptConfig);
 
         var newScripts = new ScriptEngines(
             creditScript,
@@ -700,7 +842,8 @@ public sealed class FtpServer
             sectionRoutingScript,
             siteScript,
             userScript,
-            groupScript);
+            groupScript,
+            speedScript);
 
         ScriptEngines? old;
         lock (_configLock)
@@ -723,7 +866,7 @@ public sealed class FtpServer
         e.MaxEvaluationTime = scriptConfig.MaxEvaluationMilliseconds > 0
             ? TimeSpan.FromMilliseconds(scriptConfig.MaxEvaluationMilliseconds)
             : TimeSpan.Zero;
-        e.MaxConcurrentEvaluations = scriptConfig.MaxConcurrentScripts;
+        e.DebugLog = msg => _log.Log(FtpLogLevel.Debug, msg);
     }
 
     private string ComputeReleaseRegistryPath(AmFtpdRuntimeConfig runtime)
@@ -952,6 +1095,14 @@ public sealed class FtpServer
     }
 
     // Optional helper for login failures from elsewhere:
+    /// <summary>
+    /// Notifies the system of a failed login attempt from the specified IP address and applies a temporary ban if
+    /// necessary.
+    /// </summary>
+    /// <remarks>This method should be called whenever a failed login attempt is detected. If the number or
+    /// pattern of failed attempts from the given address meets the configured criteria, the address may be temporarily
+    /// banned from further access.</remarks>
+    /// <param name="address">The IP address from which the failed login attempt originated. Cannot be null.</param>
     public void NotifyFailedLogin(IPAddress address)
     {
         var decision = HammerGuard.RegisterFailedLogin(address);
@@ -1029,6 +1180,72 @@ public sealed class FtpServer
             {
                 _log.Log(FtpLogLevel.Warn, $"[Status] Monitoring refresh failed: {ex.Message}", ex);
                 msg += " (monitoring refresh failed; see logs)";
+            }
+
+            // Restart webhook dispatcher if config changed
+            try
+            {
+                if (_webhooks is not null)
+                {
+                    try { _webhooks.DisposeAsync().AsTask().Wait(); } catch { }
+                    _webhooks = null;
+                }
+
+                if (Runtime.WebhookConfig is { Enabled: true } newWhCfg)
+                {
+                    _webhooks = new amFTPd.Core.Webhooks.WebhookDispatcher(
+                        newWhCfg, Runtime.EventBus, _log);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Warn, $"[Webhook] Dispatcher restart failed: {ex.Message}", ex);
+            }
+
+            // Restart ACME certificate manager if config changed
+            try
+            {
+                if (_acme is not null)
+                {
+                    try { _acme.DisposeAsync().AsTask().Wait(); } catch { }
+                    _acme = null;
+                }
+
+                if (Runtime.AcmeConfig is { Enabled: true } newAcmeCfg)
+                {
+                    _acme = new amFTPd.Core.Tls.AcmeCertificateManager(
+                        cfg: newAcmeCfg,
+                        pfxPath: Runtime.TlsPfxPath
+                                      ?? throw new InvalidOperationException("TlsPfxPath not set."),
+                        pfxPassword: Runtime.TlsPfxPassword ?? "",
+                        configDir: Path.GetDirectoryName(Runtime.ConfigFilePath) ?? AppContext.BaseDirectory,
+                        log: _log,
+                        onRenewed: ct => ReloadConfigurationAsync(ct).ContinueWith(_ => { }, CancellationToken.None));
+                    await _acme.StartAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Warn, $"[ACME] Manager restart failed: {ex.Message}", ex);
+            }
+
+            // Reload plugin host (dispose old ALCs, load new DLLs)
+            try
+            {
+                if (oldRuntime.PluginHost is { } oldHost)
+                {
+                    await oldHost.DisposeAsync().ConfigureAwait(false);
+                }
+
+                if (Runtime.PluginHost is { } newHost)
+                {
+                    newHost.WireEventHandlers(Runtime.EventBus);
+                    _log.Log(FtpLogLevel.Info, "[Plugin] Plugin host reloaded and event handlers re-wired.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Log(FtpLogLevel.Warn, $"[Plugin] Plugin host reload failed: {ex.Message}", ex);
             }
 
             // Update persistence path (in case ConfigFilePath changes) and flush soon.
@@ -1422,6 +1639,56 @@ public sealed class FtpServer
     }
 
     /// <summary>
+    /// Gracefully stops the FTP server by:
+    /// 1. Stopping acceptance of new connections immediately.
+    /// 2. Waiting up to <paramref name="drainTimeout"/> for active transfers to finish.
+    /// 3. Calling <see cref="Stop"/> to perform the full teardown.
+    /// </summary>
+    /// <param name="drainTimeout">
+    /// How long to wait for in-progress transfers to complete before forcing shutdown.
+    /// Defaults to 60 seconds.
+    /// </param>
+    public async Task GracefulStopAsync(TimeSpan? drainTimeout = null)
+    {
+        var timeout = drainTimeout ?? TimeSpan.FromSeconds(60);
+
+        _log.Log(FtpLogLevel.Info, "[SHUTDOWN] Graceful shutdown initiated — closing listener...");
+
+        // Stop accepting new connections; current sessions keep running.
+        _cts?.Cancel();
+        try { _listener?.Stop(); } catch { }
+
+        var deadline = DateTimeOffset.UtcNow + timeout;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var active = FtpSession.GetActiveSessions()
+                .Count(s => s.Server == this && s.TransferDirection != 0);
+
+            if (active == 0)
+            {
+                _log.Log(FtpLogLevel.Info, "[SHUTDOWN] All transfers complete.");
+                break;
+            }
+
+            _log.Log(FtpLogLevel.Info,
+                $"[SHUTDOWN] Waiting for {active} in-progress transfer(s)... " +
+                $"({(int)(deadline - DateTimeOffset.UtcNow).TotalSeconds}s remaining)");
+
+            await Task.Delay(1_000).ConfigureAwait(false);
+        }
+
+        var remaining = FtpSession.GetActiveSessions()
+            .Count(s => s.Server == this && s.TransferDirection != 0);
+
+        if (remaining > 0)
+            _log.Log(FtpLogLevel.Warn,
+                $"[SHUTDOWN] Drain timeout — forcibly stopping with {remaining} transfer(s) still active.");
+
+        Stop();
+    }
+
+    /// <summary>
     /// Stops the FTP server, canceling any ongoing operations and releasing resources.
     /// </summary>
     /// <remarks>This method cancels any pending tasks, stops the listener, and logs the server shutdown
@@ -1500,6 +1767,29 @@ public sealed class FtpServer
             _housekeeping = null;
         }
 
+        if (_autoNuke is not null)
+        {
+            _autoNuke.DisposeAsync().AsTask().Wait();
+            _autoNuke = null;
+        }
+
+        if (_webhooks is not null)
+        {
+            try { _webhooks.DisposeAsync().AsTask().Wait(); } catch { }
+            _webhooks = null;
+        }
+
+        if (_acme is not null)
+        {
+            try { _acme.DisposeAsync().AsTask().Wait(); } catch { }
+            _acme = null;
+        }
+
+        // Dispose plugin host (LIFO plugin shutdown + ALC unload)
+        if (Runtime.PluginHost is { } stoppingHost)
+        {
+            try { stoppingHost.DisposeAsync().AsTask().Wait(); } catch { }
+        }
 
         // Dispose AMScript engines
         ScriptEngines? scripts;

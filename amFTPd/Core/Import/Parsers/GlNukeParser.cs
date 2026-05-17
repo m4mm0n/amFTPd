@@ -1,19 +1,33 @@
-﻿using amFTPd.Core.Import.Records;
+using System;
+using amFTPd.Core.Import.Records;
 
 namespace amFTPd.Core.Import.Parsers;
 
 /// <summary>
-/// Parses glFTPD nuke records from a "glftpd.nuke" file located in the specified root directory.
+/// Parses glFTPd nuke records from known glFTPd nuke logs.
 /// </summary>
-/// <remarks>This parser reads the "glftpd.nuke" file, if present, and yields each valid nuke record as an <see
-/// cref="ImportedNukeRecord"/> instance. Lines that are empty, malformed, or do not meet the expected format are
-/// ignored. The parser does not throw if the file is missing; it simply yields no results.</remarks>
 public sealed class GlNukeParser : IImportParser<ImportedNukeRecord>
 {
     public IEnumerable<ImportedNukeRecord> Parse(string rootPath)
     {
-        var nukeFile = Path.Combine(rootPath, "glftpd.nuke");
-        if (!File.Exists(nukeFile))
+        var candidates = new[]
+        {
+            Path.Combine(rootPath, "glftpd.nuke"),
+            Path.Combine(rootPath, "ftp-data", "logs", "nukelog"),
+            Path.Combine(rootPath, "ftp-data", "logs", "nukelog.txt")
+        };
+
+        string? nukeFile = null;
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                nukeFile = candidate;
+                break;
+            }
+        }
+
+        if (nukeFile is null)
             yield break;
 
         foreach (var line in File.ReadLines(nukeFile))
@@ -21,30 +35,40 @@ public sealed class GlNukeParser : IImportParser<ImportedNukeRecord>
             if (string.IsNullOrWhiteSpace(line))
                 continue;
 
-            var parts = line.Split(
+            var clean = line.Trim();
+            if (clean.StartsWith('#'))
+                continue;
+
+            var parts = clean.Split(
                 ' ',
                 StringSplitOptions.RemoveEmptyEntries);
 
             if (parts.Length < 5)
                 continue;
 
-            var section = parts[0];
-            var release = parts[1];
+            var start = 0;
+            if (parts.Length >= 2 && parts[0].Equals("NUKE", StringComparison.OrdinalIgnoreCase))
+            {
+                start = 1;
+            }
 
-            if (!int.TryParse(parts[2], out var mult))
+            if (parts.Length < start + 5)
+                continue;
+
+            var section = parts[start];
+            var release = parts[start + 1];
+
+            if (!int.TryParse(parts[start + 2], out var mult))
                 continue;
 
             var nuker = parts[^2];
             var reason = string.Join(
                 ' ',
-                parts.Skip(3).Take(parts.Length - 5));
+                parts.Skip(start + 3).Take(parts.Length - (start + 5)));
 
             var ts = DateTimeOffset.UtcNow;
-
             if (long.TryParse(parts[^1], out var unix))
-            {
                 ts = DateTimeOffset.FromUnixTimeSeconds(unix);
-            }
 
             yield return new ImportedNukeRecord(
                 Section: section,

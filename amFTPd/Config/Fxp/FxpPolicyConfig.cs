@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FxpPolicyConfig.cs
@@ -124,6 +124,6 @@ public sealed class FxpPolicyConfig
     /// Allow FXP where both control and data are protected by TLS.
     /// </summary>
     public bool AllowSecureFxp { get; init; } = true;
-    
-    
+
+
 }

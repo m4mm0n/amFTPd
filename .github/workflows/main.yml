@@ -3,15 +3,14 @@ name: Release amFTPd
 on:
   push:
     tags:
-      - 'v*.*.*'        # tags like v1.2.3
+      - 'v*'            # tags like v0.8.0.0
 
 permissions:
   contents: write       # needed for creating releases
   packages: write       # needed for pushing Docker images
 
 env:
-  # IMPORTANT: this must be a PATH INSIDE THE REPO, not your C: drive
-  PROJECT_PATH: amFTPd/amFTPd.csproj   # <-- adjust THIS to match your repo layout
+  PROJECT_PATH: amFTPd/amFTPd.csproj
 
 jobs:
   build:
@@ -38,7 +37,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'   # or 8.0.x or whatever you actually use
+          dotnet-version: '10.0.x'
 
       - name: Publish ${{ matrix.rid }}
         shell: pwsh
@@ -48,7 +47,7 @@ jobs:
             -r "${{ matrix.rid }}" `
             --self-contained true `
             /p:PublishSingleFile=true `
-            /p:PublishTrimmed=true `
+            /p:PublishTrimmed=false `
             -o "out/${{ matrix.rid }}"
 
       - name: Archive ${{ matrix.rid }}

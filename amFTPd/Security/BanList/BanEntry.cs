@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           BanEntry.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -7,7 +7,7 @@
  *  CRC32:          0xDAC17AD8
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Represents an IP or CIDR ban entry with optional expiration metadata.
  * 
  *  License:
  *      MIT License

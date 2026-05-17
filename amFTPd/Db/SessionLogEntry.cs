@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SessionLogEntry.cs
@@ -18,10 +18,10 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ====================================================================================================
  */
-using amFTPd.Core.Events;
-using amFTPd.Logging;
 using System.Text;
 using System.Text.Json;
+using amFTPd.Core.Events;
+using amFTPd.Logging;
 
 namespace amFTPd.Db
 {

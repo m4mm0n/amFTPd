@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteShowuserCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xB669CDEC
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE SHOWUSER command handler.
  * 
  *  License:
  *      MIT License

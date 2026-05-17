@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SectionManager.cs
@@ -19,9 +19,8 @@
  * ====================================================================================================
  */
 
-
-using amFTPd.Db;
 using System.Text.Json;
+using amFTPd.Db;
 
 namespace amFTPd.Config.Ftpd;
 
@@ -78,14 +77,24 @@ public sealed class SectionManager
         if (!virtualPath.StartsWith("/"))
             virtualPath = "/" + virtualPath;
 
-        // try to find a matching section by prefix
+        // Try to find a matching section by path segment boundary.
         var match = _sections.FirstOrDefault(sec =>
-            virtualPath.StartsWith(sec.VirtualRoot, StringComparison.OrdinalIgnoreCase));
+            IsSectionMatch(virtualPath, sec.VirtualRoot));
 
         if (match is not null)
             return match;
 
         // Fallback: if we have at least one section, return the first one.
+        var defaultSection = _sections.FirstOrDefault(
+            static s => s.VirtualRoot == "/" &&
+                        s.Name.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase));
+        if (defaultSection is not null)
+            return defaultSection;
+
+        var rootSection = _sections.FirstOrDefault(s => s.VirtualRoot == "/");
+        if (rootSection is not null)
+            return rootSection;
+
         if (_sections.Count > 0)
             return _sections[0];
 
@@ -100,6 +109,17 @@ public sealed class SectionManager
             DownloadMultiplier: 1.0,
             NukeMultiplier: 1
         ).Normalize();
+    }
+
+    private static bool IsSectionMatch(string virtualPath, string sectionRoot)
+    {
+        if (string.Equals(sectionRoot, "/", StringComparison.Ordinal))
+            return true;
+
+        if (!virtualPath.StartsWith(sectionRoot, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return virtualPath.Length == sectionRoot.Length || virtualPath[sectionRoot.Length] == '/';
     }
 
 
@@ -167,13 +187,13 @@ public sealed class SectionManager
     }
 
     // ---------------------------------------------------------------------
-    // DB BACKEND (ISectionStore) – stubbed for now
+    // SECTION STORE BACKEND
     // ---------------------------------------------------------------------
 
     /// <summary>
     /// Creates a SectionManager from a section-store backend.
-    /// Currently returns an empty set; hook into the real ISectionStore
-    /// implementation whenever you’re ready.
+    /// Reads all configured sections from the supplied store and fails loudly if
+    /// the backend returns no usable records.
     /// </summary>
     public static SectionManager FromSectionStore(ISectionStore store, string sourceDescription)
     {

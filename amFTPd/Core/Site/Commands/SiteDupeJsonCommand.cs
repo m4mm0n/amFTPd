@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using amFTPd.Core.Dupe;
 
 namespace amFTPd.Core.Site.Commands;

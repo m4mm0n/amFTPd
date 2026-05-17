@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Stats;
+namespace amFTPd.Core.Stats;
 
 /// <summary>
 /// Provides methods for calculating per-second rates of statistics over a specified time window between two snapshots.

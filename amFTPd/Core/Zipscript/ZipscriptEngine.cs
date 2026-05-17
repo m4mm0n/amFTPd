@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           ZipscriptEngine.cs
@@ -19,13 +19,13 @@
  * ====================================================================================================
  */
 
+using System.Collections.Concurrent;
+using System.Globalization;
 using amFTPd.Config.Daemon;
 using amFTPd.Core.Scene;
 using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Utils.Cryptography;
-using System.Collections.Concurrent;
-using System.Globalization;
 
 namespace amFTPd.Core.Zipscript;
 
@@ -90,7 +90,7 @@ public sealed class ZipscriptEngine
     private const int DbFlushThreshold = 32;
 
     private AmFtpdRuntimeConfig? _runtime;
-    private readonly SceneStateRegistry? _sceneRegistry;
+    //private readonly SceneStateRegistry? _sceneRegistry;
 
     /// <summary>
     /// Occurs when a release operation has completed, providing the final status of the release process.
@@ -217,10 +217,10 @@ public sealed class ZipscriptEngine
         var fileName = Path.GetFileName(normalizedVirt);
 
         // Compute CRC32 for non-SFV files *before* taking the lock to avoid holding it while doing IO.
-        uint? crc = null;
+        uint? crc = ctx.Crc32;
         var isSfv = fileName.EndsWith(".sfv", StringComparison.OrdinalIgnoreCase);
 
-        if (!isSfv)
+        if (!isSfv && crc == null)
         {
             try
             {
@@ -244,7 +244,7 @@ public sealed class ZipscriptEngine
                 state = new ReleaseState
                 {
                     ReleasePath = releasePath,
-                    SectionName = ctx.SectionName,
+                    SectionName = ctx.SectionName ?? string.Empty,
                     Started = ctx.CompletedAt,
                     LastUpdated = ctx.CompletedAt
                 };
@@ -282,7 +282,7 @@ public sealed class ZipscriptEngine
 
             if (isNewRelease)
                 PreDetected?.Invoke(new ZipscriptPreContext(
-                    ctx.SectionName,
+                    state.SectionName,
                     Path.GetFileName(releasePath),
                     releasePath,
                     ctx.UserName ?? "UNKNOWN",
@@ -489,7 +489,7 @@ public sealed class ZipscriptEngine
                 state = new ReleaseState
                 {
                     ReleasePath = virt,
-                    SectionName = sectionName,
+                    SectionName = sectionName ?? string.Empty,
                     Started = DateTimeOffset.UtcNow
                 };
                 _releases[virt] = state;
@@ -572,7 +572,18 @@ public sealed class ZipscriptEngine
         var norm = NormalizeVirtualPath(virtualReleasePath);
 
         lock (_lock)
-            return !_releases.TryGetValue(norm, out var state) ? null : BuildStatus(state);
+        {
+            if (!_releases.TryGetValue(norm, out var state))
+                return null;
+
+            if (!string.IsNullOrWhiteSpace(state.SfvPhysicalPath) &&
+                state.SfvEntries.Count == 0)
+            {
+                LoadSfvIntoState(state);
+            }
+
+            return BuildStatus(state);
+        }
     }
 
     /// <summary>
@@ -614,7 +625,7 @@ public sealed class ZipscriptEngine
 
         try
         {
-            var lines = File.ReadAllLines(path);
+            var lines = ReadSfvLines(path);
             state.SfvEntries.Clear();
 
             foreach (var line in lines)
@@ -659,7 +670,15 @@ public sealed class ZipscriptEngine
                 {
                     info.ExpectedCrc = kvp.ExpectedCrc;
                     if (info.ActualCrc is null)
+                    {
                         info.State = ZipscriptFileState.Missing;
+                    }
+                    else
+                    {
+                        info.State = info.ActualCrc == kvp.ExpectedCrc
+                            ? ZipscriptFileState.Ok
+                            : ZipscriptFileState.BadCrc;
+                    }
                 }
             }
 
@@ -678,6 +697,24 @@ public sealed class ZipscriptEngine
                 $"Zipscript: failed to parse SFV '{path}': {ex.Message}",
                 ex);
         }
+    }
+
+    private static string[] ReadSfvLines(string path)
+    {
+        using var fs = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite);
+
+        using var reader = new StreamReader(fs);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+
+        return lines.ToArray();
     }
 
     private static void UpdateFileInState(

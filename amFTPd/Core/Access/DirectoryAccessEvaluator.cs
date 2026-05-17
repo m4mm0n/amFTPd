@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           DirectoryAccessEvaluator.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -66,7 +66,7 @@ public sealed class DirectoryAccessEvaluator
 
             var key = Normalize(rawKey);
 
-            if (!virtualPath.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+            if (!IsPathMatch(virtualPath, key))
                 continue;
 
             // Longest prefix wins
@@ -97,5 +97,16 @@ public sealed class DirectoryAccessEvaluator
             path = "/" + path;
         // no trailing slash trimming – keeps prefix semantics simple
         return path;
+    }
+
+    private static bool IsPathMatch(string virtualPath, string normalizedRuleRoot)
+    {
+        if (normalizedRuleRoot == "/")
+            return true;
+
+        if (!virtualPath.StartsWith(normalizedRuleRoot, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return virtualPath.Length == normalizedRuleRoot.Length || virtualPath[normalizedRuleRoot.Length] == '/';
     }
 }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SectionResolver.cs
@@ -70,7 +70,19 @@ namespace amFTPd.Core.Sections
             if (!virtualPath.StartsWith('/'))
                 virtualPath = "/" + virtualPath;
 
-            return _sections.FirstOrDefault(sec => virtualPath.StartsWith(sec.VirtualRoot, StringComparison.OrdinalIgnoreCase));
+            return _sections.FirstOrDefault(sec =>
+                IsMatch(virtualPath, sec.VirtualRoot));
+        }
+
+        private static bool IsMatch(string virtualPath, string sectionRoot)
+        {
+            if (sectionRoot == "/")
+                return true;
+
+            if (!virtualPath.StartsWith(sectionRoot, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return virtualPath.Length == sectionRoot.Length || virtualPath[sectionRoot.Length] == '/';
         }
     }
 }

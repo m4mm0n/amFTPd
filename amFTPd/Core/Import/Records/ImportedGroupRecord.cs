@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import.Records;
+namespace amFTPd.Core.Import.Records;
 
 /// <summary>
 /// Represents a group record imported from an external source, including its name, default ratio, and privilege status.

@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           BinaryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -17,12 +17,12 @@
  *      Please do not use for illegal purposes, and if you do use the project please refer to the original author.
  * ==================================================================================================== */
 
-using amFTPd.Config.Ftpd;
-using amFTPd.Security;
-using amFTPd.Utils;
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using amFTPd.Config.Ftpd;
+using amFTPd.Security;
+using amFTPd.Utils;
 
 namespace amFTPd.Db
 {
@@ -242,22 +242,38 @@ namespace amFTPd.Db
         public IEnumerable<FtpUser> GetAllUsers()
             => _users.Values;
 
-        public bool TryAuthenticate(string user, string password, out FtpUser? account)
+        public bool TryAuthenticate(string user, string password, out FtpUser? account, out string? denyReason)
         {
             account = null;
+            denyReason = null;
 
             if (!_users.TryGetValue(user, out var u))
+            {
+                denyReason = "530 Login incorrect.\r\n";
                 return false;
+            }
+
+            if (u.Disabled)
+            {
+                denyReason = "530 Account disabled.\r\n";
+                return false;
+            }
 
             if (!PasswordHasher.VerifyPassword(password, u.PasswordHash))
+            {
+                denyReason = "530 Login incorrect.\r\n";
                 return false;
+            }
 
             lock (_sync)
             {
                 var c = _loginCounter.TryGetValue(user, out var cur) ? cur : 0;
 
                 if (u.MaxConcurrentLogins > 0 && c >= u.MaxConcurrentLogins)
+                {
+                    denyReason = $"530 Max connections reached for your account ({u.MaxConcurrentLogins}).\r\n";
                     return false;
+                }
 
                 _loginCounter[user] = c + 1;
             }
@@ -543,13 +559,12 @@ namespace amFTPd.Db
 
         private byte[] DeriveKey(byte[] salt)
         {
-            using var pbkdf2 = new Rfc2898DeriveBytes(
+            return Rfc2898DeriveBytes.Pbkdf2(
                 _masterPasswordBytes,
                 salt,
                 200_000,
-                HashAlgorithmName.SHA256);
-
-            return pbkdf2.GetBytes(32);
+                HashAlgorithmName.SHA256,
+                32);
         }
 
         private static byte[] EnsureSalt(string saltPath)

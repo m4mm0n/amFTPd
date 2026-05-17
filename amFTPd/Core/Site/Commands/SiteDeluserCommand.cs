@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDeluserCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xD2A75FD4
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DELUSER command handler.
  * 
  *  License:
  *      MIT License
@@ -27,7 +27,7 @@ namespace amFTPd.Core.Site.Commands
         public override string Name => "DELUSER";
         public override bool RequiresAdmin => false;
         public override bool RequiresSiteop => true;
-        public override string HelpText => "DELUSER <user>  - disables the account";
+        public override string HelpText => "DELUSER <user>  - soft-disable the account (use UNSUSPEND to re-enable).";
 
         public override async Task ExecuteAsync(
             SiteCommandContext context,
@@ -63,6 +63,13 @@ namespace amFTPd.Core.Site.Commands
                 await s.WriteAsync($"550 Failed to disable user: {error ?? "unknown error"}\r\n", cancellationToken);
                 return;
             }
+
+            context.Runtime.AuditLog?.Log(
+                actor: context.Session.Account?.UserName ?? "*unknown*",
+                action: "DELUSER",
+                target: userName,
+                detail: $"group={user.PrimaryGroup}",
+                ip: context.Session.RemoteEndPoint?.Address.ToString());
 
             await s.WriteAsync("200 User disabled.\r\n", cancellationToken);
         }

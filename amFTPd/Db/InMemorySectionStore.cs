@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           InMemorySectionStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -21,6 +21,7 @@
 
 
 
+using System.Linq;
 using amFTPd.Config.Ftpd;
 //using DbSection = amFTPd.Db.FtpSection;
 
@@ -37,8 +38,8 @@ namespace amFTPd.Db
     /// </remarks>
     internal sealed class InMemorySectionStore : ISectionStore
     {
-        private readonly Dictionary<string, Config.Ftpd.FtpSection> _sections =
-            new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, Config.Ftpd.FtpSection> _sections;
+        private readonly object _sync = new();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="InMemorySectionStore"/> class
@@ -48,9 +49,10 @@ namespace amFTPd.Db
         {
             if (sections is null) throw new ArgumentNullException(nameof(sections));
 
-            _sections = sections
+            var initialized = sections
                 .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            _sections = new Dictionary<string, Config.Ftpd.FtpSection>(initialized, StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -72,11 +74,18 @@ namespace amFTPd.Db
 
         /// <inheritdoc />
         public Config.Ftpd.FtpSection? FindSection(string sectionName) =>
-            sectionName is null ? throw new ArgumentNullException(nameof(sectionName)) :
-            _sections.TryGetValue(sectionName, out var s) ? s : null;
+            sectionName is null
+                ? throw new ArgumentNullException(nameof(sectionName))
+                : FindSectionInternal(sectionName);
 
         /// <inheritdoc />
-        public IEnumerable<Config.Ftpd.FtpSection> GetAllSections() => _sections.Values;
+        public IEnumerable<Config.Ftpd.FtpSection> GetAllSections()
+        {
+            lock (_sync)
+            {
+                return _sections.Values.ToList();
+            }
+        }
 
         /// <inheritdoc />
         public bool TryUpdateSection(Config.Ftpd.FtpSection section, out string? error)
@@ -87,15 +96,18 @@ namespace amFTPd.Db
                 return false;
             }
 
-            if (!_sections.ContainsKey(section.Name))
+            lock (_sync)
             {
-                error = $"Section '{section.Name}' does not exist.";
-                return false;
-            }
+                if (!_sections.ContainsKey(section.Name))
+                {
+                    error = $"Section '{section.Name}' does not exist.";
+                    return false;
+                }
 
-            _sections[section.Name] = section;
-            error = null;
-            return true;
+                _sections[section.Name] = section;
+                error = null;
+                return true;
+            }
         }
 
         /// <inheritdoc />
@@ -107,27 +119,47 @@ namespace amFTPd.Db
                 return false;
             }
 
-            if (!_sections.Remove(sectionName))
+            lock (_sync)
             {
-                error = $"Section '{sectionName}' does not exist.";
-                return false;
-            }
+                if (!_sections.Remove(sectionName))
+                {
+                    error = $"Section '{sectionName}' does not exist.";
+                    return false;
+                }
 
-            error = null;
-            return true;
+                error = null;
+                return true;
+            }
         }
 
         public bool TryAddSection(Config.Ftpd.FtpSection section, out string? error)
         {
-            if (_sections.ContainsKey(section.Name))
+            if (section is null)
             {
-                error = "Section exists.";
+                error = "Section cannot be null.";
                 return false;
             }
 
-            _sections[section.Name] = section;
-            error = null;
-            return true;
+            lock (_sync)
+            {
+                if (_sections.ContainsKey(section.Name))
+                {
+                    error = "Section exists.";
+                    return false;
+                }
+
+                _sections[section.Name] = section;
+                error = null;
+                return true;
+            }
+        }
+
+        private Config.Ftpd.FtpSection? FindSectionInternal(string sectionName)
+        {
+            lock (_sync)
+            {
+                return _sections.TryGetValue(sectionName, out var s) ? s : null;
+            }
         }
     }
 }

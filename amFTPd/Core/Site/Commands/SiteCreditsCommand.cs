@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteCreditsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xE5595856
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE CREDITS command handler.
  * 
  *  License:
  *      MIT License

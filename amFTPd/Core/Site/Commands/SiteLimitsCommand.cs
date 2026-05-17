@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteLimitsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x251D88B4
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE LIMITS command handler.
  * 
  *  License:
  *      MIT License

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRescanNukesCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x49AF62C4
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RESCANNUKES command handler.
  * 
  *  License:
  *      MIT License

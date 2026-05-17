@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AMScriptContext.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -56,5 +56,9 @@ public sealed record AMScriptContext(
     // Added for section-routing, SITE scripting, user rules
     string? VirtualPath = "",
     string? PhysicalPath = "",
-    string Event = ""
+    string Event = "",
+    bool IsAdmin = false,
+    bool IsSiteop = false,
+    bool IsTls = false,
+    string Arg = ""
 );

@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           IdentManager.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -38,7 +38,6 @@ namespace amFTPd.Core.Ident;
 public sealed class IdentManager
 {
     private readonly IdentConfig _config;
-    private readonly IdentClient _client = new();
     private readonly IdentCache? _cache;
 
     /// <summary>
@@ -108,7 +107,7 @@ public sealed class IdentManager
             return cached;
         }
 
-        var result = await _client.QueryAsync(remote, local, _config.TimeoutMs, ct).ConfigureAwait(false);
+        var result = await new IdentClient().QueryAsync(remote, local, _config.TimeoutMs, ct).ConfigureAwait(false);
 
         if (_cache is not null && result.Success)
             _cache.Set(remote.Address, result);

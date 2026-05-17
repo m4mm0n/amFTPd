@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteMoveCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xD43ED918
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE MOVE command handler.
  * 
  *  License:
  *      MIT License

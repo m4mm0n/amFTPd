@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteLastracesCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x93A368E6
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE LASTRACES command handler.
  * 
  *  License:
  *      MIT License

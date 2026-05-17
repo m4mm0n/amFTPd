@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDupeCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xF81D4BF8
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DUPE command handler.
  * 
  *  License:
  *      MIT License

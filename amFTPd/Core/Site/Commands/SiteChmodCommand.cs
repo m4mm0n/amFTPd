@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteChmodCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x4FBCE746
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE CHMOD command handler.
  * 
  *  License:
  *      MIT License

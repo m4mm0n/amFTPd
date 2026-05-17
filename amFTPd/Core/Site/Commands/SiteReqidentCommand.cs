@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteReqidentCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xE37C6EA7
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE REQIDENT command handler.
  * 
  *  License:
  *      MIT License

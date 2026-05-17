@@ -1,4 +1,4 @@
-﻿using amFTPd.Core.Import;
+using amFTPd.Core.Import;
 
 namespace amFTPd.Core.Site.Commands;
 

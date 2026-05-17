@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Irc.FiSH;
+namespace amFTPd.Core.Irc.FiSH;
 
 /// <summary>
 /// Provides methods for encoding and decoding data using the crypt(3) "fish" variant of Base64 encoding, commonly used

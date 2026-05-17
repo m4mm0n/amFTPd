@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace amFTPd.Core.Dupe;
@@ -42,7 +42,7 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
     // =====================================================================
 
     public void AddOrUpdateFile(
-        string section,
+        string? section,
         string release,
         string fileName,
         uint crc32,
@@ -50,6 +50,7 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
         string uploaderUser,
         string? uploaderGroup)
     {
+        section ??= string.Empty;
         var key = DupeEntry.MakeKey(section, release);
         var now = DateTimeOffset.UtcNow;
 
@@ -61,7 +62,8 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
 
             if (_index.TryGetValue(key, out var offset))
             {
-                meta = ReadMeta(offset);
+                var recordEnd = GetRecordEndOffset(offset);
+                meta = ReadMeta(offset, recordEnd);
                 files = ReadCrcList(meta);
             }
             else
@@ -77,20 +79,22 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
                 files = new List<BinaryDupeCrcEntry>();
             }
 
-            // Remove existing entry for same filename
-            var removed = files.RemoveAll(f =>
-                f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+            var existingEntries = files
+                .Where(f => f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
-            if (removed == 0)
+            if (existingEntries.Count > 0)
             {
-                meta.FileCount++;
-                meta.TotalBytes += fileSize;
-
-                if (IsArchive(fileName))
-                    meta.ArchiveCount++;
+                meta.TotalBytes = Math.Max(0, meta.TotalBytes - existingEntries.Sum(f => f.FileSize));
+                files = files
+                    .Where(f => !f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
             }
 
-            files.Add(new BinaryDupeCrcEntry(fileName, crc32));
+            files.Add(new BinaryDupeCrcEntry(fileName, crc32, fileSize));
+            meta.FileCount = files.Count;
+            meta.ArchiveCount = files.Count(IsArchiveEntry);
+            meta.TotalBytes += fileSize;
 
             meta.LastUpdatedUnix = now.ToUnixTimeSeconds();
 
@@ -112,17 +116,25 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
             if (!_index.TryGetValue(key, out var offset))
                 return;
 
-            var meta = ReadMeta(offset);
+            var recordEnd = GetRecordEndOffset(offset);
+            var meta = ReadMeta(offset, recordEnd);
             var files = ReadCrcList(meta);
 
-            var removed = files.RemoveAll(f =>
-                f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase));
+            var removedEntries = files
+                .Where(f => f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var removed = removedEntries.Count;
 
             if (removed == 0)
                 return;
 
+            files = [.. files.Where(f => !f.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))];
+
+            meta.TotalBytes = Math.Max(0, meta.TotalBytes - removedEntries.Sum(f => f.FileSize));
             meta.FileCount = Math.Max(0, meta.FileCount - removed);
             meta.ArchiveCount = files.Count(IsArchiveEntry);
+
 
             if (files.Count == 0)
             {
@@ -154,7 +166,8 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
             if (!_index.TryGetValue(key, out var offset))
                 return null;
 
-            var meta = ReadMeta(offset);
+            var recordEnd = GetRecordEndOffset(offset);
+            var meta = ReadMeta(offset, recordEnd);
 
             return new DupeEntry
             {
@@ -166,7 +179,8 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
                 LastUpdated = DateTimeOffset.FromUnixTimeSeconds(meta.LastUpdatedUnix),
                 IsNuked = meta.IsNuked,
                 NukeMultiplier = (int)meta.NukeMultiplier,
-                NukeReason = meta.NukeReason
+                NukeReason = meta.NukeReason,
+                NukePenalties = new Dictionary<string, long>(meta.NukePenalties, StringComparer.OrdinalIgnoreCase)
             };
         }
         finally
@@ -191,7 +205,8 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
                 if (list.Count >= limit)
                     break;
 
-                var meta = ReadMeta(offset);
+                var recordEnd = GetRecordEndOffset(offset);
+                var meta = ReadMeta(offset, recordEnd);
 
                 if (sectionName != null &&
                     !meta.Section.Equals(sectionName, StringComparison.OrdinalIgnoreCase))
@@ -210,7 +225,8 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
                     LastUpdated = DateTimeOffset.FromUnixTimeSeconds(meta.LastUpdatedUnix),
                     IsNuked = meta.IsNuked,
                     NukeMultiplier = (int)meta.NukeMultiplier,
-                    NukeReason = meta.NukeReason
+                    NukeReason = meta.NukeReason,
+                    NukePenalties = new Dictionary<string, long>(meta.NukePenalties, StringComparer.OrdinalIgnoreCase)
                 });
             }
         }
@@ -220,6 +236,38 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
         }
 
         return list;
+    }
+
+    public IEnumerable<DupeEntry> GetAll()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            var list = new List<DupeEntry>(_index.Count);
+            foreach (var offset in _index.Values)
+            {
+                var recordEnd = GetRecordEndOffset(offset);
+                var meta = ReadMeta(offset, recordEnd);
+                list.Add(new DupeEntry
+                {
+                    SectionName = meta.Section,
+                    ReleaseName = meta.Release,
+                    UploaderGroup = meta.Group,
+                    TotalBytes = meta.TotalBytes,
+                    FirstSeen = DateTimeOffset.FromUnixTimeSeconds(meta.FirstSeenUnix),
+                    LastUpdated = DateTimeOffset.FromUnixTimeSeconds(meta.LastUpdatedUnix),
+                    IsNuked = meta.IsNuked,
+                    NukeMultiplier = (int)meta.NukeMultiplier,
+                    NukeReason = meta.NukeReason,
+                    NukePenalties = new Dictionary<string, long>(meta.NukePenalties, StringComparer.OrdinalIgnoreCase)
+                });
+            }
+            return list;
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
     }
 
     // =====================================================================
@@ -242,7 +290,8 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
 
             if (_index.TryGetValue(key, out var offset))
             {
-                meta = ReadMeta(offset);
+                var recordEnd = GetRecordEndOffset(offset);
+                meta = ReadMeta(offset, recordEnd);
                 files = ReadCrcList(meta);
             }
             else
@@ -262,6 +311,9 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
             meta.IsNuked = entry.IsNuked;
             meta.NukeMultiplier = entry.NukeMultiplier;
             meta.NukeReason = entry.NukeReason;
+            meta.NukePenalties = new Dictionary<string, long>(
+                entry.NukePenalties,
+                StringComparer.OrdinalIgnoreCase);
 
             WriteRelease(entry.SectionName, entry.ReleaseName, meta, files);
         }
@@ -309,6 +361,7 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
             {
                 bw.Write(f.FileName);
                 bw.Write(f.Crc);
+                bw.Write(f.FileSize);
             }
         }
 
@@ -331,7 +384,11 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
         {
             var name = br.ReadString();
             var crc = br.ReadUInt32();
-            list.Add(new BinaryDupeCrcEntry(name, crc));
+            long fileSize = 0;
+            if (br.BaseStream.Position + sizeof(long) <= br.BaseStream.Length)
+                fileSize = br.ReadInt64();
+
+            list.Add(new BinaryDupeCrcEntry(name, crc, fileSize));
         }
 
         return list;
@@ -359,14 +416,21 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
 
         bw.Write(m.CrcOffset);
         bw.Write(m.CrcCount);
+
+        bw.Write(m.NukePenalties.Count);
+        foreach (var kv in m.NukePenalties)
+        {
+            bw.Write(kv.Key);
+            bw.Write(kv.Value);
+        }
     }
 
-    private BinaryDupeMetaRecord ReadMeta(long offset)
+    private BinaryDupeMetaRecord ReadMeta(long offset, long recordEnd)
     {
         _meta.Seek(offset, SeekOrigin.Begin);
         using var br = new BinaryReader(_meta, Encoding.UTF8, true);
 
-        return new BinaryDupeMetaRecord
+        var record = new BinaryDupeMetaRecord
         {
             Section = br.ReadString(),
             Release = br.ReadString(),
@@ -386,6 +450,59 @@ public sealed class BinaryDupeStore : IDupeStore, IDisposable
             CrcOffset = br.ReadInt64(),
             CrcCount = br.ReadInt32()
         };
+
+        record.NukePenalties = ReadNukePenalties(br, recordEnd);
+
+        return record;
+    }
+
+    private static Dictionary<string, long> ReadNukePenalties(BinaryReader br, long recordEnd)
+    {
+        if (br.BaseStream.Position >= recordEnd)
+            return new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var remaining = recordEnd - br.BaseStream.Position;
+            if (remaining < sizeof(int))
+                return new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+            var count = br.ReadInt32();
+            if (count is < 0 or > 10000)
+                return new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+            var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < count; i++)
+            {
+                if (br.BaseStream.Position >= recordEnd)
+                    break;
+
+                var user = br.ReadString();
+                if (br.BaseStream.Position + sizeof(long) > recordEnd)
+                    break;
+
+                var penalty = br.ReadInt64();
+                result[user] = penalty;
+            }
+
+            return result;
+        }
+        catch
+        {
+            return new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private long GetRecordEndOffset(long offset)
+    {
+        long? nextOffset = null;
+        foreach (var candidate in _index.Values)
+        {
+            if (candidate > offset && (nextOffset is null || candidate < nextOffset))
+                nextOffset = candidate;
+        }
+
+        return nextOffset ?? _meta.Length;
     }
 
     // =====================================================================

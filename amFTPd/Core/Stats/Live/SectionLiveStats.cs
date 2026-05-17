@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Stats.Live;
+namespace amFTPd.Core.Stats.Live;
 
 /// <summary>
 /// Represents live statistics for a specific section, including upload and download counts, data volume, and the number

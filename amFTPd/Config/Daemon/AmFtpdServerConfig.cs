@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdServerConfig.cs
@@ -57,6 +57,7 @@ namespace amFTPd.Config.Daemon
         bool RequireTlsForAuth,
         string DataChannelProtectionDefault,   // "C" or "P"
         bool AllowActiveMode,
-        bool AllowFxp
+        bool AllowFxp,
+        int MaxCommandsPerMinute = 240
     );
 }

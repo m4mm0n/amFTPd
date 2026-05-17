@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteHelpCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x9484CFDF
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE HELP command handler.
  * 
  *  License:
  *      MIT License

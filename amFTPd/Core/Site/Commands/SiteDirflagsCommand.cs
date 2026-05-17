@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDirflagsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x22F5B7F0
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DIRFLAGS command handler.
  * 
  *  License:
  *      MIT License
@@ -20,8 +20,8 @@
  */
 
 
-using amFTPd.Config.Ftpd.RatioRules;
 using System.Text;
+using amFTPd.Config.Ftpd.RatioRules;
 
 namespace amFTPd.Core.Site.Commands;
 

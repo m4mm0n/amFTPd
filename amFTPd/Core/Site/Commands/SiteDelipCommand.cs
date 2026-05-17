@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteDelipCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xAFE281CA
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE DELIP command handler.
  * 
  *  License:
  *      MIT License

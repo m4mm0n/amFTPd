@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteStatMonthlyCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0xAAB9F660
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE STATMONTHLY command handler.
  * 
  *  License:
  *      MIT License

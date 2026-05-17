@@ -1,0 +1,83 @@
+# amFTPd systemd unit file
+#
+# Install:
+#   sudo cp deploy/amftpd.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now amftpd
+#
+# Or run the helper script:
+#   sudo bash deploy/install-systemd.sh
+#
+# REHASH (reload config without restart):
+#   sudo systemctl kill --signal=SIGHUP amftpd
+#   -- or --
+#   sudo kill -HUP $(systemctl show -p MainPID --value amftpd)
+
+[Unit]
+Description=amFTPd — a managed, scene-grade FTP daemon
+Documentation=https://github.com/zerolinez/amftpd
+After=network-online.target
+Wants=network-online.target
+# If using a database backend, add the appropriate service here:
+# After=mysql.service postgresql.service
+
+[Service]
+Type=simple
+User=amftpd
+Group=amftpd
+
+# Adjust these paths to match your deployment
+WorkingDirectory=/opt/amftpd
+ExecStart=/opt/amftpd/amFTPd /etc/amftpd/amftpd.json
+
+# SIGHUP triggers a config reload (REHASH)
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Give transfers up to 70 s to complete before SIGKILL
+TimeoutStopSec=70
+
+# ── Security hardening ─────────────────────────────────────────────────────
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+# ProtectSystem=strict makes the whole filesystem read-only except for the
+# paths listed in ReadWritePaths below. Adjust these to match your layout.
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/amftpd /var/log/amftpd /etc/amftpd
+
+# Limit to only the capabilities we actually need:
+#   CAP_NET_BIND_SERVICE  — bind to port 21 (and 80 if ACME HTTP-01 is enabled)
+# Remove this if you configure amFTPd to listen on an unprivileged port (>1023)
+# and use a firewall rule to redirect 21→2121.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Restrict syscalls to a sensible subset (remove if causing issues)
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+# Prevent the process from gaining new privileges via SUID/capabilities
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+# Limit address families to what amFTPd needs
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Environment
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+# Log to the journal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=amftpd
+
+[Install]
+WantedBy=multi-user.target

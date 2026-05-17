@@ -1,7 +1,7 @@
-﻿using amFTPd.Logging;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
+using amFTPd.Logging;
 
 namespace amFTPd.Core.Irc.FiSH;
 

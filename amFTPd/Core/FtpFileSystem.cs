@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpFileSystem.cs
@@ -38,7 +38,7 @@ public sealed class FtpFileSystem
 {
     private readonly string _rootFs; // physical root (full path)
     private readonly ConcurrentDictionary<string, string> _pathCache = new(StringComparer.Ordinal);
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="FtpFileSystem"/> class with the specified root file system path.
     /// </summary>

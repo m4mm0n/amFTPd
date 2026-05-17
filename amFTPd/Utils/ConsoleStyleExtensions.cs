@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           ConsoleStyleExtensions.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -230,7 +230,7 @@ namespace amFTPd.Utils
         private static void WriteCentered(string text)
         {
             var clean = AnsiRegex.Replace(text, "");
-            var left = Math.Max((Console.WindowWidth - clean.Length) / 2, 0);
+            var left = Math.Max((SafeWindowWidth() - clean.Length) / 2, 0);
 
             try { Console.SetCursorPosition(left, Console.CursorTop); }
             catch { }

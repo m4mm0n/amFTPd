@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Dupe;
+namespace amFTPd.Core.Dupe;
 
 /// <summary>
 /// Provides methods for mapping a DupeRelease object and associated data to a DupeEntry instance.
@@ -21,6 +21,7 @@ public static class DupeEntryMapper
             UploaderGroup = r.Group,
             IsNuked = r.IsNuked,
             NukeReason = r.NukeReason,
-            NukeMultiplier = (int)Math.Round(r.NukeMultiplier)
+            NukeMultiplier = (int)Math.Round(r.NukeMultiplier),
+            NukePenalties = new Dictionary<string, long>(r.NukePenalties, StringComparer.OrdinalIgnoreCase)
         };
 }

@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Scene;
+namespace amFTPd.Core.Scene;
 
 /// <summary>
 /// Provides utility methods for classifying scene-related files based on their file names or extensions.

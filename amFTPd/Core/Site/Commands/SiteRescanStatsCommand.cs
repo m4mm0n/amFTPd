@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRescanStatsCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x850B6D2C
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE RESCANSTATS command handler.
  * 
  *  License:
  *      MIT License

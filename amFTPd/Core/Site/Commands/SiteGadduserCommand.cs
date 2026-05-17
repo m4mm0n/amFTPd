@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteGadduserCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x14BC41BA
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE GADDUSER command handler.
  * 
  *  License:
  *      MIT License

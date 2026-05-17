@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           AmFtpdConfigRoot.cs
@@ -27,6 +27,7 @@ using amFTPd.Config.Ident;
 using amFTPd.Config.Irc;
 using amFTPd.Config.Vfs;
 using amFTPd.Core.Zipscript;
+using amFTPd.Logging;
 
 namespace amFTPd.Config.Daemon;
 
@@ -49,6 +50,12 @@ namespace amFTPd.Config.Daemon;
 /// <param name="Zipscript">Optional Zipscript configuration for managing automated release processing and rescanning.</param>
 /// <param name="Status">Optional status endpoint configuration for monitoring the server's health and status via HTTP.</param>
 /// <param name="Compatibility">Optional FTP compatibility configuration for handling various FTP client quirks and behaviors.</param>
+/// <param name="Webhooks">Optional outbound HTTP webhook configuration. When present and Enabled, the daemon fires JSON
+/// POSTs on configured FTP events (upload, nuke, pre, login, etc.).</param>
+/// <param name="Acme">Optional ACME v2 automatic TLS configuration. When present and Enabled, the daemon
+/// provisions and auto-renews its TLS certificate from the configured CA (default: Let's Encrypt).</param>
+/// <param name="Plugins">Optional list of plugin DLLs to load at startup. Each entry specifies the path to
+/// a plugin DLL and its per-plugin settings.</param>
 public sealed record AmFtpdConfigRoot(
     AmFtpdServerConfig Server,
     AmFtpdTlsConfig Tls,
@@ -62,6 +69,11 @@ public sealed record AmFtpdConfigRoot(
     FxpPolicyConfig? FxpPolicy = null,
     IrcConfig? Irc = null,
     ZipscriptConfig? Zipscript = null,
+    TclConfig? Tcl = null,
     AmFtpdStatusConfig? Status = null,
-    FtpCompatibilityConfig? Compatibility = null
+    FtpCompatibilityConfig? Compatibility = null,
+    AmFtpdWebhookConfig? Webhooks = null,
+    AmFtpdAcmeConfig? Acme = null,
+    QuickLogOptions? Logging = null,
+    List<AmFtpdPluginEntry>? Plugins = null
 );

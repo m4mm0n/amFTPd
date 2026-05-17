@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Import;
+namespace amFTPd.Core.Import;
 
 /// <summary>
 /// Represents summary statistics for a duplicate import operation, including counts of total, inserted, updated,

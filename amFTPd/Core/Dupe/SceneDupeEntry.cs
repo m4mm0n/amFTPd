@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Dupe;
+namespace amFTPd.Core.Dupe;
 
 /// <summary>
 /// Portable scene-style dupe entry.

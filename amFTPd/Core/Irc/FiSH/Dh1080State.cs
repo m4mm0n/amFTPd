@@ -1,4 +1,4 @@
-﻿namespace amFTPd.Core.Irc.FiSH;
+namespace amFTPd.Core.Irc.FiSH;
 
 /// <summary>
 /// Represents the current state of a DH1080 key exchange session.

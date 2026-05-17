@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 
 namespace amFTPd.Core.Irc.FiSH;
@@ -33,7 +33,16 @@ public sealed class FishKeyStore
     /// the default value for <see cref="FishKeyEntry"/>. This parameter is passed uninitialized.</param>
     /// <returns>true if the entry was found for the specified key; otherwise, false.</returns>
     public bool TryGet(string target, out FishKeyEntry entry)
-        => _keys.TryGetValue(target, out entry);
+    {
+        if (_keys.TryGetValue(target, out var found))
+        {
+            entry = found;
+            return true;
+        }
+
+        entry = null!;
+        return false;
+    }
     /// <summary>
     /// Marks the specified key as pending, indicating that it is awaiting further processing or action.
     /// </summary>

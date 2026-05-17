@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           VfsConfig.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -97,7 +97,7 @@ public sealed record VfsConfig
 
         if (!path.StartsWith("/"))
             path = "/" + path;
-        if(root != null)
+        if (root != null)
             return path.Equals(root.TrimEnd('/'), StringComparison.OrdinalIgnoreCase)
                || path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
         return false;

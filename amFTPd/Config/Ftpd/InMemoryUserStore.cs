@@ -1,4 +1,4 @@
-﻿/* ====================================================================================================
+/* ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           InMemoryUserStore.cs
  *  Author:         Geir Gustavsen, ZeroLinez Softworx
@@ -25,8 +25,8 @@
 
 
 
-using amFTPd.Security;
 using System.Text.Json;
+using amFTPd.Security;
 
 namespace amFTPd.Config.Ftpd
 {
@@ -43,6 +43,7 @@ namespace amFTPd.Config.Ftpd
         private readonly string _configPath;
         private readonly Dictionary<string, int> _activeLogins = new(StringComparer.OrdinalIgnoreCase);
         private readonly object _loginLock = new();
+        private readonly object _sync = new();
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -110,18 +111,21 @@ namespace amFTPd.Config.Ftpd
 
         public void Save()
         {
-            var list = _users.Values
-                .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
-                .Select(ToConfig)
-                .ToList();
+            lock (_sync)
+            {
+                var list = _users.Values
+                    .OrderBy(u => u.UserName, StringComparer.OrdinalIgnoreCase)
+                    .Select(ToConfig)
+                    .ToList();
 
-            var json = JsonSerializer.Serialize(list, JsonOptions);
+                var json = JsonSerializer.Serialize(list, JsonOptions);
 
-            var dir = Path.GetDirectoryName(_configPath);
-            if (!string.IsNullOrWhiteSpace(dir))
-                Directory.CreateDirectory(dir);
+                var dir = Path.GetDirectoryName(_configPath);
+                if (!string.IsNullOrWhiteSpace(dir))
+                    Directory.CreateDirectory(dir);
 
-            File.WriteAllText(_configPath, json);
+                File.WriteAllText(_configPath, json);
+            }
         }
 
         // =====================================================================
@@ -133,23 +137,39 @@ namespace amFTPd.Config.Ftpd
             if (string.IsNullOrWhiteSpace(userName))
                 return null;
 
-            return _users.TryGetValue(userName, out var u) ? u : null;
+            lock (_sync)
+            {
+                return _users.TryGetValue(userName, out var u) ? u : null;
+            }
         }
 
-        public bool TryAuthenticate(string userName, string password, out FtpUser? user)
+        public bool TryAuthenticate(string userName, string password, out FtpUser? user, out string? denyReason)
         {
             user = null;
+            denyReason = null;
 
-            if (!_users.TryGetValue(userName, out var acc))
-                return false;
+            FtpUser acc;
+            lock (_sync)
+            {
+                if (!_users.TryGetValue(userName, out acc!))
+                {
+                    denyReason = "530 Login incorrect.\r\n";
+                    return false;
+                }
+            }
 
             if (acc.Disabled)
+            {
+                denyReason = "530 Account disabled.\r\n";
                 return false;
+            }
 
             if (!VerifyPassword(acc.PasswordHash, password))
+            {
+                denyReason = "530 Login incorrect.\r\n";
                 return false;
+            }
 
-            // ----- NEW: enforce MaxConcurrentLogins -----
             if (acc.MaxConcurrentLogins > 0)
             {
                 lock (_loginLock)
@@ -157,14 +177,13 @@ namespace amFTPd.Config.Ftpd
                     var current = _activeLogins.TryGetValue(userName, out var c) ? c : 0;
                     if (current >= acc.MaxConcurrentLogins)
                     {
-                        // too many sessions
+                        denyReason = $"530 Max connections reached for your account ({acc.MaxConcurrentLogins}).\r\n";
                         return false;
                     }
 
                     _activeLogins[userName] = current + 1;
                 }
             }
-            // --------------------------------------------
 
             user = acc;
             return true;
@@ -180,14 +199,17 @@ namespace amFTPd.Config.Ftpd
                 return false;
             }
 
-            if (_users.ContainsKey(user.UserName))
+            lock (_sync)
             {
-                error = "User already exists.";
-                return false;
-            }
+                if (_users.ContainsKey(user.UserName))
+                {
+                    error = "User already exists.";
+                    return false;
+                }
 
-            _users[user.UserName] = user;
-            Save();
+                _users[user.UserName] = user;
+                Save();
+            }
             return true;
         }
 
@@ -201,8 +223,11 @@ namespace amFTPd.Config.Ftpd
                 return false;
             }
 
-            _users[user.UserName] = user;
-            Save();
+            lock (_sync)
+            {
+                _users[user.UserName] = user;
+                Save();
+            }
             return true;
         }
 
@@ -235,19 +260,27 @@ namespace amFTPd.Config.Ftpd
         }
 
         public IEnumerable<FtpUser> GetAllUsers()
-            => _users.Values;
+        {
+            lock (_sync)
+            {
+                return _users.Values.ToList();
+            }
+        }
 
         // Optional helper for admin / SITE commands
         public bool TryDeleteUser(string userName, out string? error)
         {
             error = null;
-            if (!_users.Remove(userName))
+            lock (_sync)
             {
-                error = "User not found.";
-                return false;
-            }
+                if (!_users.Remove(userName))
+                {
+                    error = "User not found.";
+                    return false;
+                }
 
-            Save();
+                Save();
+            }
             return true;
         }
 

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpCommandRouter.cs
@@ -19,6 +19,9 @@
  * ====================================================================================================
  */
 
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.Net;
 using amFTPd.Config.Daemon;
 using amFTPd.Config.Ftpd;
 using amFTPd.Config.Ftpd.RatioRules;
@@ -37,9 +40,6 @@ using amFTPd.Db;
 using amFTPd.Logging;
 using amFTPd.Scripting;
 using amFTPd.Security;
-using System.Collections.Immutable;
-using System.Diagnostics;
-using System.Net;
 using FtpSection = amFTPd.Config.Ftpd.FtpSection;
 
 namespace amFTPd.Core;
@@ -80,6 +80,7 @@ public sealed partial class FtpCommandRouter
     private AMScriptEngine? _siteScript;
     private AMScriptEngine? _userScript;
     private AMScriptEngine? _groupScript;
+    private AMScriptEngine? _speedScript;
     private AmFtpdRuntimeConfig _runtime;
 
     private readonly DirectoryAccessEvaluator _directoryAccess;
@@ -230,23 +231,28 @@ public sealed partial class FtpCommandRouter
         // User / group / section stores
         _users = _runtime.UserStore;
 
-        // Prefer DB-backed group & section stores if available, otherwise fall back
+        // Prefer DB-backed group store if available; otherwise create a read-only
+        // in-memory view derived from runtime.Groups to avoid disconnected state.
         if (_runtime.GroupStore is not null && _runtime.SectionStore is not null)
         {
             _groups = _runtime.GroupStore;
-            var sectionStore = _runtime.SectionStore;
             //_credits = new CreditEngine(_users, _groups, sectionStore);
         }
         else
         {
-            // No DB – you can either:
-            // 1) keep a minimal in-memory group/section store, or
-            // 2) throw for now if credits absolutely require them.
-            // For Phase 1: very simple in-memory stores would be enough.
+            var groupStore = new InMemoryGroupStore();
+            foreach (var (groupName, config) in _runtime.Groups)
+            {
+                var group = new amFTPd.Db.FtpGroup(
+                    groupName,
+                    config.Description,
+                    config.Users?.ToList() ?? [],
+                    new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase));
 
-            _groups = new InMemoryGroupStore();      // you'll implement this tiny adapter
-            var sectionStore = new InMemorySectionStore(_sections); // also tiny adapter
-            //_credits = new CreditEngine(_users, _groups, sectionStore);
+                groupStore.TryAddGroup(group, out _);
+            }
+
+            _groups = groupStore;
         }
 
         CreditService = new CreditService(
@@ -444,7 +450,8 @@ public sealed partial class FtpCommandRouter
         AMScriptEngine? sectionRouting = null,
         AMScriptEngine? site = null,
         AMScriptEngine? users = null,
-        AMScriptEngine? groups = null)
+        AMScriptEngine? groups = null,
+        AMScriptEngine? speed = null)
     {
         _creditScript = credit;
         _fxpScript = fxp;
@@ -453,6 +460,66 @@ public sealed partial class FtpCommandRouter
         _siteScript = site;
         _userScript = users;
         _groupScript = groups;
+        _speedScript = speed;
+    }
+
+    /// <summary>
+    /// Resolves the effective transfer speed cap (in KB/s) for the current session and path.
+    /// Combines the per-user stored limit, the per-section limit, and any speed.msl override.
+    /// Returns 0 when no limit applies (unlimited).
+    /// </summary>
+    private int ResolveEffectiveSpeedKbps(bool isDownload, FtpSection? section, string? virtPath)
+    {
+        var account = _s.Account;
+
+        // 1. Start from the per-user limit (may have been overridden at login by group/user scripts).
+        var userLimit = isDownload
+            ? (account?.MaxDownloadKbps ?? 0)
+            : (account?.MaxUploadKbps ?? 0);
+
+        // 2. Per-section speed cap (0 = no section limit).
+        var sectionLimit = isDownload
+            ? (section?.MaxDownloadKbps ?? 0)
+            : (section?.MaxUploadKbps ?? 0);
+
+        // 3. speed.msl override — evaluated per-transfer so rules can be section/path-aware.
+        var scriptLimit = 0;
+        if (_speedScript is not null && account is not null)
+        {
+            var ctx = new AMScriptContext(
+                IsFxp: _isFxp,
+                Section: section?.Name ?? "/",
+                FreeLeech: section?.FreeLeech ?? false,
+                UserName: account.UserName,
+                UserGroup: account.GroupName ?? "",
+                Bytes: 0,
+                Kb: 0,
+                CostDownload: 0,
+                EarnedUpload: 0,
+                VirtualPath: virtPath ?? "/",
+                PhysicalPath: "",
+                Event: isDownload ? "DOWNLOAD" : "UPLOAD"
+            );
+
+            var result = isDownload
+                ? _speedScript.EvaluateDownload(ctx)
+                : _speedScript.EvaluateUpload(ctx);
+
+            scriptLimit = isDownload
+                ? (result.NewDownloadLimitKbps ?? 0)
+                : (result.NewUploadLimitKbps ?? 0);
+        }
+
+        // 4. Effective limit = most restrictive non-zero value across all sources.
+        //    A value of 0 means "no limit" from that source — skip it in the comparison.
+        var effective = 0;
+        foreach (var v in new[] { userLimit, sectionLimit, scriptLimit })
+        {
+            if (v > 0 && (effective == 0 || v < effective))
+                effective = v;
+        }
+
+        return effective;
     }
 
     private async Task<bool> RunPreDispatchPipelineAsync(
@@ -610,7 +677,8 @@ public sealed partial class FtpCommandRouter
         Stream destination,
         int maxKbps,
         bool isDownload,
-        CancellationToken ct)
+        CancellationToken ct,
+        Action<long>? onProgress = null)
     {
         if (source is null) throw new ArgumentNullException(nameof(source));
         if (destination is null) throw new ArgumentNullException(nameof(destination));
@@ -638,6 +706,7 @@ public sealed partial class FtpCommandRouter
 
                 await destination.WriteAsync(buffer, 0, read, ct).ConfigureAwait(false);
                 total += read;
+                onProgress?.Invoke(read);
 
                 if (maxKbps > 0 && sw is not null)
                 {
@@ -746,8 +815,8 @@ public sealed partial class FtpCommandRouter
             var group = account.GroupName ?? string.Empty;
             var rule = RatioPipeline.Resolve(virtPath, group);
 
-            ratio = rule.Ratio ?? 0;
-            multiplyCost = rule.MultiplyCost ?? 0;
+            ratio = rule.Ratio is > 0 ? rule.Ratio.Value : 1.0;
+            multiplyCost = rule.MultiplyCost is > 0 ? rule.MultiplyCost.Value : 1.0;
 
             if (rule.IsFree ?? false)
                 isFree = true;
@@ -812,8 +881,8 @@ public sealed partial class FtpCommandRouter
             var group = account.GroupName ?? string.Empty;
             var rule = RatioPipeline.Resolve(virtPath, group);
 
-            ratio = rule.Ratio ?? 1.0;
-            multiplyCost = rule.MultiplyCost ?? 1.0;
+            ratio = rule.Ratio is > 0 ? rule.Ratio.Value : 1.0;
+            multiplyCost = rule.MultiplyCost is > 0 ? rule.MultiplyCost.Value : 1.0;
 
             if (rule.IsFree ?? false)
                 isFree = true;
@@ -864,8 +933,8 @@ public sealed partial class FtpCommandRouter
             var group = account.GroupName ?? string.Empty;
             var rule = RatioPipeline.Resolve(virtPath, group);
 
-            ratio = rule.Ratio ?? 1.0;
-            uploadBonus = rule.UploadBonus ?? 1.0;
+            ratio = rule.Ratio is > 0 ? rule.Ratio.Value : 1.0;
+            uploadBonus = rule.UploadBonus is > 0 ? rule.UploadBonus.Value : 1.0;
 
             if (rule.IsFree ?? false)
                 isFree = true;

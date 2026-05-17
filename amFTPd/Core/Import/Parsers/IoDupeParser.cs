@@ -1,4 +1,5 @@
-﻿using amFTPd.Core.Import.Records;
+using System;
+using amFTPd.Core.Import.Records;
 
 namespace amFTPd.Core.Import.Parsers;
 
@@ -6,12 +7,14 @@ public sealed class IoDupeParser : IImportParser<ImportedDupeRecord>
 {
     public IEnumerable<ImportedDupeRecord> Parse(string rootPath)
     {
-        // Common ioFTPD locations / filenames
         var candidates = new[]
         {
             Path.Combine(rootPath, "ioDUPE.db"),
             Path.Combine(rootPath, "dupefile.txt"),
-            Path.Combine(rootPath, "ftp-data", "misc", "dupefile.txt")
+            Path.Combine(rootPath, "dupelog"),
+            Path.Combine(rootPath, "dupelog.txt"),
+            Path.Combine(rootPath, "ftp-data", "misc", "dupefile.txt"),
+            Path.Combine(rootPath, "ftp-data", "misc", "dupefile")
         };
 
         string? file = null;
@@ -30,23 +33,28 @@ public sealed class IoDupeParser : IImportParser<ImportedDupeRecord>
 
         foreach (var rawLine in File.ReadLines(file))
         {
-            var line = rawLine.Trim();
-            if (line.Length == 0 || line.StartsWith("#"))
+            if (string.IsNullOrWhiteSpace(rawLine))
                 continue;
 
-            var parts = line.Split('|');
+            var line = rawLine.Trim();
+            if (line.StartsWith('#'))
+                continue;
+
+            var parts = line.Contains('|')
+                ? line.Split('|')
+                : line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
             if (parts.Length < 5)
                 continue;
 
-            // Required fields
             var section = parts[0].Trim();
             var release = parts[1].Trim();
             var group = parts[2].Trim();
 
-            if (!long.TryParse(parts[3], out var ts))
+            if (!long.TryParse(parts[3].Trim(), out var ts))
                 continue;
 
-            if (!long.TryParse(parts[4], out var size))
+            if (!long.TryParse(parts[4].Trim(), out var size))
                 continue;
 
             var isNuked = false;
@@ -59,7 +67,13 @@ public sealed class IoDupeParser : IImportParser<ImportedDupeRecord>
 
                 var idx = parts[5].IndexOf(':');
                 if (idx > 0 && idx + 1 < parts[5].Length)
-                    nukeReason = parts[5][(idx + 1)..];
+                {
+                    nukeReason = parts[5][(idx + 1)..].Trim();
+                }
+                else if (parts.Length > 6)
+                {
+                    nukeReason = string.Join(' ', parts.Skip(5)).Replace("NUKED", "", StringComparison.OrdinalIgnoreCase).Trim();
+                }
             }
 
             yield return new ImportedDupeRecord

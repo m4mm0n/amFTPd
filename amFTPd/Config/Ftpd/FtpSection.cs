@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           FtpSection.cs
@@ -62,6 +62,13 @@ public sealed record FtpSection
     /// <summary>Ratio section name (links to ratio rules).</summary>
     public string? RatioSection { get; init; }
 
+    /// <summary>Compatibility alias used by older section JSON files.</summary>
+    public string? RatioRuleName
+    {
+        get => RatioSection;
+        init => RatioSection = value;
+    }
+
     /// <summary>Allow uploads in this section.</summary>
     public bool AllowUpload { get; init; } = true;
 
@@ -87,10 +94,51 @@ public sealed record FtpSection
     public double? NukeMultiplier { get; init; } = 1.0;
 
     /// <summary>
+    /// Maximum upload speed for this section in KB/s. 0 = unlimited.
+    /// Acts as a cap on top of the per-user MaxUploadKbps.
+    /// </summary>
+    public int MaxUploadKbps { get; init; }
+
+    /// <summary>
+    /// Maximum download speed for this section in KB/s. 0 = unlimited.
+    /// Acts as a cap on top of the per-user MaxDownloadKbps.
+    /// </summary>
+    public int MaxDownloadKbps { get; init; }
+
+    /// <summary>
     /// Optional aliases for this section name, used for compatibility with
     /// legacy configs (gl/io/raiden) and for convenience.
     /// </summary>
     public IReadOnlyList<string> Aliases { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// If true, an .sfv file must be present in the release directory before
+    /// any non-.sfv file may be uploaded. Rejects uploads with 550 until
+    /// the SFV arrives first.
+    /// </summary>
+    public bool RequireSfvFirst { get; init; }
+
+    /// <summary>
+    /// If true, a REST-based resume (REST N + STOR) is verified before accepting:
+    /// the partial file on disk must be exactly N bytes AND its CRC32 must match
+    /// the stored partial-file checksum (if available). Rejects with 550 + re-upload
+    /// instruction on mismatch. Defaults to false.
+    /// </summary>
+    public bool RequireResumeIntegrity { get; init; }
+
+    /// <summary>
+    /// The groups that are allowed to PRE releases into this section.
+    /// Empty list = any group (or siteop) may PRE.
+    /// If non-empty, only the listed groups (and siteops) may use SITE PRE for this section.
+    /// </summary>
+    public IReadOnlyList<string> AllowedPreGroups { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// If true, SITE PRE commands targeting this section go into a pending queue and
+    /// must be approved by a siteop via SITE PREAPPROVE before going live.
+    /// Defaults to false (immediate pre).
+    /// </summary>
+    public bool RequirePreApproval { get; init; }
 
     public FtpSection()
     {
@@ -111,7 +159,13 @@ public sealed record FtpSection
         double UploadMultiplier = 1.0,
         double DownloadMultiplier = 1.0,
         double NukeMultiplier = 1.0,
-        string Description = "")
+        string Description = "",
+        int MaxUploadKbps = 0,
+        int MaxDownloadKbps = 0,
+        bool RequireSfvFirst = false,
+        bool RequireResumeIntegrity = false,
+        IReadOnlyList<string>? AllowedPreGroups = null,
+        bool RequirePreApproval = false)
     {
         this.Name = Name;
         this.VirtualRoot = VirtualRoot;
@@ -125,6 +179,12 @@ public sealed record FtpSection
         this.DownloadMultiplier = DownloadMultiplier;
         this.NukeMultiplier = NukeMultiplier;
         this.Description = Description;
+        this.MaxUploadKbps = MaxUploadKbps;
+        this.MaxDownloadKbps = MaxDownloadKbps;
+        this.RequireSfvFirst = RequireSfvFirst;
+        this.RequireResumeIntegrity = RequireResumeIntegrity;
+        this.AllowedPreGroups = AllowedPreGroups ?? Array.Empty<string>();
+        this.RequirePreApproval = RequirePreApproval;
     }
 }
 

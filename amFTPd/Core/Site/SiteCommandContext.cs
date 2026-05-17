@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteCommandContext.cs
@@ -76,7 +76,7 @@ namespace amFTPd.Core.Site
             Session.Account?.IsSiteop == true ||
             Session.Account?.IsAdmin == true;
 
-        public string IpAddress => Session.RemoteEndPoint.Address.ToString();
+        public string IpAddress => Session.RemoteEndPoint?.Address.ToString() ?? string.Empty;
 
         // =====================================================================
         // Runtime truth & observability

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteChgrpCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x58C311C5
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE CHGRP command handler.
  * 
  *  License:
  *      MIT License
@@ -82,6 +82,17 @@ public sealed class SiteChgrpCommand : SiteCommandBase
             await s.WriteAsync($"550 Failed to update user: {error ?? "unknown error"}\r\n", cancellationToken);
             return;
         }
+
+        var secList = secondaryGroups.Count > 0
+            ? " secondary=" + string.Join(",", secondaryGroups)
+            : string.Empty;
+
+        context.Runtime.AuditLog?.Log(
+            actor: s.Account?.UserName ?? "*unknown*",
+            action: "CHGRP",
+            target: userName,
+            detail: $"primary={primary}{secList}",
+            ip: s.RemoteEndPoint?.Address.ToString());
 
         await s.WriteAsync("200 Group membership updated.\r\n", cancellationToken);
     }

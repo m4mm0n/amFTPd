@@ -1,4 +1,4 @@
-﻿/*
+/*
  * ====================================================================================================
  *  Project:        amFTPd - a managed FTP daemon
  *  File:           SiteRehashCommand.cs
@@ -8,7 +8,7 @@
  *  CRC32:          0x2897DA57
  *  
  *  Description:
- *      TODO: Describe this file.
+ *      Implements the SITE REHASH command handler.
  * 
  *  License:
  *      MIT License
@@ -70,6 +70,14 @@ namespace amFTPd.Core.Site.Commands
             }
 
             sb.AppendLine("200 End.");
+
+            context.Runtime.AuditLog?.Log(
+                actor: acc?.UserName ?? "*unknown*",
+                action: "REHASH",
+                detail: changedSections.Count == 0
+                    ? "no changes"
+                    : "changed=" + string.Join(",", changedSections),
+                ip: s.RemoteEndPoint?.Address.ToString());
 
             var text = sb.ToString().Replace("\n", "\r\n");
             await s.WriteAsync(text, cancellationToken);
